@@ -1,7 +1,7 @@
 name = "InterpolatedNyquist"
 uuid = "1b0c7da8-4eb4-4bd5-bd5a-0bb1b0f4bca1"
 version = "0.1.0"
-authors = ["Your Name <email@example.com>"]
+authors = ["Daniel Bachrathy <bachrathy@mm.bme.hu>"]
 
 [deps]
 BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
