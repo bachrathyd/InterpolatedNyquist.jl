@@ -47,10 +47,12 @@ save("stability_chart.png", f)
 ```
 
 ### High-Performance Results
-For the 4th-order system above, a 3000-point sweep completes in approximately **0.38 seconds** (excluding compilation) on a standard machine, providing both the root count (Z) and a robustness metric (σ_est).
+For the 4th-order system above:
+- **Global Sweep:** A 3000-point brute-force sweep completes in approximately **0.38 seconds** (excluding compilation).
+- **MDBM Refinement:** Tracing the boundary with 4 levels of refinement takes approximately **0.45 seconds**. This achieves an **equivalent resolution of 305 x 305** (~93,000 points) but only requires a few thousand targeted function evaluations.
 
 ![Stability Chart](output_figures/example_02.png)
-*Stability Chart generated in ~0.38s (3000 points). Heatmap shows the number of unstable roots (Z > 0) or the stability metric (σ_est < 0) for stable regions.*
+*Stability Chart generated in < 1s total. The background heatmap shows the coarse grid sweep, while the smooth black lines are the high-precision MDBM boundary (305x305 equivalent resolution).*
 
 ## Citing
 If you use `InterpolatedNyquist.jl` in your research, please cite the following paper:
