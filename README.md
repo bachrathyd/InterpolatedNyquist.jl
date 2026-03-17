@@ -16,6 +16,13 @@ Pkg.activate(".")
 Pkg.instantiate()
 ```
 
+## Citing
+If you use `InterpolatedNyquist.jl` in your research, please cite the following paper (in preparation):
+
+> Your Name, et al. "High-Performance Nyquist Stability Analysis of Delayed Dynamical Systems using MDBM and Autodiff-Enhanced Stiff Integration." Journal of Sound and Vibration, 2026.
+
+See `CITATION.bib` for the BibTeX entry.
+
 ## Examples Directory
 - `01` - `03`: Hybrid stability charts for standard systems.
 - `04`: DDE to CharEq black-box extraction.
