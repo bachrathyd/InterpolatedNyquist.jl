@@ -8,6 +8,8 @@
 - **Stiff Integration:** Employs robust ODE solvers (like `Rosenbrock23`) to track rapid phase changes without skipping encirclements.
 - **Hybrid Strategy:** Fast global sweeps for background mapping, high-precision MDBM for boundary tracing.
 - **Error Estimation:** Self-validating numerical integrity based on the winding number's integer requirement.
+- **Fractional Dynamics:** Robust handling of non-integer derivatives and singularities at ω=0.
+- **Interactive Tuning:** Real-time parameter exploration using GLMakie Observables and ultra-fast solvers.
 
 ## Usage Example
 
@@ -41,15 +43,15 @@ C_plot = Z_mat .+ (Z_mat .== 0) .* σ_mat
 
 # 4. Visualize
 f = Figure()
-ax = Axis(f[1, 1], title="Stability Chart", xlabel="p", ylabel="d")
+ax = GLMakie.Axis(f[1, 1], title="Stability Chart", xlabel="p", ylabel="d")
 hm = heatmap!(ax, Pv, Dv, C_plot, colormap=:viridis)
 save("stability_chart.png", f)
 ```
 
 ### High-Performance Results
 For the 4th-order system above:
-- **Global Sweep:** A 3000-point brute-force sweep completes in approximately **0.38 seconds** (excluding compilation).
-- **MDBM Refinement:** Tracing the boundary with 4 levels of refinement takes approximately **0.45 seconds**. This achieves an **equivalent resolution of 305 x 305** (~93,000 points) but only requires a few thousand targeted function evaluations.
+- **Global Sweep:** A 15 000-point brute-force sweep completes in approximately **~0.3 seconds** (excluding compilation).
+- **MDBM Refinement:** Tracing the boundary with 4 levels of refinement takes approximately **~0.10 seconds**. This achieves an **equivalent resolution of 305 x 305** (~93,000 points) but only requires a few thousand targeted function evaluations.
 
 ![Stability Chart](output_figures/example_02.png)
 *Stability Chart generated in < 1s total. The background heatmap shows the coarse grid sweep, while the smooth black lines are the high-precision MDBM boundary (305x305 equivalent resolution).*
@@ -71,5 +73,7 @@ Pkg.add(url="https://github.com/bachrathyd/InterpolatedNyquist.jl")
 The `examples/` folder contains over 20 detailed test cases, including:
 - **Matrix Systems:** Stability of high-dimensional FEM models (50x50 matrices).
 - **Neutral Systems:** Handling neutral delay differential equations.
+- **Fractional Dynamics:** Stability of fractional-order systems (e.g., `examples/22_fractional_dynamics.jl`).
+- **Real-Time Interaction:** Interactive tuning of parameters with instant updates (`examples/23_efficient_interactive_plotting.jl`).
 - **Precision Analysis:** Convergence studies and error field mapping.
 - **Distributed Delays:** Stability of systems with kernel-based delays.

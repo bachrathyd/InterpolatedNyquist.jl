@@ -5,27 +5,41 @@ using DifferentialEquations
 using ForwardDiff
 using StaticArrays
 using QuadGK
+using FunctionWrappers: FunctionWrapper
 
 # Standardized Tag for ForwardDiff specialization
 struct NyquistTag end
 const StandardTag = ForwardDiff.Tag{NyquistTag, Float64}
+
+# Exact types for FunctionWrapper to prevent recompilation
+const StandardDual = ForwardDiff.Dual{StandardTag, Float64, 1}
+const ComplexDual = Complex{StandardDual}
+
+"""
+    NyquistWrapper{P}
+
+Type-stable wrapper for D(λ, p) where λ is a Complex Dual and p is the parameter collection.
+Using this wrapper prevents Julia from recompiling the solver logic when D_func is redefined.
+"""
+const NyquistWrapper{P} = FunctionWrapper{ComplexDual, Tuple{ComplexDual, P}}
 
 """
     get_n_power_max(D_func, p, σ=0.0; ω_large=1e6)
 
 Estimates the highest power of the polynomial (n_power_max).
 """
-function get_n_power_max(D_func, p, σ=0.0; ω_large=1e6)
+function get_n_power_max(@nospecialize(D_func), p::P, σ=0.0; ω_large=1e6) where P
+    wrapped_D = (D_func isa NyquistWrapper{P}) ? D_func : NyquistWrapper{P}(D_func)
+    return _get_n_power_max_impl(wrapped_D, p, σ; ω_large=ω_large)
+end
+
+function _get_n_power_max_impl(D_func::NyquistWrapper{P}, p::P, σ=0.0; ω_large=1e6) where P
     dual_ω = ForwardDiff.Dual{StandardTag}(ω_large, 1.0)
-    # λ = σ + iω
     dual_λ = σ + 1im * dual_ω
     res = D_func(dual_λ, p)
-    rv = real(res)
-    iv = imag(res)
-    D_val_re = ForwardDiff.value(rv)
-    D_val_im = ForwardDiff.value(iv)
-    dD_dω_re = ForwardDiff.partials(rv, 1)
-    dD_dω_im = ForwardDiff.partials(iv, 1)
+    rv, iv = real(res), imag(res)
+    D_val_re, D_val_im = ForwardDiff.value(rv), ForwardDiff.value(iv)
+    dD_dω_re, dD_dω_im = ForwardDiff.partials(rv, 1), ForwardDiff.partials(iv, 1)
     n_est = ω_large * (dD_dω_re * D_val_re + dD_dω_im * D_val_im) / (D_val_re^2 + D_val_im^2)
     return round(Int, n_est), n_est
 end
@@ -35,28 +49,33 @@ end
 
 Calculates the number of unstable roots using direct integration of the phase.
 """
-function calculate_unstable_roots_direct(D_func::F, p::P, σ::S=0.0; 
+function calculate_unstable_roots_direct(@nospecialize(D_func), p::P, σ::S=0.0; 
     ω_max=1e6, reltol=1e-5, abstol=1e-5, solver=AutoTsit5(Rosenbrock23()), 
-    n_power_max=nothing, verbosity=0) where {F, P, S}
+    n_power_max=nothing, verbosity=0) where {P, S}
+
+    wrapped_D = (D_func isa NyquistWrapper{P}) ? D_func : NyquistWrapper{P}(D_func)
+    return _calculate_unstable_roots_direct_impl(wrapped_D, p, σ; 
+        ω_max=ω_max, reltol=reltol, abstol=abstol, solver=solver, 
+        n_power_max=n_power_max, verbosity=verbosity)
+end
+
+function _calculate_unstable_roots_direct_impl(D_func::NyquistWrapper{P}, p::P, σ::S; 
+    ω_max=1e6, reltol=1e-5, abstol=1e-5, solver=AutoTsit5(Rosenbrock23()), 
+    n_power_max=nothing, verbosity=0) where {P, S}
 
     min_D_sq = Ref(Inf)
     estimated_sigma = Ref(Inf)
     ω_crit = Ref(0.0)
     
     function phase_ode(y, params, ω)
-        # Ensure we use the correct Tag for autodiff compatibility
         T_tag = (ω isa ForwardDiff.Dual) ? ForwardDiff.tagtype(ω) : StandardTag
-        
         dual_ω = ForwardDiff.Dual{T_tag}(ForwardDiff.value(ω), 1.0)
         dual_λ = σ + 1im * dual_ω
         res = D_func(dual_λ, p)
 
-        rv = real(res)
-        iv = imag(res)
-        re_val = ForwardDiff.value(rv)
-        im_val = ForwardDiff.value(iv)
-        dre = ForwardDiff.partials(rv, 1)
-        dim = ForwardDiff.partials(iv, 1)
+        rv, iv = real(res), imag(res)
+        re_val, im_val = ForwardDiff.value(rv), ForwardDiff.value(iv)
+        dre, dim = ForwardDiff.partials(rv, 1), ForwardDiff.partials(iv, 1)
 
         d_sq = re_val^2 + im_val^2
         darg = (dim * re_val - dre * im_val) / d_sq
@@ -73,7 +92,7 @@ function calculate_unstable_roots_direct(D_func::F, p::P, σ::S=0.0;
     prob = ODEProblem{false}(phase_ode, SA[0.0], (0.0, Float64(ω_max)))
     sol = solve(prob, solver, reltol=reltol, abstol=abstol, save_everystep=false, saveat=[ω_max], maxiters=Int(1e5))
 
-    n_pow = n_power_max === nothing ? get_n_power_max(D_func, p, σ, ω_large=ω_max)[1] : n_power_max
+    n_pow = n_power_max === nothing ? _get_n_power_max_impl(D_func, p, σ, ω_large=ω_max)[1] : n_power_max
     Z_raw = -(1.0 / π) * sol.u[end][1] + n_pow / 2.0
 
     return round(Int, Z_raw), Z_raw, sqrt(min_D_sq[]), estimated_sigma[], ω_crit[]
@@ -84,12 +103,14 @@ end
 
 Vectorized stability sweep using multi-threading.
 """
-function calculate_unstable_roots_p_vec(D_func::F, params_vec::AbstractVector{P}; 
+function calculate_unstable_roots_p_vec(@nospecialize(D_func), params_vec::AbstractVector{P}; 
     σ::S=0.0, ω_max=1e6, reltol=1e-5, abstol=1e-5, solver=AutoTsit5(Rosenbrock23()), 
-    parameter_independent_nmax=true, verbosity=0) where {F, P, S}
+    parameter_independent_nmax=true, verbosity=0) where {P, S}
+    
+    wrapped_D = (D_func isa NyquistWrapper{P}) ? D_func : NyquistWrapper{P}(D_func)
     
     n_params = length(params_vec)
-    n_pow_fixed = parameter_independent_nmax ? get_n_power_max(D_func, params_vec[1], σ, ω_large=ω_max)[1] : nothing
+    n_pow_fixed = parameter_independent_nmax ? _get_n_power_max_impl(wrapped_D, params_vec[1], σ, ω_large=ω_max)[1] : nothing
 
     Z_ints = zeros(Int, n_params)
     Z_raws = zeros(Float64, n_params)
@@ -102,7 +123,7 @@ function calculate_unstable_roots_p_vec(D_func::F, params_vec::AbstractVector{P}
     end
 
     @inbounds Threads.@threads for i in 1:n_params
-        zi, zr, md, es, wc = calculate_unstable_roots_direct(D_func, params_vec[i], σ; 
+        zi, zr, md, es, wc = _calculate_unstable_roots_direct_impl(wrapped_D, params_vec[i], σ; 
             ω_max=ω_max, reltol=reltol, abstol=abstol, solver=solver, 
             n_power_max=n_pow_fixed, verbosity=verbosity)
         Z_ints[i] = zi
@@ -120,8 +141,16 @@ end
 
 Calculates the number of unstable roots using QuadGK.jl (adaptive 1D quadrature).
 """
-function calculate_unstable_roots_quadgk(D_func::F, p::P, σ::S=0.0; 
-    ω_max=1e6, reltol=1e-5, abstol=1e-5, n_power_max=nothing) where {F, P, S}
+function calculate_unstable_roots_quadgk(@nospecialize(D_func), p::P, σ::S=0.0; 
+    ω_max=1e6, reltol=1e-5, abstol=1e-5, n_power_max=nothing) where {P, S}
+    
+    wrapped_D = (D_func isa NyquistWrapper{P}) ? D_func : NyquistWrapper{P}(D_func)
+    return _calculate_unstable_roots_quadgk_impl(wrapped_D, p, σ; 
+        ω_max=ω_max, reltol=reltol, abstol=abstol, n_power_max=n_power_max)
+end
+
+function _calculate_unstable_roots_quadgk_impl(D_func::NyquistWrapper{P}, p::P, σ::S=0.0; 
+    ω_max=1e6, reltol=1e-5, abstol=1e-5, n_power_max=nothing) where {P, S}
     
     min_D_sq = Ref(Inf)
     estimated_sigma = Ref(Inf)
@@ -131,12 +160,9 @@ function calculate_unstable_roots_quadgk(D_func::F, p::P, σ::S=0.0;
         dual_ω = ForwardDiff.Dual{StandardTag}(ω, 1.0)
         dual_λ = σ + 1im * dual_ω
         res = D_func(dual_λ, p)
-        rv = real(res)
-        iv = imag(res)
-        re_val = ForwardDiff.value(rv)
-        im_val = ForwardDiff.value(iv)
-        dre = ForwardDiff.partials(rv, 1)
-        dim = ForwardDiff.partials(iv, 1)
+        rv, iv = real(res), imag(res)
+        re_val, im_val = ForwardDiff.value(rv), ForwardDiff.value(iv)
+        dre, dim = ForwardDiff.partials(rv, 1), ForwardDiff.partials(iv, 1)
         d_sq = re_val^2 + im_val^2
         if d_sq < min_D_sq[]
             min_D_sq[] = d_sq
@@ -147,7 +173,7 @@ function calculate_unstable_roots_quadgk(D_func::F, p::P, σ::S=0.0;
     end
 
     integral, err = quadgk(phase_integrand, 0.0, Float64(ω_max), rtol=reltol, atol=abstol)
-    n_pow = n_power_max === nothing ? get_n_power_max(D_func, p, σ, ω_large=ω_max)[1] : n_power_max
+    n_pow = n_power_max === nothing ? _get_n_power_max_impl(D_func, p, σ, ω_large=ω_max)[1] : n_power_max
     Z_raw = -(1.0 / π) * integral + n_pow / 2.0
     return round(Int, Z_raw), Z_raw, sqrt(min_D_sq[]), estimated_sigma[], ω_crit[]
 end
@@ -157,11 +183,13 @@ end
 
 Vectorized stability sweep using QuadGK and multi-threading.
 """
-function calculate_unstable_roots_quadgk_p_vec(D_func::F, params_vec::AbstractVector{P}; 
-    σ::S=0.0, ω_max=1e6, reltol=1e-5, abstol=1e-5, parameter_independent_nmax=true, verbosity=0) where {F, P, S}
+function calculate_unstable_roots_quadgk_p_vec(@nospecialize(D_func), params_vec::AbstractVector{P}; 
+    σ::S=0.0, ω_max=1e6, reltol=1e-5, abstol=1e-5, parameter_independent_nmax=true, verbosity=0) where {P, S}
+    
+    wrapped_D = (D_func isa NyquistWrapper{P}) ? D_func : NyquistWrapper{P}(D_func)
     
     n_params = length(params_vec)
-    n_pow_fixed = parameter_independent_nmax ? get_n_power_max(D_func, params_vec[1], σ, ω_large=ω_max)[1] : nothing
+    n_pow_fixed = parameter_independent_nmax ? _get_n_power_max_impl(wrapped_D, params_vec[1], σ, ω_large=ω_max)[1] : nothing
 
     Z_ints = zeros(Int, n_params)
     Z_raws = zeros(Float64, n_params)
@@ -174,7 +202,7 @@ function calculate_unstable_roots_quadgk_p_vec(D_func::F, params_vec::AbstractVe
     end
 
     @inbounds Threads.@threads for i in 1:n_params
-        zi, zr, md, es, wc = calculate_unstable_roots_quadgk(D_func, params_vec[i], σ; 
+        zi, zr, md, es, wc = _calculate_unstable_roots_quadgk_impl(wrapped_D, params_vec[i], σ; 
             ω_max=ω_max, reltol=reltol, abstol=abstol, n_power_max=n_pow_fixed)
         Z_ints[i] = zi
         Z_raws[i] = zr
@@ -191,8 +219,16 @@ end
 
 ULTRA-FAST: Fixed-step trapezoidal integration. Zero overhead, perfect for real-time sweeps.
 """
-function calculate_unstable_roots_fixed_step(D_func::F, p::P, σ::S=0.0; 
-    ω_max=1e6, steps=1000, n_power_max=nothing) where {F, P, S}
+function calculate_unstable_roots_fixed_step(@nospecialize(D_func), p::P, σ::S=0.0; 
+    ω_max=1e6, steps=1000, n_power_max=nothing) where {P, S}
+    
+    wrapped_D = (D_func isa NyquistWrapper{P}) ? D_func : NyquistWrapper{P}(D_func)
+    return _calculate_unstable_roots_fixed_step_impl(wrapped_D, p, σ; 
+        ω_max=ω_max, steps=steps, n_power_max=n_power_max)
+end
+
+function _calculate_unstable_roots_fixed_step_impl(D_func::NyquistWrapper{P}, p::P, σ::S=0.0; 
+    ω_max=1e6, steps=1000, n_power_max=nothing) where {P, S}
     
     min_D_sq = Inf
     estimated_sigma = Inf
@@ -201,7 +237,6 @@ function calculate_unstable_roots_fixed_step(D_func::F, p::P, σ::S=0.0;
     h = Float64(ω_max) / steps
     integral = 0.0
     
-    # Internal point calculation
     function get_darg(ω_val)
         dual_ω = ForwardDiff.Dual{StandardTag}(ω_val, 1.0)
         dual_λ = σ + 1im * dual_ω
@@ -211,7 +246,6 @@ function calculate_unstable_roots_fixed_step(D_func::F, p::P, σ::S=0.0;
         dre, dim = ForwardDiff.partials(rv, 1), ForwardDiff.partials(iv, 1)
         d_sq = re_val^2 + im_val^2
         
-        # Track diagnostics
         if d_sq < min_D_sq
             min_D_sq = d_sq
             ω_crit = ω_val
@@ -229,7 +263,7 @@ function calculate_unstable_roots_fixed_step(D_func::F, p::P, σ::S=0.0;
         f_prev = f_curr
     end
 
-    n_pow = n_power_max === nothing ? get_n_power_max(D_func, p, σ, ω_large=ω_max)[1] : n_power_max
+    n_pow = n_power_max === nothing ? _get_n_power_max_impl(D_func, p, σ, ω_large=ω_max)[1] : n_power_max
     Z_raw = -(1.0 / π) * integral + n_pow / 2.0
     return round(Int, Z_raw), Z_raw, sqrt(min_D_sq), estimated_sigma, ω_crit
 end
@@ -239,11 +273,13 @@ end
 
 Vectorized stability sweep using ultra-fast fixed-step integration.
 """
-function calculate_unstable_roots_fixed_step_p_vec(D_func::F, params_vec::AbstractVector{P}; 
-    σ::S=0.0, ω_max=1e6, steps=500, parameter_independent_nmax=true, verbosity=0) where {F, P, S}
+function calculate_unstable_roots_fixed_step_p_vec(@nospecialize(D_func), params_vec::AbstractVector{P}; 
+    σ::S=0.0, ω_max=1e6, steps=500, parameter_independent_nmax=true, verbosity=0) where {P, S}
+    
+    wrapped_D = (D_func isa NyquistWrapper{P}) ? D_func : NyquistWrapper{P}(D_func)
     
     n_params = length(params_vec)
-    n_pow_fixed = parameter_independent_nmax ? get_n_power_max(D_func, params_vec[1], σ, ω_large=ω_max)[1] : nothing
+    n_pow_fixed = parameter_independent_nmax ? _get_n_power_max_impl(wrapped_D, params_vec[1], σ, ω_large=ω_max)[1] : nothing
 
     Z_ints = zeros(Int, n_params)
     Z_raws = zeros(Float64, n_params)
@@ -256,7 +292,7 @@ function calculate_unstable_roots_fixed_step_p_vec(D_func::F, params_vec::Abstra
     end
 
     @inbounds Threads.@threads for i in 1:n_params
-        zi, zr, md, es, wc = calculate_unstable_roots_fixed_step(D_func, params_vec[i], σ; 
+        zi, zr, md, es, wc = _calculate_unstable_roots_fixed_step_impl(wrapped_D, params_vec[i], σ; 
             ω_max=ω_max, steps=steps, n_power_max=n_pow_fixed)
         Z_ints[i] = zi
         Z_raws[i] = zr

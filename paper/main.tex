@@ -70,6 +70,9 @@ The exact calculation of $D'(i\omega)$ is critical. We utilize Dual Numbers via 
 \subsection{Benefits of Stiff ODE Solvers}
 The characteristic function $D(i\omega)$ can exhibit extremely rapid variations in phase when the contour passes near a zero or a pole. Such scenarios lead to "stiffness" in the phase ODE. By employing advanced stiff solvers like \texttt{Rosenbrock23} from the \texttt{DifferentialEquations.jl} suite, the integration step size $\Delta\omega$ is automatically and adaptively reduced in these critical regions. This ensures that no encirclements are "skipped," a common failure mode in fixed-step or simple quadrature methods.
 
+\subsection{Minimizing Recompilation Overhead}
+In the Julia language, functions are often specialized upon at compile time, which can lead to significant overhead when a user redefines the characteristic equation. To mitigate this, we employ \texttt{FunctionWrappers.jl} to provide a type-stable entry point for the solver. By wrapping the user-defined $D(\lambda, \mathbf{p})$ into a fixed-type interface, the internal solver logic is compiled only once. This reduces the overhead of subsequent evaluations from seconds to milliseconds, enabling rapid iterative design and real-time stability exploration.
+
 \section{Hybrid Strategy: MDBM Enrichment}
 \subsection{Coarse Grid Mapping}
 To visualize stability regions over a parameter space $\mathbf{p}$, we first perform a coarse grid evaluation. For each point $\mathbf{p}$, the stiff ODE solver computes $Z(\mathbf{p})$. While this provides a general map, the boundaries remain poorly defined at low resolutions.

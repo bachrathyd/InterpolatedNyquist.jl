@@ -16,8 +16,8 @@ function D_chareq(λ::T, p) where T
 end
 
 # 2. Hybrid Strategy Part 1: Grid sweep
-Pv = LinRange(-2.01, 4.0, 60)
-Dv = LinRange(-2.01, 5.0, 50)
+Pv = LinRange(-2.01, 4.0, 150)
+Dv = LinRange(-2.01, 5.0, 100)
 params_vec = vec([(Pv[i], Dv[j]) for i in 1:length(Pv), j in 1:length(Dv)])
 
 println("Grid sweep (4th Order)...")
@@ -38,6 +38,8 @@ end
 
 boundary_mdbm = MDBM_Problem(mdbm_wrapper, [LinRange(-2.01, 4.0, 20), LinRange(-2.01, 5.0, 20)])
 @time MDBM.solve!(boundary_mdbm, 4, verbosity=1)
+@show boundary_mdbm
+length.(boundary_mdbm.axes)
 xyz_sol = getinterpolatedsolution(boundary_mdbm)
 DT1 = MDBM.connect(boundary_mdbm)
 edge2plot_xyz = [reduce(hcat, [i_sol[getindex.(DT1, 1)], i_sol[getindex.(DT1, 2)], fill(NaN, length(DT1))])'[:] for i_sol in xyz_sol]
