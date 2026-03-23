@@ -24,6 +24,13 @@ println("Grid sweep (4th Order)...")
 @time Z_ints_vec, Z_raws_vec, min_Ds_vec, σ_ests_vec, ω_crits_vec = 
     calculate_unstable_roots_p_vec(D_chareq, params_vec, verbosity=1)
 
+@time Z_ints_vec, Z_raws_vec, min_Ds_vec, σ_ests_vec_many, ω_crits_vec = 
+    calculate_unstable_roots_p_vec(D_chareq, params_vec, verbosity=1, n_roots_to_track=3)
+
+σ_ests_vec = map(σ_ests_vec_many) do v
+    v[argmin(ifelse.(isnan.(v), Inf, abs.(v)))]
+end
+
 Z_mat_int = reshape(Z_ints_vec, length(Pv), length(Dv))
 σ_mat_est = reshape(σ_ests_vec, length(Pv), length(Dv))
 C_to_plot = Z_mat_int .+ (Z_mat_int .== 0) .* σ_mat_est

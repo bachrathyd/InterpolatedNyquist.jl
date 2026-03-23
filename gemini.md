@@ -50,11 +50,48 @@ InterpolatedNyquist.jl/
 
 # Notes on name spaces: The Axis us used by MDBM and  GLMakie, so if we create a figure, please use  GLMakie.Axis
 
+Modify the `_calculate_unstable_roots_direct_impl` function in `src/integration_solvers.jl` to use a multiple-dispatch pattern based on a `Val{N}` type parameter to optimize memory and CPU time depending on how many roots we need to track. 
+
+**DO NOT use `ContinuousCallback`.** We are prioritizing raw CPU speed over absolute accuracy. All tracking must happen manually inside the `phase_ode` integration step using in-place mutation of closed-over variables.
+
+Implement three specific dispatches for `_calculate_unstable_roots_direct_impl`:
+
+1.  **`Val{0}` (Maximum Speed):**
+    * Do not track `min_D_sq`, `estimated_sigma`, or `ω_crit` at all.
+    * The `phase_ode` should strictly calculate and return `darg`.
+    * Return only `(round(Int, Z_raw), Z_raw)`.
+
+2.  **`Val{1}` (Single Root Tracking):**
+    * Track only the single closest root.
+    * Use a closed-over `Ref{Float64}` for `min_D_sq` and a `Ref{Complex{Float64}}` to store the combined `σ_est + im * ω_crit`.
+    * Update these references inside `phase_ode` if `d_sq < min_D_sq[]`.
+    * Return `(round(Int, Z_raw), Z_raw, sqrt(min_D_sq[]), real(root_ref[]), imag(root_ref[]))`.
+
+3.  **`Val{N}` (Multi-Root Tracking):**
+    * Track up to `N` local minima of `|D|^2`.
+    * Use an `MVector{N, Float64}` (from `StaticArrays`) for storing the local minimum `d_sq` values, initialized to `Inf`.
+    * Use an `MVector{N, ComplexF64}` to store the corresponding `σ_est + im * ω_crit` values, initialized to `NaN + NaN*im`.
+    * Inside `phase_ode`, detect a local minimum. (You can do this by tracking the previous step's `d_sq` and `d_sq_derivative` to find where the derivative crosses from negative to positive). 
+    * When a local minimum is found, calculate its `σ_est` and `ω_crit` as a `Complex` number.
+    * If this new minimum is smaller than the largest value currently in our `MVector`, insert it into the array (keeping the arrays sorted by `d_sq` from smallest to largest). 
+    * Return `(round(Int, Z_raw), Z_raw, sqrt.(d_sq_vec), real.(roots_vec), imag.(roots_vec))`.
+
+Ensure all code remains type-stable, allocation-free inside the ODE loop, and compatible with the existing `NyquistWrapper` and `ForwardDiff` logic.
+
+4.  **The defailt value of should be N=1 (`Val{1}`) this way all the previouse code sould be complatible with the new implementaion**
+    * Add a new example, which compares the CPU time of a single points evaluation of similar problem as in : 02_integration_4th_order.jl, use the fix paramtere p=-0.2 d=0.5. Compare Val{0}, Val{1} and Val{10}.
+    for the selected points plot the contour lines fo Re(D)=0 and Im(D)=0 (so we can see the exact root location at the intersection) and then scatterplot the approximated roots by Val{10} (use different marke to the closest one provided by Val{1}). The title should contain the Z_raw and sigma of the closest root.
+
+
+
+
+
+
 Further task:Furthremore, alwasy save the figures, and meke a clear documnetation, with all the feautes, and examples, and description how to use it. Make all the necessary documentation which is needed for Julia package registration.
    Furthermore, I would like to write a journal paper about it, so make a latex folred, in which you write the journal article, basic idea of nyquist stabiolity. Solition one. Enriching the coars grib with the MDB solution in which    
    the number of roots getting much betterin and only a coars resolution is satisfactor. + If we combine it withe a triangulation of tha arease with the same points and using the constraind edges in triangulation provided by the       
    MDBM then we can also reduce the grid resolution in the paramteres space too, becaue of the interpolation capability of the MDBM. Next chaper, use stiff  ode solver to the the best resolution at any point, it is most roust in a     
-   single points calculation. (anywy, if low reolustion is enough quarature it ok, but the stiff equation solver is much more robust and still very fast, due p the excellent Julia Diff.Eq.jl implementation. Futhermot, if we store      
+   single points calculation. (anyway, if low reolustion is enough quarature it ok, but the stiff equation solver is much more robust and still very fast, due p the excellent Julia Diff.Eq.jl implementation. Futhermot, if we store      
    the closest points, or basde on that we can approximate the colsest root, thatn we can alos use the interpolation capability of the MDBM late (or if we just want to find the stilbity limit). This is super fast. And usfull,
    because not only the boundary is given, but the sensitivity , the robustness inside the stable area. This is super efficinet. And can be applied to almost any kind of diffet which is not time dependent (in the concluasion there     
    should be a note, that for time dependent system infinity Hill dterminant based calculation could be used, however it is out of socpe, and for thet the robust calcuation would be hard, it would depend on the truncation sime of      

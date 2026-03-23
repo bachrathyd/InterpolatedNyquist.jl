@@ -23,6 +23,17 @@ params_vec = vec([(Pv[i], Dv[j]) for i in 1:length(Pv), j in 1:length(Dv)])
 println("Grid sweep for background...")
 @time Z_ints_vec, _, _, σ_ests_vec, _ = 
     calculate_unstable_roots_p_vec(D_chareq, params_vec, verbosity=1)
+
+
+# @time Z_ints_vec, Z_raws_vec, min_Ds_vec, σ_ests_vec_many, ω_crits_vec = 
+#     calculate_unstable_roots_p_vec(D_chareq, params_vec, verbosity=1, n_roots_to_track=2)
+# 
+# σ_ests_vec = map(σ_ests_vec_many) do v
+#     v[argmin(ifelse.(isnan.(v), Inf, abs.(v)))]
+# end
+
+
+    
 Z_mat_int = reshape(Z_ints_vec, length(Pv), length(Dv))
 σ_mat_est = reshape(σ_ests_vec, length(Pv), length(Dv))
 C_to_plot = Z_mat_int .+ (Z_mat_int .== 0) .* σ_mat_est
@@ -36,6 +47,11 @@ hm = heatmap!(ax, Pv, Dv, C_to_plot, colormap=:viridis, alpha=0.6)
 Colorbar(f[1, 2], hm, label="Stability Metric")
 
 σ_levels = LinRange(0.0, -1.4, 5)
+
+# Add coarse contour lines from the heatmap data to compare with MDBM
+contour!(ax, Pv, Dv, σ_mat_est, levels=σ_levels, labels=true, color=:white, linestyle=:dash, linewidth=1.5)
+
+
 colors = [:black, :blue, :green, :orange, :red]
 
 for (idx, σ_loc) in enumerate(σ_levels)
@@ -65,4 +81,3 @@ axislegend(ax, position=:rb)
 mkpath("output_figures")
 save("output_figures/example_05.png", f)
 display(f)
-

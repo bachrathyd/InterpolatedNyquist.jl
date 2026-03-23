@@ -18,11 +18,11 @@ p_test = (2.0, 1.0) # Unstable point
 
 # 2. Reference Value (Ultra High Precision)
 println("Calculating reference value...")
-# Return is (Z_int, Z_raw, min_D, estimated_sigma, ω_crit, raw_integral)
+# Return is (Z_int, Z_raw, min_D, estimated_sigma, ω_crit)
 res_ref = calculate_unstable_roots_direct(D_chareq, p_test; 
-    ω_max=ω_max, reltol=1e-15, abstol=1e-15, solver=Rosenbrock23())
-phi_ref = res_ref[6]
-println("Reference raw_integral: $phi_ref")
+    ω_max=ω_max, reltol=1e-15, abstol=1e-15, solver=Rosenbrock23(), maxiters=Int(1e7))
+phi_ref = res_ref[2]
+println("Reference Z_raw: $phi_ref")
 
 # 3. Parameter Sweep for Convergence
 tols = [1e-3, 1e-4, 1e-5, 1e-6, 1e-7, 1e-8, 1e-9, 1e-10, 1e-11, 1e-12]
@@ -32,8 +32,8 @@ tols = [1e-3, 1e-4, 1e-5, 1e-6, 1e-7, 1e-8, 1e-9, 1e-10, 1e-11, 1e-12]
 # - Tsit5 (Non-stiff ODE)
 # - QuadGK (Adaptive Quadrature)
 methods = [
-    (tol -> calculate_unstable_roots_direct(D_chareq, p_test; ω_max=ω_max, reltol=tol, abstol=tol, solver=Rosenbrock23()), "Rosenbrock23 (Stiff)"),
-    (tol -> calculate_unstable_roots_direct(D_chareq, p_test; ω_max=ω_max, reltol=tol, abstol=tol, solver=Tsit5()), "Tsit5 (Non-stiff)"),
+    (tol -> calculate_unstable_roots_direct(D_chareq, p_test; ω_max=ω_max, reltol=tol, abstol=tol, solver=Rosenbrock23(), maxiters=Int(1e7)), "Rosenbrock23 (Stiff)"),
+    (tol -> calculate_unstable_roots_direct(D_chareq, p_test; ω_max=ω_max, reltol=tol, abstol=tol, solver=Tsit5(), maxiters=Int(1e7)), "Tsit5 (Non-stiff)"),
     (tol -> calculate_unstable_roots_quadgk(D_chareq, p_test; ω_max=ω_max, reltol=tol, abstol=tol), "QuadGK (Quadrature)")
 ]
 
@@ -51,7 +51,7 @@ for (foo, name) in methods
         t = @elapsed begin
             res = foo(tol)
         end
-        phi_val = res[6]
+        phi_val = res[2]
         
         push!(errors, abs(phi_val - phi_ref))
         push!(times, t)

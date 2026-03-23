@@ -47,30 +47,34 @@ end
     calculate_unstable_roots_direct(D_func, p, σ=0.0; ...)
 
 Calculates the number of unstable roots using direct integration of the phase.
+Use `n_roots_to_track` to optimize:
+- 0: Max speed, only Z calculation.
+- 1: Track the closest root (default).
+- N: Track up to N local minima.
 """
 function calculate_unstable_roots_direct(@nospecialize(D_func), p::P, σ::S=0.0; 
+    n_roots_to_track=1,
     ω_max=1e6, reltol=1e-5, abstol=1e-5, solver=AutoTsit5(Rosenbrock23()), 
-    n_power_max=nothing, verbosity=0) where {P, S}
+    n_power_max=nothing, verbosity=0, maxiters=Int(1e6)) where {P, S}
 
     wrapped_D = (D_func isa NyquistWrapper{P}) ? D_func : NyquistWrapper{P}(D_func)
-    return _calculate_unstable_roots_direct_impl(wrapped_D, p, σ; 
+    return _calculate_unstable_roots_direct_impl(wrapped_D, p, σ, Val(n_roots_to_track); 
         ω_max=ω_max, reltol=reltol, abstol=abstol, solver=solver, 
-        n_power_max=n_power_max, verbosity=verbosity)
+        n_power_max=n_power_max, verbosity=verbosity, maxiters=maxiters)
 end
 
+# Default for backward compatibility
 function _calculate_unstable_roots_direct_impl(D_func::NyquistWrapper{P}, p::P, σ::S; 
-    ω_max=1e6, reltol=1e-5, abstol=1e-5, solver=AutoTsit5(Rosenbrock23()), 
-    n_power_max=nothing, verbosity=0) where {P, S}
+    kwargs...) where {P, S}
+    return _calculate_unstable_roots_direct_impl(D_func, p, σ, Val(1); kwargs...)
+end
 
-    min_D_sq = Ref(Inf)
-    estimated_sigma = Ref(Inf)
-    ω_crit = Ref(0.0)
-    
+# Val{0}: Maximum Speed (No tracking)
+function _calculate_unstable_roots_direct_impl(D_func::NyquistWrapper{P}, p::P, σ::S, ::Val{0}; 
+    ω_max=1e6, reltol=1e-5, abstol=1e-5, solver=AutoTsit5(Rosenbrock23()), 
+    n_power_max=nothing, verbosity=0, maxiters=Int(1e6)) where {P, S}
+
     function phase_ode(y, params, ω)
-        # Use our StandardTag for the INTERNAL derivative calculation
-        # Stripping the ODE solver's tag if present (via ForwardDiff.value)
-        # prevents conversion errors with the strictly-typed FunctionWrapper.
-        # TRICK: Add a tiny offset to avoid singularities in fractional derivatives at ω=0
         pure_ω = max(ForwardDiff.value(ω), 1e-9)
         dual_ω = ForwardDiff.Dual{StandardTag}(pure_ω, 1.0)
         dual_λ = σ + 1im * dual_ω
@@ -81,29 +85,119 @@ function _calculate_unstable_roots_direct_impl(D_func::NyquistWrapper{P}, p::P, 
         dre, dim = ForwardDiff.partials(rv, 1), ForwardDiff.partials(iv, 1)
 
         d_sq = re_val^2 + im_val^2
-        # Handle singularity (e.g. at ω=0 if D(0)=0)
         if d_sq < 1e-20
             return SA[0.0]
         end
 
-        darg = (dim * re_val - dre * im_val) / d_sq
-
-        if d_sq < min_D_sq[]
-            min_D_sq[] = d_sq
-            ω_crit[] = ForwardDiff.value(ω)
-            estimated_sigma[] = -(re_val * dim - im_val * dre) / (dim^2 + dre^2)
-        end
-
-        return SA[darg]
+        return SA[(dim * re_val - dre * im_val) / d_sq]
     end
 
     prob = ODEProblem{false}(phase_ode, SA[0.0], (0.0, Float64(ω_max)))
-    sol = solve(prob, solver, reltol=reltol, abstol=abstol, save_everystep=false, saveat=[ω_max], maxiters=Int(1e5))
+    sol = solve(prob, solver, reltol=reltol, abstol=abstol, save_everystep=false, saveat=[ω_max], maxiters=maxiters)
 
     n_pow = n_power_max === nothing ? _get_n_power_max_impl(D_func, p, σ, ω_large=ω_max) : n_power_max
     Z_raw = -(1.0 / π) * sol.u[end][1] + n_pow / 2.0
 
-    return round(Int, Z_raw), Z_raw, sqrt(min_D_sq[]), estimated_sigma[], ω_crit[]
+    return round(Int, Z_raw), Z_raw
+end
+
+# Val{1}: Single Root Tracking
+function _calculate_unstable_roots_direct_impl(D_func::NyquistWrapper{P}, p::P, σ::S, ::Val{1}; 
+    ω_max=1e6, reltol=1e-5, abstol=1e-5, solver=AutoTsit5(Rosenbrock23()), 
+    n_power_max=nothing, verbosity=0, maxiters=Int(1e6)) where {P, S}
+
+    min_D_sq = Ref(Inf)
+    root_ref = Ref(0.0 + 0.0im)
+    
+    function phase_ode(y, params, ω)
+        pure_ω = max(ForwardDiff.value(ω), 1e-9)
+        dual_ω = ForwardDiff.Dual{StandardTag}(pure_ω, 1.0)
+        dual_λ = σ + 1im * dual_ω
+        res = D_func(dual_λ, p)
+
+        rv, iv = real(res), imag(res)
+        re_val, im_val = ForwardDiff.value(rv), ForwardDiff.value(iv)
+        dre, dim = ForwardDiff.partials(rv, 1), ForwardDiff.partials(iv, 1)
+
+        d_sq = re_val^2 + im_val^2
+        if d_sq < 1e-20
+            return SA[0.0]
+        end
+
+        if d_sq < min_D_sq[]
+            min_D_sq[] = d_sq
+            est_sigma = -(re_val * dim - im_val * dre) / (dim^2 + dre^2)
+            root_ref[] = est_sigma + 1im * ForwardDiff.value(ω)
+        end
+
+        return SA[(dim * re_val - dre * im_val) / d_sq]
+    end
+
+    prob = ODEProblem{false}(phase_ode, SA[0.0], (0.0, Float64(ω_max)))
+    sol = solve(prob, solver, reltol=reltol, abstol=abstol, save_everystep=false, saveat=[ω_max], maxiters=maxiters)
+
+    n_pow = n_power_max === nothing ? _get_n_power_max_impl(D_func, p, σ, ω_large=ω_max) : n_power_max
+    Z_raw = -(1.0 / π) * sol.u[end][1] + n_pow / 2.0
+
+    return round(Int, Z_raw), Z_raw, sqrt(min_D_sq[]), real(root_ref[]), imag(root_ref[])
+end
+
+# Val{N}: Multi-Root Tracking
+function _calculate_unstable_roots_direct_impl(D_func::NyquistWrapper{P}, p::P, σ::S, ::Val{N}; 
+    ω_max=1e6, reltol=1e-5, abstol=1e-5, solver=AutoTsit5(Rosenbrock23()), 
+    n_power_max=nothing, verbosity=0, maxiters=Int(1e6)) where {P, S, N}
+
+    d_sq_vec = MVector{N, Float64}(fill(Inf, N))
+    roots_vec = MVector{N, ComplexF64}(fill(NaN + NaN*im, N))
+    prev_d_sq_deriv = Ref(0.0)
+    prev_ω = Ref(0.0)
+
+    function phase_ode(y, params, ω)
+        pure_ω = max(ForwardDiff.value(ω), 1e-9)
+        dual_ω = ForwardDiff.Dual{StandardTag}(pure_ω, 1.0)
+        dual_λ = σ + 1im * dual_ω
+        res = D_func(dual_λ, p)
+
+        rv, iv = real(res), imag(res)
+        re_val, im_val = ForwardDiff.value(rv), ForwardDiff.value(iv)
+        dre, dim = ForwardDiff.partials(rv, 1), ForwardDiff.partials(iv, 1)
+
+        d_sq = re_val^2 + im_val^2
+        d_sq_deriv = 2*(re_val * dre + im_val * dim)
+        curr_ω = ForwardDiff.value(ω)
+
+        # Detect local minimum: derivative crosses 0 from below
+        if prev_d_sq_deriv[] < 0 && d_sq_deriv > 0 && curr_ω > prev_ω[]
+            est_sigma = -(re_val * dim - im_val * dre) / (dim^2 + dre^2)
+            new_root = est_sigma + 1im * curr_ω
+            
+            if d_sq < d_sq_vec[N]
+                idx = N
+                while idx > 1 && d_sq < d_sq_vec[idx-1]
+                    idx -= 1
+                end
+                for j in N:-1:idx+1
+                    d_sq_vec[j] = d_sq_vec[j-1]
+                    roots_vec[j] = roots_vec[j-1]
+                end
+                d_sq_vec[idx] = d_sq
+                roots_vec[idx] = new_root
+            end
+        end
+        prev_d_sq_deriv[] = d_sq_deriv
+        prev_ω[] = curr_ω
+
+        d_sq_safe = max(d_sq, 1e-20)
+        return SA[(dim * re_val - dre * im_val) / d_sq_safe]
+    end
+
+    prob = ODEProblem{false}(phase_ode, SA[0.0], (0.0, Float64(ω_max)))
+    sol = solve(prob, solver, reltol=reltol, abstol=abstol, save_everystep=false, saveat=[ω_max], maxiters=maxiters)
+
+    n_pow = n_power_max === nothing ? _get_n_power_max_impl(D_func, p, σ, ω_large=ω_max) : n_power_max
+    Z_raw = -(1.0 / π) * sol.u[end][1] + n_pow / 2.0
+
+    return round(Int, Z_raw), Z_raw, sqrt.(d_sq_vec), real.(roots_vec), imag.(roots_vec)
 end
 
 """
@@ -112,36 +206,76 @@ end
 Vectorized stability sweep using multi-threading.
 """
 function calculate_unstable_roots_p_vec(@nospecialize(D_func), params_vec::AbstractVector{P}; 
+    n_roots_to_track=1,
     σ::S=0.0, ω_max=1e6, reltol=1e-5, abstol=1e-5, solver=AutoTsit5(Rosenbrock23()), 
-    parameter_independent_nmax=true, verbosity=0) where {P, S}
+    parameter_independent_nmax=true, verbosity=0, maxiters=Int(1e6)) where {P, S}
     
     wrapped_D = (D_func isa NyquistWrapper{P}) ? D_func : NyquistWrapper{P}(D_func)
     
     n_params = length(params_vec)
     n_pow_fixed = parameter_independent_nmax ? _get_n_power_max_impl(wrapped_D, params_vec[1], σ, ω_large=ω_max) : nothing
 
-    Z_ints = zeros(Int, n_params)
-    Z_raws = zeros(Float64, n_params)
-    min_Ds = zeros(Float64, n_params)
-    sigmas = zeros(Float64, n_params)
-    crits = zeros(Float64, n_params)
+    if n_roots_to_track == 1
+        Z_ints = zeros(Int, n_params)
+        Z_raws = zeros(Float64, n_params)
+        min_Ds = zeros(Float64, n_params)
+        sigmas = zeros(Float64, n_params)
+        crits = zeros(Float64, n_params)
 
-    if verbosity > 0
-        println("Calculating stability over $n_params points...")
+        if verbosity > 0
+            println("Calculating stability over $n_params points (tracking 1 root)...")
+        end
+
+        @inbounds Threads.@threads for i in 1:n_params
+            zi, zr, md, es, wc = _calculate_unstable_roots_direct_impl(wrapped_D, params_vec[i], σ, Val(1); 
+                ω_max=ω_max, reltol=reltol, abstol=abstol, solver=solver, 
+                n_power_max=n_pow_fixed, verbosity=verbosity, maxiters=maxiters)
+            Z_ints[i] = zi
+            Z_raws[i] = zr
+            min_Ds[i] = md
+            sigmas[i] = es
+            crits[i] = wc
+        end
+        return Z_ints, Z_raws, min_Ds, sigmas, crits
+    elseif n_roots_to_track == 0
+        Z_ints = zeros(Int, n_params)
+        Z_raws = zeros(Float64, n_params)
+
+        if verbosity > 0
+            println("Calculating stability over $n_params points (max speed)...")
+        end
+
+        @inbounds Threads.@threads for i in 1:n_params
+            zi, zr = _calculate_unstable_roots_direct_impl(wrapped_D, params_vec[i], σ, Val(0); 
+                ω_max=ω_max, reltol=reltol, abstol=abstol, solver=solver, 
+                n_power_max=n_pow_fixed, verbosity=verbosity, maxiters=maxiters)
+            Z_ints[i] = zi
+            Z_raws[i] = zr
+        end
+        return Z_ints, Z_raws
+    else
+        Z_ints = zeros(Int, n_params)
+        Z_raws = zeros(Float64, n_params)
+        min_Ds_list = [zeros(Float64, n_roots_to_track) for _ in 1:n_params]
+        sigmas_list = [zeros(Float64, n_roots_to_track) for _ in 1:n_params]
+        crits_list = [zeros(Float64, n_roots_to_track) for _ in 1:n_params]
+
+        if verbosity > 0
+            println("Calculating stability over $n_params points (tracking $n_roots_to_track roots)...")
+        end
+
+        @inbounds Threads.@threads for i in 1:n_params
+            zi, zr, md, es, wc = _calculate_unstable_roots_direct_impl(wrapped_D, params_vec[i], σ, Val(n_roots_to_track); 
+                ω_max=ω_max, reltol=reltol, abstol=abstol, solver=solver, 
+                n_power_max=n_pow_fixed, verbosity=verbosity, maxiters=maxiters)
+            Z_ints[i] = zi
+            Z_raws[i] = zr
+            min_Ds_list[i] .= md
+            sigmas_list[i] .= es
+            crits_list[i] .= wc
+        end
+        return Z_ints, Z_raws, min_Ds_list, sigmas_list, crits_list
     end
-
-    @inbounds Threads.@threads for i in 1:n_params
-        zi, zr, md, es, wc = _calculate_unstable_roots_direct_impl(wrapped_D, params_vec[i], σ; 
-            ω_max=ω_max, reltol=reltol, abstol=abstol, solver=solver, 
-            n_power_max=n_pow_fixed, verbosity=verbosity)
-        Z_ints[i] = zi
-        Z_raws[i] = zr
-        min_Ds[i] = md
-        sigmas[i] = es
-        crits[i] = wc
-    end
-
-    return Z_ints, Z_raws, min_Ds, sigmas, crits
 end
 
 """
