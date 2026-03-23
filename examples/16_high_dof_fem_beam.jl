@@ -13,7 +13,7 @@ function build_matrices(N, ρA, EA, L, c_damping)
         K[i:i+1, i:i+1] += ke; M[i:i+1, i:i+1] += me
     end
     M_red = M[2:end, 2:end]; K_red = K[2:end, 2:end]
-    return M_red, c_damping .* M_red, K_red
+    return M_red, c_damping .* K_red, K_red
 end
 
 const N_elem_fem = 30 # Increased DOF to show optimization benefit
@@ -42,13 +42,13 @@ function D_chareq_optimized(λ::T, p) where T
 end
 
 # 2. Hybrid Strategy
-Kpv = LinRange(0.0, 1.0, 40)
-tauv = LinRange(0.1, 1.5, 30)
+Kpv = LinRange(0.0, 1.0, 100)
+tauv = LinRange(0.1, 7.5, 80)
 params_vec = vec([(Kpv[i], tauv[j]) for i in 1:length(Kpv), j in 1:length(tauv)])
 
 println("Grid sweep (Optimized FEM Beam, DOF=$(N_elem_fem-1))...")
 @time Z_ints_vec, Z_raws_vec, min_Ds_vec, σ_ests_vec, ω_crits_vec = 
-    calculate_unstable_roots_p_vec(D_chareq_optimized, params_vec, ω_max=50.0, verbosity=1)
+    calculate_unstable_roots_p_vec(D_chareq_optimized, params_vec, ω_max=50.0, verbosity=0)
 
 Z_mat_int = reshape(Z_ints_vec, length(Kpv), length(tauv))
 σ_mat_est = reshape(σ_ests_vec, length(Kpv), length(tauv))

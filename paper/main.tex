@@ -34,7 +34,7 @@ Nyquist stability \sep Delayed systems \sep MDBM \sep Stiff ODE solvers \sep Aut
 \linenumbers
 
 \section{Introduction}
-Delayed dynamical systems are prevalent in various engineering applications, from machine tool chatter to biological feedback loops. The stability of such systems is governed by the roots of a transcendental characteristic equation $D(\lambda) = 0$. Traditional methods like the Nyquist criterion rely on counting encirclements of the origin by the image of the Bromwich contour. While robust, the practical implementation often requires high-resolution frequency sampling to avoid missing rapid phase changes, especially in systems with large delays or multiple feedback loops.
+Delayed dynamical systems are prevalent in various engineering applications, from machine tool chatter to biological feedback loops. The stability of such systems is governed by the roots of a transcendental characteristic equation $D(\lambda) = 0$. Traditional methods like the Nyquist criterion rely on counting encirclements of the origin by the image of the Bromwich contour. While robust, the practical implementation often requires high-resolution frequency sampling to avoid missing rapid phase changes, especially in systems with large delays, multiple feedback loops, or fractional-order dynamics where non-integer powers of the Laplace variable are present.
 
 \section{Theoretical Background}
 \subsection{The Argument Principle}
@@ -73,59 +73,73 @@ The characteristic function $D(i\omega)$ can exhibit extremely rapid variations 
 \subsection{Minimizing Recompilation Overhead}
 In the Julia language, functions are often specialized upon at compile time, which can lead to significant overhead when a user redefines the characteristic equation. To mitigate this, we employ \texttt{FunctionWrappers.jl} to provide a type-stable entry point for the solver. By wrapping the user-defined $D(\lambda, \mathbf{p})$ into a fixed-type interface, the internal solver logic is compiled only once. This reduces the overhead of subsequent evaluations from seconds to milliseconds, enabling rapid iterative design and real-time stability exploration.
 
-\section{Hybrid Strategy: MDBM Enrichment}
-\subsection{Coarse Grid Mapping}
-To visualize stability regions over a parameter space $\mathbf{p}$, we first perform a coarse grid evaluation. For each point $\mathbf{p}$, the stiff ODE solver computes $Z(\mathbf{p})$. While this provides a general map, the boundaries remain poorly defined at low resolutions.
+\section{Hybrid Strategy: MDBM Enrichment and Parameter-Space Interpolation}
+\subsection{Coarse Grid Mapping and Boundary Refinement}
+To visualize stability regions over a parameter space $\mathbf{p}$, we first perform a coarse grid evaluation. For each point $\mathbf{p}$, the stiff ODE solver computes the winding number $Z(\mathbf{p})$. While this provides a general map, the boundaries remain poorly defined at low resolutions.
 
-\subsection{MDBM Boundary Refinement}
-We enrich this result using the Multi-Dimensional Bisection Method (MDBM). MDBM identifies the stability boundary where $Z$ changes or where the distance to the nearest root is minimal. By utilizing the constrained triangulation provided by MDBM, we can interpolate the stability metrics between sampled points, effectively reducing the required grid density by orders of magnitude while maintaining high fidelity on the boundary.
+We enrich this result using the Multi-Dimensional Bisection Method (MDBM). MDBM identifies the stability boundary where $Z$ changes or where the distance to the nearest root is minimal. By utilizing the constrained triangulation provided by MDBM, we can interpolate the stability metrics between sampled points. Specifically, the triangulation uses the points from both the coarse grid and the high-resolution boundary points discovered by MDBM. By enforcing the "constrained edges" identified as the stability limit, we ensure that the interpolation does not "blur" the boundary. This approach allows us to significantly reduce the grid resolution in the parameter space, as the interpolation capability of the MDBM-enriched triangulation provides a highly accurate representation of the stability landscape even with a sparse initial grid.
 
-\begin{figure}[h]
-\centering
-\includegraphics[width=0.7\textwidth]{output_figures/example_01.png}
-\caption{Stability chart of a 4th-order delayed system. The background heatmap (coarse grid) is refined by the MDBM boundary trace (black lines), demonstrating the hybrid efficiency.}
-\label{fig:mdbm_hybrid}
-\end{figure}
+\subsection{Robustness and Sensitivity Analysis}
+A significant advantage of this hybrid approach is that it provides more than just a binary stable/unstable classification. By storing the closest points to the origin in the $D$-plane (or estimating the real part of the closest root $\sigma_{est}$ via local linearization), we can approximate the "distance to instability" at any point in the parameter space. The MDBM interpolation capability allows us to map this sensitivity field across the entire domain rapidly. This provides the user with an intuitive measure of robustness—indicating not only whether the system is stable but also how sensitive it is to parameter perturbations inside the stable area. This is particularly useful for engineering design, where being "safely stable" is often more important than merely being on the right side of the boundary.
 
-\section{Numerical Error and Verification}
-\subsection{Integer Consistency Metric}
-A unique feature of the Nyquist criterion is that the theoretical winding number $Z$ must be an integer. Any deviation of the raw integrated value $Z_{raw}$ from its nearest integer $Z_{int}$ is a direct measure of the total accumulated numerical error:
-\begin{equation}
-    \epsilon_{num} = |Z_{raw} - \text{round}(Z_{raw})|
-\end{equation}
-This metric allows for a self-validating solver that can flag points where the numerical integrity is compromised (e.g., due to insufficient $\omega_{max}$ or tolerance).
+\section{Performance Analysis and Computational Efficiency}
+\subsection{CPU Time and Bottlenecks}
+The computational cost of the proposed methodology varies significantly depending on the chosen solver and the desired map resolution. For colored stability maps (e.g., Figures~\ref{fig:fractional}), we typically employ the vectorized stiff integration approach (\texttt{calculate\_unstable\_roots\_p\_vec}). For a grid of $100 \times 100$ points, the total CPU time is often under 10 seconds on a standard desktop processor, thanks to Julia's multi-threading capabilities.
 
-\subsection{Error Field Analysis}
-Figure~\ref{fig:error_field} demonstrates the error distribution over a stability chart. For most regions, the error remains near the solver tolerance ($10^{-4}$), confirming the high precision of the stiff integration approach.
+In contrast, the MDBM-enrichment strategy is highly efficient for tracing high-resolution stability boundaries. However, it is important to note that the triangulation of the multidimensional points can become a computational bottleneck as the number of points increases. For this reason, we recommend using the integration-based solvers for generating global sensitivity maps (coarse or medium resolution) and reserving the MDBM refinement specifically for identifying the precise location of the stability limit with high fidelity.
 
-\begin{figure}[h]
-\centering
-\includegraphics[width=0.9\textwidth]{output_figures/example_21_error_field.png}
-\caption{Left: Stability chart $Z_{int}$. Right: Corresponding numerical error field. The error is consistently low, with minor increases only at the critical stability boundaries where the system is most sensitive.}
-\label{fig:error_field}
-\end{figure}
-
-\section{Performance Comparison}
-Table~\ref{tab:performance} compares the execution time and accuracy of the proposed methodology. Stiff solvers maintain high precision even at high frequencies where adaptive quadrature begins to struggle with oscillation density.
-
-\begin{table}[h]
-\centering
-\caption{Execution time and accuracy comparison for different solvers.}
-\begin{tabular}{l|cc|cc}
-\toprule
-Method & Avg. Time (ms) & Max Error & Reliability \\ \midrule
-Fixed-Step & 0.05 & $10^{-1}$ & Low \\
-QuadGK & 0.85 & $10^{-6}$ & Medium \\
-Stiff ODE (Rosen23) & 1.20 & $10^{-12}$ & High \\ \bottomrule
-\end{tabular}
-\label{tab:performance}
-\end{table}
+\subsection{Robustness vs. Speed}
+While simple quadrature methods (like \texttt{QuadGK}) are often sufficient and marginally faster for systems with low sensitivity, the stiff ODE solver (\texttt{Rosenbrock23}) is significantly more robust. In regions of the parameter space where the characteristic contour $D(i\omega)$ passes extremely close to the origin, quadrature methods may fail to converge or require an excessive number of function evaluations. The adaptive step-size control of the stiff solver handles these "near-singular" cases gracefully, maintaining high precision without the need for manual tuning of the frequency grid.
 
 \section{Conclusion}
-The combination of autodiff-enhanced stiff integration and MDBM enrichment provides a powerful framework for the stability analysis of complex delayed systems. The use of Julia's high-performance ecosystem enables the generation of precise stability maps in seconds. Future work could extend this to time-periodic systems using Hill's determinant, though time-domain methods often remain more robust for such cases.
+The combination of autodiff-enhanced stiff integration and MDBM enrichment provides a powerful framework for the stability analysis of complex delayed systems. The use of Julia's high-performance ecosystem enables the generation of precise stability maps in seconds, offering both the global stability topology and local robustness metrics. 
+
+It should be noted that while the current methodology is highly efficient for time-invariant systems, time-periodic systems (e.g., milling processes with variable spindle speed) would require more complex approaches such as Hill's infinite determinant. While Hill-based methods could potentially be integrated into this framework, ensuring their robustness is challenging due to the dependence on the truncation size of the Hill matrix. For such time-dependent systems, direct time-domain stability analysis or semi-discretization methods often remains a more practical and robust alternative. The present work focuses on providing a fast, reliable, and "out-of-the-box" solution for the large class of systems described by time-invariant transcendental characteristic equations.
 
 \appendix
 \section{Case Studies}
-The methodology has been validated on multiple systems, including high-dimensional FEM beam models (50x50 matrices) and neutral delay differential equations. Full implementations are available in the \texttt{InterpolatedNyquist.jl} package.
+The methodology has been validated on multiple systems, including high-dimensional FEM beam models, neutral delay differential equations, and fractional-order systems. 
+
+\subsection{Fractional-Order Delayed Oscillator}
+Fractional-order systems are increasingly used to model materials with memory and hereditary properties. A common characteristic equation for such systems with delay is:
+\begin{equation}
+    D(\lambda) = \lambda^\alpha + a \lambda^\beta + k e^{-\lambda\tau} = 0
+\end{equation}
+where $\alpha \in (1, 2)$ and $\beta \in (0, 1)$ are the fractional orders. The \texttt{InterpolatedNyquist.jl} package handles such cases natively. Figure~\ref{fig:fractional} illustrates the stability regions for a fractional-order oscillator, showing how the proposed method captures the boundaries accurately.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.6\textwidth]{output_figures/example_22_fractional.png}
+\caption{Stability chart of a fractional-order delayed system ($s^{1.8} + 0.5s^{0.8} + k e^{-s\tau} = 0$).}
+\label{fig:fractional}
+\end{figure}
+
+\subsection{High-Dimensional FEM Beam Model}
+To demonstrate the scalability of the approach, we consider a cantilever beam discretized with 50 finite elements, resulting in a system with 100 degrees of freedom. The characteristic equation involves the determinant of a $100 \times 100$ complex matrix:
+\begin{equation}
+    D(\lambda) = \det \left( \mathbf{M}\lambda^2 + \mathbf{C}\lambda + \mathbf{K} + \mathbf{K}_p e^{-\lambda\tau} \right)
+\end{equation}
+Even for such high-dimensional systems, the combination of \texttt{StaticArrays.jl} for small matrix operations and Julia's efficient BLAS/LAPACK interface allows the stiff solver to track the phase changes efficiently. Figure~\ref{fig:beam} shows the stability lobes for the beam under delayed feedback control.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.6\textwidth]{output_figures/example_16.png}
+\caption{Stability lobes for a 100-DOF FEM beam model with delayed feedback.}
+\label{fig:beam}
+\end{figure}
+
+\subsection{Neutral Delay Differential Equations (NDDE)}
+Neutral delay systems, where the rate of change depends on delayed derivatives, present unique challenges due to their potential for infinitely many unstable roots and extreme stiffness. We consider a second-order neutral system:
+\begin{equation}
+    D(\lambda) = \lambda^2 + a \lambda^2 e^{-\lambda\tau} + b + c e^{-\lambda\tau} = 0
+\end{equation}
+where $a$ is the neutral coefficient. For $|a| \ge 1$, the system is inherently unstable or ill-posed. The stiff ODE solver in \texttt{InterpolatedNyquist.jl} is particularly well-suited for these cases, as it can adapt its frequency step size to track the high-frequency phase variations characteristic of neutral systems. Figure~\ref{fig:neutral} shows the stability boundary in the $a$-$c$ parameter space, refined with MDBM to capture the precise stability limit.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.6\textwidth]{output_figures/example_12.png}
+\caption{Stability chart of a neutral delay system ($s^2 + a s^2 e^{-s} + 1 + c e^{-s} = 0$).}
+\label{fig:neutral}
+\end{figure}
 
 \end{document}

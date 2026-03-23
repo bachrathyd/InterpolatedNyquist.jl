@@ -13,17 +13,17 @@ function D_chareq(λ::T, p) where T
 end
 
 # 2. Setup Parameter Grid
-Pv = LinRange(-2.0, 4.0, 50)
-Dv = LinRange(-2.0, 5.0, 50)
+Pv = LinRange(-2.0, 4.0, 100)
+Dv = LinRange(-2.0, 5.0, 100)
 params_vec = vec([(Pv[i], Dv[j]) for i in 1:length(Pv), j in 1:length(Dv)])
 
 println("Calculating stability and error field over $(length(params_vec)) points...")
 
-# 3. Perform Sweep
+## 3. Perform Sweep
 # Using a moderate tolerance to see some "visible" numerical error if it exists
 reltol = 1e-4
 abstol = 1e-4
-ω_max = 1e4
+ω_max =1000
 
 # Custom loop to collect raw Z values
 Z_raws = zeros(length(params_vec))
@@ -56,12 +56,13 @@ Colorbar(f[1, 2], hm1, label="Number of Unstable Roots (Z)")
 # Axis 2: Numerical Error Field
 # Use log scale for error to see small variations
 ax2 = Axis(f[1, 3], title="Numerical Error Field |Z_raw - Z_int|", xlabel="P", ylabel="D")
-hm2 = heatmap!(ax2, Pv, Dv, err_mat, colormap=:inferno, colorrange=(1e-10, 1e-1))
+hm2 = heatmap!(ax2, Pv, Dv, log.(err_mat))#, colormap=:inferno, colorrange=(1e-5, 1e-1))
 Colorbar(f[1, 4], hm2, label="Absolute Error")
-
+ax3 = Axis(f[1, 5], title="Numerical Error Field |Z_raw - Z_int|", xlabel="P", ylabel="D")
+hist!(ax3, log.(errors), bins=50, color=:red, label="Error Distribution")
 println("Average Error: ", mean(errors))
 println("Max Error: ", maximum(errors))
-
+println("Min Error: ", minimum(errors))
 mkpath("output_figures")
 save("output_figures/example_21_error_field.png", f)
 display(f)

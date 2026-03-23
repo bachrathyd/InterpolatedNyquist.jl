@@ -10,6 +10,8 @@ using GeometryBasics
 using Interpolations
 using ForwardDiff
 using DifferentialEquations
+using QuadGK
+using FunctionWrappers: FunctionWrapper
 using PrecompileTools
 
 # Include sub-files
@@ -20,8 +22,9 @@ include("dde_extraction.jl")
 # Exports
 export calculate_encirclement_number,
        argument_principle_with_MDBM,
-       trinangulation_of_MDBM_results,
+       triangulation_of_MDBM_results,
        argument_principle_solver_with_MDBM,
+       sensitivity_mapping_with_MDBM,
        get_n_power_max,
        calculate_unstable_roots_direct,
        calculate_unstable_roots_p_vec,

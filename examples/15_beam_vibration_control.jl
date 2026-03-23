@@ -48,8 +48,8 @@ function mdbm_wrapper(Kp, τ_val)::Float64
     return sign_val * abs(es)
 end
 
-boundary_mdbm = MDBM_Problem(mdbm_wrapper, [LinRange(0.0, 2.0, 25), LinRange(0.1, 3.0, 25)])
-@time MDBM.solve!(boundary_mdbm, 4, verbosity=1)
+boundary_mdbm = MDBM_Problem(mdbm_wrapper, [LinRange(0.0, 2.0, 15), LinRange(0.1, 3.0, 15)])
+@time MDBM.solve!(boundary_mdbm, 3, verbosity=1)
 xyz_sol = getinterpolatedsolution(boundary_mdbm)
 DT1 = MDBM.connect(boundary_mdbm)
 edge2plot_xyz = [reduce(hcat, [i_sol[getindex.(DT1, 1)], i_sol[getindex.(DT1, 2)], fill(NaN, length(DT1))])'[:] for i_sol in xyz_sol]

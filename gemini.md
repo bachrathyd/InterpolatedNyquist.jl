@@ -46,10 +46,11 @@ InterpolatedNyquist.jl/
 │   └── 04_dde_to_chareq.jl
 ├── Project.toml
 └── README.md
+```
 
+# Notes on name spaces: The Axis us used by MDBM and  GLMakie, so if we create a figure, please use  GLMakie.Axis
 
-
-Further task:Furthremore, alwasy same the figures, and meke a clear documnetation, with all the feautes, and examples, and description how to use it. Make all the necessary rocumentation which is needed for Julia package registration.
+Further task:Furthremore, alwasy save the figures, and meke a clear documnetation, with all the feautes, and examples, and description how to use it. Make all the necessary documentation which is needed for Julia package registration.
    Furthermore, I would like to write a journal paper about it, so make a latex folred, in which you write the journal article, basic idea of nyquist stabiolity. Solition one. Enriching the coars grib with the MDB solution in which    
    the number of roots getting much betterin and only a coars resolution is satisfactor. + If we combine it withe a triangulation of tha arease with the same points and using the constraind edges in triangulation provided by the       
    MDBM then we can also reduce the grid resolution in the paramteres space too, becaue of the interpolation capability of the MDBM. Next chaper, use stiff  ode solver to the the best resolution at any point, it is most roust in a     

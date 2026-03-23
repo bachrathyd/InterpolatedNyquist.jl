@@ -109,7 +109,7 @@ function argument_principle_with_MDBM(D_func, mdbm, omega_coars; σ=0.0)
 
         # c. Calculate n_power_max for this parameter set
         # Use a large frequency to estimate polynomial order
-        n_power_max, _ = get_n_power_max(D_func, p_val, σ; ω_large=1e6)
+        n_power_max = get_n_power_max(D_func, p_val, σ; ω_large=1e6)
 
         # d. Combine MDBM, extra, and symmetric points
         om_combined = vcat(om_mdbm, omega_coars)
@@ -125,11 +125,11 @@ function argument_principle_with_MDBM(D_func, mdbm, omega_coars; σ=0.0)
 end
 
 """
-    trinangulation_of_MDBM_results(mdbm, p_uniq, Ncirc)
+    triangulation_of_MDBM_results(mdbm, p_uniq, color_values)
 
-Triangulates the MDBM results for visualization.
+Triangulates the MDBM results for visualization using `color_values` for the mesh.
 """
-function trinangulation_of_MDBM_results(mdbm, p_uniq, Ncirc)
+function triangulation_of_MDBM_results(mdbm, p_uniq, color_values)
     xyz_sol = getinterpolatedsolution(mdbm)
     
     # Assuming 2 parameter dimensions for plotting
@@ -164,8 +164,8 @@ function trinangulation_of_MDBM_results(mdbm, p_uniq, Ncirc)
         u, v, w = T
         u > 0 && v > 0 && w > 0 || continue
 
-        # Calculate average Ncirc for this triangle (only for sampled points)
-        vals = [Ncirc[idx-n_sol] for idx in (u, v, w) if idx > n_sol]
+        # Calculate average color_values for this triangle (only for sampled points)
+        vals = [color_values[idx-n_sol] for idx in (u, v, w) if idx > n_sol]
 
         if !isempty(vals)
             avg_c = Float32(mean(vals))
@@ -181,7 +181,7 @@ end
 """
     argument_principle_solver_with_MDBM(D_func, axlist, ω_coars; σ=0.0)
 
-Complete workflow for MDBM enrichment.
+Complete workflow for MDBM enrichment using brute-force evaluation for background.
 """
 function argument_principle_solver_with_MDBM(D_func, axlist, ω_coars; σ=0.0)
     
@@ -206,7 +206,48 @@ function argument_principle_solver_with_MDBM(D_func, axlist, ω_coars; σ=0.0)
     p_uniq, Ncirc = argument_principle_with_MDBM(D_func, boundary_mdbm, ω_coars; σ=σ)
 
     @info "Triangulation"
-    mesh_points, mesh_faces, mesh_colors, edge2plot_xyz = trinangulation_of_MDBM_results(boundary_mdbm, p_uniq, Ncirc)
+    mesh_points, mesh_faces, mesh_colors, edge2plot_xyz = triangulation_of_MDBM_results(boundary_mdbm, p_uniq, Ncirc)
 
     return boundary_mdbm, p_uniq, Ncirc, mesh_points, mesh_faces, mesh_colors, edge2plot_xyz
+end
+
+"""
+    sensitivity_mapping_with_MDBM(D_func, axlist; σ=0.0, ω_max=1e6, Niter=4)
+
+HIGH-LEVEL: Uses the integration-based sensitivity metric (estimated σ) as the MDBM objective.
+This provides the most robust and informative stability map.
+"""
+function sensitivity_mapping_with_MDBM(D_func, axlist; σ=0.0, ω_max=1e6, Niter=4)
+    
+    function mdbm_objective(p_all...)
+        p = length(p_all) > 1 ? Tuple(p_all) : p_all[1]
+        zi, zr, md, es, wc = calculate_unstable_roots_direct(D_func, p, σ; ω_max=ω_max)
+        sign_val = (zi == 0) ? 1.0 : -1.0
+        return sign_val * abs(es)
+    end
+
+    @info "High-Fidelity Boundary Tracing (MDBM + Stiff ODE)"
+    boundary_mdbm = MDBM_Problem(mdbm_objective, axlist)
+    MDBM.solve!(boundary_mdbm, Niter, verbosity=1, checkneighbourNum=2, doThreadprecomp=true, normp=10.0, ncubetolerance=0.6)
+
+    # Extract results for triangulation
+    eval_points = getevaluatedpoints(boundary_mdbm)
+    n_axes = length(eval_points)
+    p_axes = eval_points[1:n_axes]
+    
+    # Reconstruct parameter collections
+    p_uniq = if n_axes > 1
+        [Tuple(p_axes[j][i] for j in 1:n_axes) for i in 1:length(p_axes[1])]
+    else
+        p_axes[1]
+    end
+    
+    # Get the sensitivity values (objective function values)
+    sensitivity_vals = getevaluatedfunctionvalues(boundary_mdbm)
+    sensitivity_vals_flat = [v[1] for v in sensitivity_vals]
+
+    @info "Triangulation of Sensitivity Field"
+    mesh_points, mesh_faces, mesh_colors, edge2plot_xyz = triangulation_of_MDBM_results(boundary_mdbm, p_uniq, sensitivity_vals_flat)
+
+    return boundary_mdbm, p_uniq, sensitivity_vals_flat, mesh_points, mesh_faces, mesh_colors, edge2plot_xyz
 end

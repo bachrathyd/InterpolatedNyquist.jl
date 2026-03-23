@@ -4,8 +4,7 @@
 using DifferentialEquations
 using ForwardDiff
 using StaticArrays
-using QuadGK
-using FunctionWrappers: FunctionWrapper
+# QuadGK and FunctionWrappers are imported in the main module
 
 # Standardized Tag for ForwardDiff specialization
 struct NyquistTag end
@@ -41,7 +40,7 @@ function _get_n_power_max_impl(D_func::NyquistWrapper{P}, p::P, σ=0.0; ω_large
     D_val_re, D_val_im = ForwardDiff.value(rv), ForwardDiff.value(iv)
     dD_dω_re, dD_dω_im = ForwardDiff.partials(rv, 1), ForwardDiff.partials(iv, 1)
     n_est = ω_large * (dD_dω_re * D_val_re + dD_dω_im * D_val_im) / (D_val_re^2 + D_val_im^2)
-    return round(Int, n_est), n_est
+    return n_est
 end
 
 """
@@ -68,8 +67,12 @@ function _calculate_unstable_roots_direct_impl(D_func::NyquistWrapper{P}, p::P, 
     ω_crit = Ref(0.0)
     
     function phase_ode(y, params, ω)
-        T_tag = (ω isa ForwardDiff.Dual) ? ForwardDiff.tagtype(ω) : StandardTag
-        dual_ω = ForwardDiff.Dual{T_tag}(ForwardDiff.value(ω), 1.0)
+        # Use our StandardTag for the INTERNAL derivative calculation
+        # Stripping the ODE solver's tag if present (via ForwardDiff.value)
+        # prevents conversion errors with the strictly-typed FunctionWrapper.
+        # TRICK: Add a tiny offset to avoid singularities in fractional derivatives at ω=0
+        pure_ω = max(ForwardDiff.value(ω), 1e-9)
+        dual_ω = ForwardDiff.Dual{StandardTag}(pure_ω, 1.0)
         dual_λ = σ + 1im * dual_ω
         res = D_func(dual_λ, p)
 
@@ -78,6 +81,11 @@ function _calculate_unstable_roots_direct_impl(D_func::NyquistWrapper{P}, p::P, 
         dre, dim = ForwardDiff.partials(rv, 1), ForwardDiff.partials(iv, 1)
 
         d_sq = re_val^2 + im_val^2
+        # Handle singularity (e.g. at ω=0 if D(0)=0)
+        if d_sq < 1e-20
+            return SA[0.0]
+        end
+
         darg = (dim * re_val - dre * im_val) / d_sq
 
         if d_sq < min_D_sq[]
@@ -92,7 +100,7 @@ function _calculate_unstable_roots_direct_impl(D_func::NyquistWrapper{P}, p::P, 
     prob = ODEProblem{false}(phase_ode, SA[0.0], (0.0, Float64(ω_max)))
     sol = solve(prob, solver, reltol=reltol, abstol=abstol, save_everystep=false, saveat=[ω_max], maxiters=Int(1e5))
 
-    n_pow = n_power_max === nothing ? _get_n_power_max_impl(D_func, p, σ, ω_large=ω_max)[1] : n_power_max
+    n_pow = n_power_max === nothing ? _get_n_power_max_impl(D_func, p, σ, ω_large=ω_max) : n_power_max
     Z_raw = -(1.0 / π) * sol.u[end][1] + n_pow / 2.0
 
     return round(Int, Z_raw), Z_raw, sqrt(min_D_sq[]), estimated_sigma[], ω_crit[]
@@ -110,7 +118,7 @@ function calculate_unstable_roots_p_vec(@nospecialize(D_func), params_vec::Abstr
     wrapped_D = (D_func isa NyquistWrapper{P}) ? D_func : NyquistWrapper{P}(D_func)
     
     n_params = length(params_vec)
-    n_pow_fixed = parameter_independent_nmax ? _get_n_power_max_impl(wrapped_D, params_vec[1], σ, ω_large=ω_max)[1] : nothing
+    n_pow_fixed = parameter_independent_nmax ? _get_n_power_max_impl(wrapped_D, params_vec[1], σ, ω_large=ω_max) : nothing
 
     Z_ints = zeros(Int, n_params)
     Z_raws = zeros(Float64, n_params)
@@ -157,13 +165,18 @@ function _calculate_unstable_roots_quadgk_impl(D_func::NyquistWrapper{P}, p::P, 
     ω_crit = Ref(0.0)
     
     function phase_integrand(ω)
-        dual_ω = ForwardDiff.Dual{StandardTag}(ω, 1.0)
+        # TRICK: Add a tiny offset to avoid singularities in fractional derivatives at ω=0
+        pure_ω = max(ω, 1e-9)
+        dual_ω = ForwardDiff.Dual{StandardTag}(pure_ω, 1.0)
         dual_λ = σ + 1im * dual_ω
         res = D_func(dual_λ, p)
         rv, iv = real(res), imag(res)
         re_val, im_val = ForwardDiff.value(rv), ForwardDiff.value(iv)
         dre, dim = ForwardDiff.partials(rv, 1), ForwardDiff.partials(iv, 1)
         d_sq = re_val^2 + im_val^2
+        if d_sq < 1e-20
+            return 0.0
+        end
         if d_sq < min_D_sq[]
             min_D_sq[] = d_sq
             ω_crit[] = ω
@@ -173,7 +186,7 @@ function _calculate_unstable_roots_quadgk_impl(D_func::NyquistWrapper{P}, p::P, 
     end
 
     integral, err = quadgk(phase_integrand, 0.0, Float64(ω_max), rtol=reltol, atol=abstol)
-    n_pow = n_power_max === nothing ? _get_n_power_max_impl(D_func, p, σ, ω_large=ω_max)[1] : n_power_max
+    n_pow = n_power_max === nothing ? _get_n_power_max_impl(D_func, p, σ, ω_large=ω_max) : n_power_max
     Z_raw = -(1.0 / π) * integral + n_pow / 2.0
     return round(Int, Z_raw), Z_raw, sqrt(min_D_sq[]), estimated_sigma[], ω_crit[]
 end
@@ -189,7 +202,7 @@ function calculate_unstable_roots_quadgk_p_vec(@nospecialize(D_func), params_vec
     wrapped_D = (D_func isa NyquistWrapper{P}) ? D_func : NyquistWrapper{P}(D_func)
     
     n_params = length(params_vec)
-    n_pow_fixed = parameter_independent_nmax ? _get_n_power_max_impl(wrapped_D, params_vec[1], σ, ω_large=ω_max)[1] : nothing
+    n_pow_fixed = parameter_independent_nmax ? _get_n_power_max_impl(wrapped_D, params_vec[1], σ, ω_large=ω_max) : nothing
 
     Z_ints = zeros(Int, n_params)
     Z_raws = zeros(Float64, n_params)
@@ -238,7 +251,9 @@ function _calculate_unstable_roots_fixed_step_impl(D_func::NyquistWrapper{P}, p:
     integral = 0.0
     
     function get_darg(ω_val)
-        dual_ω = ForwardDiff.Dual{StandardTag}(ω_val, 1.0)
+        # TRICK: Add a tiny offset to avoid singularities in fractional derivatives at ω=0
+        pure_ω = max(ω_val, 1e-9)
+        dual_ω = ForwardDiff.Dual{StandardTag}(pure_ω, 1.0)
         dual_λ = σ + 1im * dual_ω
         res = D_func(dual_λ, p)
         rv, iv = real(res), imag(res)
@@ -246,6 +261,10 @@ function _calculate_unstable_roots_fixed_step_impl(D_func::NyquistWrapper{P}, p:
         dre, dim = ForwardDiff.partials(rv, 1), ForwardDiff.partials(iv, 1)
         d_sq = re_val^2 + im_val^2
         
+        if d_sq < 1e-20
+            return 0.0
+        end
+
         if d_sq < min_D_sq
             min_D_sq = d_sq
             ω_crit = ω_val
@@ -263,7 +282,7 @@ function _calculate_unstable_roots_fixed_step_impl(D_func::NyquistWrapper{P}, p:
         f_prev = f_curr
     end
 
-    n_pow = n_power_max === nothing ? _get_n_power_max_impl(D_func, p, σ, ω_large=ω_max)[1] : n_power_max
+    n_pow = n_power_max === nothing ? _get_n_power_max_impl(D_func, p, σ, ω_large=ω_max) : n_power_max
     Z_raw = -(1.0 / π) * integral + n_pow / 2.0
     return round(Int, Z_raw), Z_raw, sqrt(min_D_sq), estimated_sigma, ω_crit
 end
@@ -279,7 +298,7 @@ function calculate_unstable_roots_fixed_step_p_vec(@nospecialize(D_func), params
     wrapped_D = (D_func isa NyquistWrapper{P}) ? D_func : NyquistWrapper{P}(D_func)
     
     n_params = length(params_vec)
-    n_pow_fixed = parameter_independent_nmax ? _get_n_power_max_impl(wrapped_D, params_vec[1], σ, ω_large=ω_max)[1] : nothing
+    n_pow_fixed = parameter_independent_nmax ? _get_n_power_max_impl(wrapped_D, params_vec[1], σ, ω_large=ω_max) : nothing
 
     Z_ints = zeros(Int, n_params)
     Z_raws = zeros(Float64, n_params)
