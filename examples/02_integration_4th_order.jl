@@ -2,6 +2,7 @@ using InterpolatedNyquist
 using GLMakie
 using MDBM
 using LinearAlgebra
+using GeometryBasics
 
 GLMakie.closeall()
 GLMakie.activate!(; title="Hybrid Stability - 4th Order")
@@ -14,7 +15,6 @@ function D_chareq(λ::T, p) where T
     ζ  = T(0.02)
     return (c1 * λ^4 + λ^2 + T(2) * ζ * λ + one(T) + P * exp(-τ * λ) + D * λ * exp(-τ * λ))
 end
-
 # 2. Hybrid Strategy Part 1: Grid sweep
 Pv = LinRange(-2.01, 4.0, 150)
 Dv = LinRange(-2.01, 5.0, 100)
@@ -27,7 +27,7 @@ println("Grid sweep (4th Order)...")
 #    calculate_unstable_roots_p_vec(D_chareq, params_vec, verbosity=1)
 
  @time Z_ints_vec, Z_raws_vec, min_Ds_vec, σ_ests_vec_many, ω_crits_vec = 
-     calculate_unstable_roots_p_vec(D_chareq, params_vec, verbosity=1, n_roots_to_track=5)
+     calculate_unstable_roots_p_vec(D_chareq, params_vec, verbosity=0, n_roots_to_track=5)
  σ_ests_vec = map(σ_ests_vec_many) do v
      v[argmin(ifelse.(isnan.(v), Inf, abs.(v)))]
  end
@@ -47,7 +47,7 @@ function mdbm_wrapper(p, d)::Float64
 end
 
 boundary_mdbm = MDBM_Problem(mdbm_wrapper, [LinRange(-2.01, 4.0, 20), LinRange(-2.01, 5.0, 20)])
-@time MDBM.solve!(boundary_mdbm, 4, verbosity=1)
+@time MDBM.solve!(boundary_mdbm, 4, verbosity=0)
 
 xyz_sol = getinterpolatedsolution(boundary_mdbm)
 DT1 = MDBM.connect(boundary_mdbm)
@@ -66,4 +66,12 @@ end
 # Save figure to disk
 mkpath("output_figures")
 save("output_figures/example_02.png", f)
+display(f)
+
+println("Finding largest inscribed circle in the stable region...in a $(size(Pv,1))x$(size(Dv,1)) matirx")
+@time R,circ_x,circ_y,i,j = find_largest_circle(Z_mat_int .== 0,Pv, Dv,N=3) # not the N as a 2^N coarse-to-fine (multi-resolution) search strategy. It might loose circle smaller than 2^N, but it is much faster than the brute-force search. You can set N=0 for the brute-force search.
+@show  R
+circle = GeometryBasics.Circle(Point2f(circ_x, circ_y), R)
+scatter!(ax, [circ_x], [circ_y], color=:magenta, marker=:star5, markersize=15, strokecolor=:black, strokewidth=1, label="Largest Inscribed Circle Center")
+lines!(ax, circle, color=:magenta, linewidth=2, label="Largest Inscribed Circle")
 display(f)

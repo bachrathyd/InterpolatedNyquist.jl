@@ -21,6 +21,7 @@ using PrecompileTools
 include("mdbm_enrichment.jl")
 include("integration_solvers.jl")
 include("dde_extraction.jl")
+include("find_largest_circle.jl")
 
 # Exports
 export calculate_encirclement_number,
@@ -35,7 +36,8 @@ export calculate_encirclement_number,
        calculate_unstable_roots_quadgk_p_vec,
        calculate_unstable_roots_fixed_step,
        calculate_unstable_roots_fixed_step_p_vec,
-       get_D_from_model
+       get_D_from_model,
+       find_largest_circle
 
 # Precompilation Workload
 @setup_workload begin

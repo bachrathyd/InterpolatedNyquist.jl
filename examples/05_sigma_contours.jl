@@ -85,3 +85,5 @@ axislegend(ax, position=:rb)
 mkpath("output_figures")
 save("output_figures/example_05.png", f)
 display(f)
+
+
