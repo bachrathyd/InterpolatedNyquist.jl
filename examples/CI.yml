@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  test:
+    name: Julia ${{ matrix.version }} - ${{ matrix.os }} - Dep versions: ${{ matrix.pkg_version }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        version:
+          - '1.9' # The minimum Julia version defined in your Project.toml
+          - '1'   # The latest stable Julia 1.x release
+        os:
+          - ubuntu-latest
+          - windows-latest
+        pkg_version:
+          - 'latest'
+        include:
+          # This extra job forces the package manager to use the oldest allowed [compat] bounds
+          - version: '1.9'
+            os: ubuntu-latest
+            pkg_version: 'min'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: ${{ matrix.version }}
+      - uses: julia-actions/julia-downgrade-compat@v1
+        if: ${{ matrix.pkg_version == 'min' }}
+      - uses: julia-actions/julia-buildpkg@v1
+      - uses: julia-actions/julia-runtest@v1

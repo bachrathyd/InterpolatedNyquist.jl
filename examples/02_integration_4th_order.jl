@@ -2,7 +2,7 @@ using InterpolatedNyquist
 using GLMakie
 using MDBM
 using LinearAlgebra
-5+5
+
 GLMakie.closeall()
 GLMakie.activate!(; title="Hybrid Stability - 4th Order")
 
@@ -20,6 +20,7 @@ Pv = LinRange(-2.01, 4.0, 150)
 Dv = LinRange(-2.01, 5.0, 100)
 
 params_vec = vec([(Pv[i], Dv[j]) for i in 1:length(Pv), j in 1:length(Dv)])
+
 
 println("Grid sweep (4th Order)...")
 #@time Z_ints_vec, Z_raws_vec, min_Ds_vec, σ_ests_vec, ω_crits_vec = 
