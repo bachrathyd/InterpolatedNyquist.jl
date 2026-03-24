@@ -1,7 +1,9 @@
 # Core logic for Method 2: Integration-based solvers
 # This file is part of InterpolatedNyquist.jl
 
-using DifferentialEquations
+using OrdinaryDiffEq
+using SciMLBase # Just in case you need base types explicitly
+
 using ForwardDiff
 using StaticArrays
 # QuadGK and FunctionWrappers are imported in the main module
@@ -149,7 +151,26 @@ function _calculate_unstable_roots_direct_impl(D_func::NyquistWrapper{P}, p::P, 
 
     d_sq_vec = MVector{N, Float64}(fill(Inf, N))
     roots_vec = MVector{N, ComplexF64}(fill(NaN + NaN*im, N))
-    prev_d_sq_deriv = Ref(0.0)
+    
+    # Boundary check at ω = 0
+    # Because |D(ω)|^2 is even, a positive derivative at ω ≈ 0 implies a local minimum at 0.
+    pure_ω_0 = 1e-9
+    dual_ω_0 = ForwardDiff.Dual{StandardTag}(pure_ω_0, 1.0)
+    dual_λ_0 = σ + 1im * dual_ω_0
+    res_0 = D_func(dual_λ_0, p)
+    rv_0, iv_0 = real(res_0), imag(res_0)
+    re_val_0, im_val_0 = ForwardDiff.value(rv_0), ForwardDiff.value(iv_0)
+    dre_0, dim_0 = ForwardDiff.partials(rv_0, 1), ForwardDiff.partials(iv_0, 1)
+    d_sq_0 = re_val_0^2 + im_val_0^2
+    d_sq_deriv_0 = 2*(re_val_0 * dre_0 + im_val_0 * dim_0)
+
+    if d_sq_deriv_0 > 0
+        est_sigma_0 = -(re_val_0 * dim_0 - im_val_0 * dre_0) / (dim_0^2 + dre_0^2)
+        d_sq_vec[1] = d_sq_0
+        roots_vec[1] = est_sigma_0 + 0.0im
+    end
+
+    prev_d_sq_deriv = Ref(d_sq_deriv_0)
     prev_ω = Ref(0.0)
 
     function phase_ode(y, params, ω)

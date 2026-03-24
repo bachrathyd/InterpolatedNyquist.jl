@@ -86,6 +86,24 @@ Ensure all code remains type-stable, allocation-free inside the ODE loop, and co
 
 
 
+Update the `Val{N}` dispatch of `_calculate_unstable_roots_direct_impl` in `src/integration_solvers.jl` to explicitly handle purely real roots at the boundary `ω = 0`.
+
+Currently, the local minimum detection (`prev_d_sq_deriv[] < 0 && d_sq_deriv > 0`) fails for roots at `ω = 0` because the integration starts at the bottom of the valley, meaning the derivative is already positive and no zero-crossing is ever detected.
+
+Add a boundary check right after allocating `d_sq_vec` and `roots_vec`, but before the `phase_ode` function is defined:
+
+1. Manually evaluate the characteristic equation at a tiny offset: `pure_ω_0 = 1e-9`.
+2. Calculate `d_sq_0` and `d_sq_deriv_0` using the exact same ForwardDiff logic used inside the ODE step.
+3. Check if it is a local minimum: `if d_sq_deriv_0 > 0`. Because the magnitude is an even function for real systems, if the derivative is positive moving away from 0, `ω=0` must be a local minimum.
+4. If true, calculate `est_sigma_0`, and insert `d_sq_0` and `est_sigma_0 + 0.0im` into the first indices of `d_sq_vec` and `roots_vec`.
+5. Crucially, initialize the closed-over variable `prev_d_sq_deriv = Ref(d_sq_deriv_0)` instead of `Ref(0.0)`. This ensures the ODE solver smoothly continues tracking the derivative state from the exact boundary condition without double-counting the root.
+
+Ensure the boundary check is allocation-free and maintains the current type stability.
+
+
+
+
+
 
 Further task:Furthremore, alwasy save the figures, and meke a clear documnetation, with all the feautes, and examples, and description how to use it. Make all the necessary documentation which is needed for Julia package registration.
    Furthermore, I would like to write a journal paper about it, so make a latex folred, in which you write the journal article, basic idea of nyquist stabiolity. Solition one. Enriching the coars grib with the MDB solution in which    

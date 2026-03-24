@@ -23,8 +23,6 @@ calculate_unstable_roots_direct(D_chareq, p_test, n_roots_to_track=0)
 calculate_unstable_roots_direct(D_chareq, p_test, n_roots_to_track=1)
 calculate_unstable_roots_direct(D_chareq, p_test, n_roots_to_track=10)
 
-
-
 # Benchmarking
 t0 = @belapsed calculate_unstable_roots_direct($D_chareq, $p_test, n_roots_to_track=0) 
 t1 = @belapsed calculate_unstable_roots_direct($D_chareq, $p_test, n_roots_to_track=1)

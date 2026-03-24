@@ -9,7 +9,10 @@ using DelaunayTriangulation
 using GeometryBasics
 using Interpolations
 using ForwardDiff
-using DifferentialEquations
+#using DifferentialEquations
+using OrdinaryDiffEq
+#using SciMLBase 
+
 using QuadGK
 using FunctionWrappers: FunctionWrapper
 using PrecompileTools

@@ -16,21 +16,23 @@ function D_chareq(λ::T, p) where T
 end
 
 # 2. Hybrid Part 1: Coarse sweep for background
-Pv = LinRange(-2.0, 4.0, 60)
-Dv = LinRange(-2.0, 5.0, 50)
+Pv = LinRange(-2.0, 4.0, 160)
+Dv = LinRange(-2.0, 5.0, 150)
 params_vec = vec([(Pv[i], Dv[j]) for i in 1:length(Pv), j in 1:length(Dv)])
 
+
 println("Grid sweep for background...")
-@time Z_ints_vec, _, _, σ_ests_vec, _ = 
-    calculate_unstable_roots_p_vec(D_chareq, params_vec, verbosity=1)
+# # sigma approximation based on the closest point of D curve
+# @time Z_ints_vec, _, _, σ_ests_vec, _ = 
+#     calculate_unstable_roots_p_vec(D_chareq, params_vec, verbosity=1)
 
 
-# @time Z_ints_vec, Z_raws_vec, min_Ds_vec, σ_ests_vec_many, ω_crits_vec = 
-#     calculate_unstable_roots_p_vec(D_chareq, params_vec, verbosity=1, n_roots_to_track=2)
-# 
-# σ_ests_vec = map(σ_ests_vec_many) do v
-#     v[argmin(ifelse.(isnan.(v), Inf, abs.(v)))]
-# end
+# sigma approximation based on the closest root to the imaginary axis (Z_int) and its estimated sigma (σ_est)
+ @time Z_ints_vec, Z_raws_vec, min_Ds_vec, σ_ests_vec_multi, ω_crits_vec = 
+     calculate_unstable_roots_p_vec(D_chareq, params_vec, verbosity=1, n_roots_to_track=2)
+  σ_ests_vec = map(σ_ests_vec_multi) do v
+     v[argmin(ifelse.(isnan.(v), Inf, abs.(v)))]
+ end
 
 
     
@@ -46,13 +48,14 @@ ax = GLMakie.Axis(f[1, 1], title="Hybrid σ-Contour Comparison", xlabel="P", yla
 hm = heatmap!(ax, Pv, Dv, C_to_plot, colormap=:viridis, alpha=0.6)
 Colorbar(f[1, 2], hm, label="Stability Metric")
 
-σ_levels = LinRange(0.0, -1.4, 5)
+σ_levels = LinRange(0.0, -1.4, 10)
 
 # Add coarse contour lines from the heatmap data to compare with MDBM
-contour!(ax, Pv, Dv, σ_mat_est, levels=σ_levels, labels=true, color=:white, linestyle=:dash, linewidth=1.5)
+contour!(ax, Pv, Dv, C_to_plot, levels=σ_levels, labels=true, color=:white, linestyle=:dash, linewidth=1.5)
 
+display(f)
 
-colors = [:black, :blue, :green, :orange, :red]
+colors = [cgrad([:red, :blue])[t] for t in LinRange(0, 1, length(σ_levels))]
 
 for (idx, σ_loc) in enumerate(σ_levels)
     @info "Tracing σ = $σ_loc level..."
@@ -64,7 +67,7 @@ for (idx, σ_loc) in enumerate(σ_levels)
     end
 
     boundary_mdbm = MDBM_Problem(mdbm_wrapper_sigma, [LinRange(-2.0, 4.0, 20), LinRange(-2.0, 5.0, 20)])
-    MDBM.solve!(boundary_mdbm, 3, verbosity=0)
+    MDBM.solve!(boundary_mdbm, 4, verbosity=0)
     
     xyz_sol = getinterpolatedsolution(boundary_mdbm)
     DT1 = MDBM.connect(boundary_mdbm)
@@ -73,6 +76,7 @@ for (idx, σ_loc) in enumerate(σ_levels)
     if !isempty(edge2plot_xyz)
         lines!(ax, edge2plot_xyz..., color=colors[idx], linewidth=2.5, label="MDBM σ = $σ_loc")
     end
+display(f)
 end
 
 axislegend(ax, position=:rb)

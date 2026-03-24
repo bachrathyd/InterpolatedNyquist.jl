@@ -2,7 +2,7 @@ using InterpolatedNyquist
 using GLMakie
 using MDBM
 using LinearAlgebra
-
+5+5
 GLMakie.closeall()
 GLMakie.activate!(; title="Hybrid Stability - 4th Order")
 
@@ -18,18 +18,20 @@ end
 # 2. Hybrid Strategy Part 1: Grid sweep
 Pv = LinRange(-2.01, 4.0, 150)
 Dv = LinRange(-2.01, 5.0, 100)
+
 params_vec = vec([(Pv[i], Dv[j]) for i in 1:length(Pv), j in 1:length(Dv)])
 
 println("Grid sweep (4th Order)...")
-@time Z_ints_vec, Z_raws_vec, min_Ds_vec, σ_ests_vec, ω_crits_vec = 
-    calculate_unstable_roots_p_vec(D_chareq, params_vec, verbosity=1)
+#@time Z_ints_vec, Z_raws_vec, min_Ds_vec, σ_ests_vec, ω_crits_vec = 
+#    calculate_unstable_roots_p_vec(D_chareq, params_vec, verbosity=1)
 
-@time Z_ints_vec, Z_raws_vec, min_Ds_vec, σ_ests_vec_many, ω_crits_vec = 
-    calculate_unstable_roots_p_vec(D_chareq, params_vec, verbosity=1, n_roots_to_track=3)
+ @time Z_ints_vec, Z_raws_vec, min_Ds_vec, σ_ests_vec_many, ω_crits_vec = 
+     calculate_unstable_roots_p_vec(D_chareq, params_vec, verbosity=1, n_roots_to_track=5)
+ σ_ests_vec = map(σ_ests_vec_many) do v
+     v[argmin(ifelse.(isnan.(v), Inf, abs.(v)))]
+ end
 
-σ_ests_vec = map(σ_ests_vec_many) do v
-    v[argmin(ifelse.(isnan.(v), Inf, abs.(v)))]
-end
+
 
 Z_mat_int = reshape(Z_ints_vec, length(Pv), length(Dv))
 σ_mat_est = reshape(σ_ests_vec, length(Pv), length(Dv))
