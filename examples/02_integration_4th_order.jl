@@ -22,7 +22,7 @@ Dv = LinRange(-2.01, 5.0, 100)
 params_vec = vec([(Pv[i], Dv[j]) for i in 1:length(Pv), j in 1:length(Dv)])
 
 
-println("Grid sweep (4th Order)...")
+println("Grid sweep - Brute Force")
 #@time Z_ints_vec, Z_raws_vec, min_Ds_vec, σ_ests_vec, ω_crits_vec = 
 #    calculate_unstable_roots_p_vec(D_chareq, params_vec, verbosity=1)
 
@@ -46,7 +46,7 @@ function mdbm_wrapper(p, d)::Float64
     return sign_val * abs(es)
 end
 
-boundary_mdbm = MDBM_Problem(mdbm_wrapper, [LinRange(-2.01, 4.0, 20), LinRange(-2.01, 5.0, 20)])
+boundary_mdbm = MDBM_Problem(mdbm_wrapper, [LinRange(-2.01, 4.0, 37), LinRange(-2.01, 5.0, 37)])
 @time MDBM.solve!(boundary_mdbm, 4, verbosity=0)
 
 xyz_sol = getinterpolatedsolution(boundary_mdbm)
@@ -63,15 +63,54 @@ if !isempty(edge2plot_xyz)
     lines!(ax, edge2plot_xyz..., color=:black, linewidth=2, label="MDBM Boundary")
 end
 
+
+
+
+
+
+
+
+
+
+# -------------------- Finding largest inscribed circle in the stable region ---------------------
+println("-------------------------------------------------------------")
+println("Finding largest inscribed circle in the stable region.")
+# 1. Brute force grid based solution
+my_scale_x=1.4 # use the scale to unify the very different grid size - leading to fitting an ellipse
+my_scale_y=1.0 # use the scale to unify the very different grid size - leading to fitting an ellipse
+
+
+println("Circle_ based on the Brute Force poitns...in a $(size(Pv,1))x$(size(Dv,1)) matrix")
+@time circ_R,circ_x,circ_y,i,j = find_largest_circle(Z_mat_int .== 0,Pv, Dv,N=0,scale_x=my_scale_x, scale_y=my_scale_y) # not the N as a 2^N coarse-to-fine (multi-resolution) search strategy. It might loose circle smaller than 2^N, but it is much faster than the brute-force search. You can set N=0 for the brute-force search.
+# Get the points for plotting
+pts = generate_ellipse_points(circ_x, circ_y, circ_R, 
+                              scale_x=my_scale_x, scale_y=my_scale_y)
+scatter!(ax,[circ_x],[circ_y], color=:magenta, marker=:star5, markersize=15)
+lines!(ax,pts[1], pts[2], color=:magenta, linewidth=2, label="Largest Inscribed Circle")#
+    
+display(f)
+
+## -------------- circle based on MDBM result ---------------------
+# based on a gridded solution, with random point cloud (Stable, Unstable, and Boundary points)
+# Substep1: the center of the circle is must be on a given Stalbe points
+# Substep2: refinement of the center location interatively
+#note that the center is moveed along only in num_angles directions. The final resolution and the CPU time could be sensitive to this parameter (16-40 is a good range)
+
+println("Circle_ based on the MDBM points")
+@time final_circle = find_largest_circle(boundary_mdbm, N=0, scale_x=my_scale_x, scale_y=my_scale_y,num_angles=32)
+
+
+# 2. Generate the plot points
+pts = generate_ellipse_points(final_circle.x, final_circle.y, final_circle.R_scaled, 
+                              scale_x=my_scale_x, scale_y=my_scale_y)
+
+scatter!(ax, [final_circle.x], [final_circle.y], color=:yellow, marker=:star5, markersize=15)
+lines!(ax, pts[1], pts[2], color=:yellow, linewidth=2, label="Largest Inscribed Ellipse")
+
+display(f)
+
+
 # Save figure to disk
 mkpath("output_figures")
 save("output_figures/example_02.png", f)
-display(f)
-
-println("Finding largest inscribed circle in the stable region...in a $(size(Pv,1))x$(size(Dv,1)) matirx")
-@time R,circ_x,circ_y,i,j = find_largest_circle(Z_mat_int .== 0,Pv, Dv,N=3) # not the N as a 2^N coarse-to-fine (multi-resolution) search strategy. It might loose circle smaller than 2^N, but it is much faster than the brute-force search. You can set N=0 for the brute-force search.
-@show  R
-circle = GeometryBasics.Circle(Point2f(circ_x, circ_y), R)
-scatter!(ax, [circ_x], [circ_y], color=:magenta, marker=:star5, markersize=15, strokecolor=:black, strokewidth=1, label="Largest Inscribed Circle Center")
-lines!(ax, circle, color=:magenta, linewidth=2, label="Largest Inscribed Circle")
 display(f)

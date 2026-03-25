@@ -2,6 +2,7 @@ using InterpolatedNyquist
 using GLMakie
 using MDBM
 using LinearAlgebra
+using GeometryBasics
 
 GLMakie.closeall()
 GLMakie.activate!(; title="Hybrid Stability - Turning Model")
@@ -16,8 +17,8 @@ function D_chareq(λ::T, p) where T
 end
 
 # 2. Hybrid Strategy Part 1: Grid sweep
-invΩ_v = LinRange(0.0, 4.0, 60)
-w_v = LinRange(0.0, 2.0, 50)
+invΩ_v = LinRange(0.0, 4.0, 120)
+w_v = LinRange(0.0, 2.0, 100)
 params_vec = vec([(invΩ_v[i], w_v[j]) for i in 1:length(invΩ_v), j in 1:length(w_v)])
 
 println("Grid sweep (Turning Model)...")
@@ -52,6 +53,14 @@ Colorbar(f[1, 2], hm, label="Metric (σ_est if stable, Z if unstable)")
 if !isempty(edge2plot_xyz)
     lines!(ax, edge2plot_xyz..., color=:black, linewidth=2, label="MDBM Boundary")
 end
+
+
+println("Finding largest inscribed circle in the stable region...in a $(size(invΩ_v,1))x$(size(w_v,1)) matrix")
+@time R,circ_x,circ_y,i,j = find_largest_circle(Z_mat_int .== 0,invΩ_v, w_v,N=0) # not the N as a 2^N coarse-to-fine (multi-resolution) search strategy. It might loose circle smaller than 2^N, but it is much faster than the brute-force search. You can set N=0 for the brute-force search.
+@show  R
+circle = GeometryBasics.Circle(Point2f(circ_x, circ_y), R)
+scatter!(ax, [circ_x], [circ_y], color=:magenta, marker=:star5, markersize=15, strokecolor=:black, strokewidth=1, label="Largest Inscribed Circle Center")
+lines!(ax, circle, color=:magenta, linewidth=2, label="Largest Inscribed Circle")
 
 # Save figure to disk
 mkpath("output_figures")
