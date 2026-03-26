@@ -64,7 +64,7 @@ See `CITATION.bib` for the BibTeX entry.
 ## Installation
 ```julia
 using Pkg
-Pkg.add(url="https://github.com/bachrathyd/InterpolatedNyquist.jl")
+Pkg.add("InterpolatedNyquist")
 ```
 
 ## Examples Directory
