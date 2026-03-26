@@ -5,6 +5,7 @@ makedocs(
     sitename = "InterpolatedNyquist.jl",
     format = Documenter.HTML(),
     modules = [InterpolatedNyquist],
+    checkdocs = :exports,             # <--- ADD THIS LINE!
     pages = [
         "Home" => "index.md",
         "Examples" => "examples.md",

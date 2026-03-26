@@ -7,7 +7,7 @@ This page lists the public functions provided by `InterpolatedNyquist.jl`.
 ```@docs
 calculate_encirclement_number
 argument_principle_with_MDBM
-trinangulation_of_MDBM_results
+triangulation_of_MDBM_results
 argument_principle_solver_with_MDBM
 sensitivity_mapping_with_MDBM
 ```
