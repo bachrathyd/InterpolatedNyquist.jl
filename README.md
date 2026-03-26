@@ -55,9 +55,9 @@ For the 4th-order system above:
 *Stability Chart generated in < 1s total. The background heatmap shows the coarse grid sweep. The negative values (with gradual color change) shows the apprximated right most charateristic roos, thepositive (uniform colors) show the number of unstable toots.The smooth black lines are the high-precision MDBM boundary (305x305 equivalent resolution).*
 
 ## Citing
-If you use `InterpolatedNyquist.jl` in your research, please cite the following paper:
+If you use `InterpolatedNyquist.jl` in your research, please cite the following paper (not submitted yet ;-) ):
 
-> Daniel Bachrathy, et al. "High-Performance Nyquist Stability Analysis of Delayed Dynamical Systems using MDBM and Autodiff-Enhanced Stiff Integration." Journal of Sound and Vibration, 2026.
+> Daniel Bachrathy, et al. "High-Performance Nyquist Stability Analysis of Delayed Dynamical Systems using MDBM and Autodiff-Enhanced Stiff Integration." ?Journal of Sound and Vibration, 2026?.
 
 See `CITATION.bib` for the BibTeX entry.
 
