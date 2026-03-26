@@ -11,3 +11,8 @@ makedocs(
         "API Reference" => "api.md",
     ]
 )
+# This is the crucial line that tells it to push to GitHub Pages!
+deploydocs(
+    repo = "github.com/bachrathyd/InterpolatedNyquist.jl.git",
+    devbranch = "main"
+)
