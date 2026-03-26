@@ -29,3 +29,15 @@ get_n_power_max
 ```@docs
 get_D_from_model
 ```
+
+## Circle Finding and Geometry
+
+These tools assist in finding the largest inscribed stability circles and generating geometry for visualization.
+
+```@docs
+find_largest_circle
+find_largest_circle_transposed
+generate_ellipse_points
+refine_circle_robust
+_to_tuples
+```
