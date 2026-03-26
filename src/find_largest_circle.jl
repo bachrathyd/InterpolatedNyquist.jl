@@ -353,8 +353,6 @@ function refine_circle_robust(x_init::Real, y_init::Real, boundary_pts::Abstract
             # We are stuck at this resolution. Use the gentle decay rate to squeeze tighter.
             step_size *= decay_rate
             if step_size < tol 
-                
-    @show iter
                 break 
             end
         end
