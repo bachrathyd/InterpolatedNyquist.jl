@@ -258,6 +258,12 @@ function find_largest_circle(true_pts::AbstractVector, false_pts::AbstractVector
 end
 
 # Helper function to convert 2xN structures into an Array of (x, y) tuples
+"""
+    _to_tuples(pts)
+
+Internal helper function to convert various 2D point cloud formats (2xN Matrix, 
+Vector of Vectors [X, Y]) into a standard Vector of (x, y) tuples.
+"""
 function _to_tuples(pts)
     # Check if it is a 2xN Matrix
     if pts isa AbstractMatrix && size(pts, 1) == 2
