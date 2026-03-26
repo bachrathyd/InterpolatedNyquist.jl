@@ -1,5 +1,8 @@
 # InterpolatedNyquist.jl
 
+[![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://bachrathyd.github.io/InterpolatedNyquist.jl/dev/)
+[![Build Status](https://github.com/bachrathyd/InterpolatedNyquist.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/bachrathyd/InterpolatedNyquist.jl/actions/workflows/CI.yml?query=branch%3Amain)kflows/CI.yml?query=branch%3Amain)
+
 `InterpolatedNyquist.jl` is a high-performance Julia package for determining the stability of delayed dynamical systems using Nyquist-based methods. It combines coarse brute-force sweeps with precise Multi-Dimensional Bisection Method (MDBM) boundary refinement.
 
 ## Features
