@@ -12,9 +12,9 @@ function D_chareq(λ::T, p) where T
     c1 = T(0.03)
     τ = T(0.5)
     ζ = T(0.02)
-    c1 = T(0.03)
-    τ = T(0.848)
-    ζ = T(0.02)
+    #c1 = T(0.03)
+    #τ = T(0.848)
+    #ζ = T(0.02)
     return (c1 * λ^4 + λ^2 + T(2) * ζ * λ + one(T) + P * exp(-τ * λ) + D * λ * exp(-τ * λ))
 end
 # 2. Hybrid Strategy Part 1: Grid sweep
@@ -75,6 +75,21 @@ if !isempty(edge2plot_xyz)
 end
 
 
+xyz_sol = getinterpolatedsolution(boundary_mdbm)
+# this is only for a fast initalization
+xy_val = getevaluatedpoints(boundary_mdbm)
+fval = getevaluatedfunctionvalues(boundary_mdbm)
+filter = fval .> 0
+
+S = [xy_val[1][filter], xy_val[2][filter]] #Stable
+U = [xy_val[1][.!filter], xy_val[2][.!filter]] # Unstable
+B = xyz_sol #Boundary points
+
+scatter!(S..., color=:green, label="S")
+scatter!(U..., color=:red, label="U")
+scatter!(B..., color=:blue, label="B")
+scatter!(B..., label="B")
+
 
 
 
@@ -120,31 +135,6 @@ scatter!(ax, [final_circle.x], [final_circle.y], color=:yellow, marker=:star5, m
 lines!(ax, pts[1], pts[2], color=:yellow, linewidth=2, label="Largest Inscribed Ellipse")
 
 display(f)
-
-
-
-
-
-
-xyz_sol = getinterpolatedsolution(boundary_mdbm)
-# this is only for a fast initalization
-xy_val = getevaluatedpoints(boundary_mdbm)
-fval = getevaluatedfunctionvalues(boundary_mdbm)
-filter = fval .> 0
-
-S = [xy_val[1][filter], xy_val[2][filter]] #Stable
-U = [xy_val[1][.!filter], xy_val[2][.!filter]] # Unstable
-B = xyz_sol #Boundary points
-
-scatter!(S..., color=:green, label="S")
-scatter!(U..., color=:red, label="U")
-scatter!(B..., color=:blue, label="B")
-scatter!(B..., label="B")
-
-
-
-
-
 
 
 

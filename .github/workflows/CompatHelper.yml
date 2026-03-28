@@ -18,7 +18,7 @@ jobs:
         run: |
           import Pkg
           name = "CompatHelper"
-          uuid = "aa819f1f-4ee6-4628-8e46-af28158c4ce6"
+          uuid = "aa819f21-2bde-4658-8897-bab36330d9b7"
           version = "3"
           Pkg.add(; name, uuid, version)
           import CompatHelper
