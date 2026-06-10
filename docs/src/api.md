@@ -21,6 +21,7 @@ calculate_unstable_roots_quadgk
 calculate_unstable_roots_quadgk_p_vec
 calculate_unstable_roots_fixed_step
 calculate_unstable_roots_fixed_step_p_vec
+refine_roots
 get_n_power_max
 ```
 

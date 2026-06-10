@@ -71,13 +71,19 @@ boundary_mdbm, p_uniq, Ncirc, mesh_points, mesh_faces, mesh_colors, edge2plot_xy
     argument_principle_solver_with_MDBM(D_4th, axlist, ω_coars)
 ```
 
-## 5. Fractional-Order Delayed Systems
-Handles non-integer powers of $\lambda$ natively via `ForwardDiff.jl`.
+## 6. Higher-Order Root Refinement
+For maximum precision near boundaries or inside stable regions, roots can be refined using polynomial or Newton-Raphson approximations.
 
 ```julia
-# D(λ) = λ^1.8 + 0.5 λ^0.8 + k exp(-λτ)
-function D_fractional(λ::T, p) where T
-    k, τ = p
-    return λ^T(1.8) + T(0.5) * λ^T(0.8) + k * exp(-λ * τ)
-end
+# Use the robust 3rd-order polynomial refinement (default)
+zi, zr, md, es, wc = calculate_unstable_roots_direct(D_4th, (1.0, 0.5), 
+    refinement_method=:Polynomial, refinement_degree=3)
+
+# Or use Newton-Raphson for machine precision
+zi, zr, md, es, wc = calculate_unstable_roots_direct(D_4th, (1.0, 0.5), 
+    refinement_method=:Newton, refinement_steps=5)
+
+# Post-processing individual root estimates
+initial_root = es + 1im * wc
+refined_root = refine_roots(D_4th, (1.0, 0.5), initial_root; method=:Newton, steps=3)
 ```
