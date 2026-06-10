@@ -53,16 +53,23 @@ Use `n_roots_to_track` to optimize:
 - 0: Max speed, only Z calculation.
 - 1: Track the closest root (default).
 - N: Track up to N local minima.
+
+Refinement options:
+- `refinement_method`: `:Polynomial` (default), `:Linear`, or `:Newton`.
+- `refinement_steps`: Number of steps for `:Newton` (default 3).
+- `refinement_degree`: Degree for `:Polynomial` (default 3).
 """
 function calculate_unstable_roots_direct(@nospecialize(D_func), p::P, σ::S=0.0; 
     n_roots_to_track=1,
     ω_max=1e6, reltol=1e-5, abstol=1e-5, solver=AutoTsit5(Rosenbrock23()), 
-    n_power_max=nothing, verbosity=0, maxiters=Int(1e6)) where {P, S}
+    n_power_max=nothing, verbosity=0, maxiters=Int(1e6),
+    refinement_method=:Polynomial, refinement_steps=3, refinement_degree=3) where {P, S}
 
     wrapped_D = (D_func isa NyquistWrapper{P}) ? D_func : NyquistWrapper{P}(D_func)
     return _calculate_unstable_roots_direct_impl(wrapped_D, p, σ, Val(n_roots_to_track); 
         ω_max=ω_max, reltol=reltol, abstol=abstol, solver=solver, 
-        n_power_max=n_power_max, verbosity=verbosity, maxiters=maxiters)
+        n_power_max=n_power_max, verbosity=verbosity, maxiters=maxiters,
+        refinement_method=refinement_method, refinement_steps=refinement_steps, refinement_degree=refinement_degree)
 end
 
 # Default for backward compatibility
@@ -74,7 +81,8 @@ end
 # Val{0}: Maximum Speed (No tracking)
 function _calculate_unstable_roots_direct_impl(D_func::NyquistWrapper{P}, p::P, σ::S, ::Val{0}; 
     ω_max=1e6, reltol=1e-5, abstol=1e-5, solver=AutoTsit5(Rosenbrock23()), 
-    n_power_max=nothing, verbosity=0, maxiters=Int(1e6)) where {P, S}
+    n_power_max=nothing, verbosity=0, maxiters=Int(1e6),
+    refinement_method=:Polynomial, refinement_steps=3, refinement_degree=3) where {P, S}
 
     function phase_ode(y, params, ω)
         pure_ω = max(ForwardDiff.value(ω), 1e-9)
@@ -106,7 +114,8 @@ end
 # Val{1}: Single Root Tracking
 function _calculate_unstable_roots_direct_impl(D_func::NyquistWrapper{P}, p::P, σ::S, ::Val{1}; 
     ω_max=1e6, reltol=1e-5, abstol=1e-5, solver=AutoTsit5(Rosenbrock23()), 
-    n_power_max=nothing, verbosity=0, maxiters=Int(1e6)) where {P, S}
+    n_power_max=nothing, verbosity=0, maxiters=Int(1e6),
+    refinement_method=:Polynomial, refinement_steps=3, refinement_degree=3) where {P, S}
 
     min_D_sq = Ref(Inf)
     root_ref = Ref(0.0 + 0.0im)
@@ -141,13 +150,20 @@ function _calculate_unstable_roots_direct_impl(D_func::NyquistWrapper{P}, p::P, 
     n_pow = n_power_max === nothing ? _get_n_power_max_impl(D_func, p, σ, ω_large=ω_max) : n_power_max
     Z_raw = -(1.0 / π) * sol.u[end][1] + n_pow / 2.0
 
-    return round(Int, Z_raw), Z_raw, sqrt(min_D_sq[]), real(root_ref[]), imag(root_ref[])
+    zi, zr, md, es, wc = round(Int, Z_raw), Z_raw, sqrt(min_D_sq[]), real(root_ref[]), imag(root_ref[])
+    
+    if refinement_method != :Linear
+        refined_root = refine_roots(D_func, p, es + 1im*wc; method=refinement_method, steps=refinement_steps, degree=refinement_degree)
+        return zi, zr, md, real(refined_root), imag(refined_root)
+    end
+    return zi, zr, md, es, wc
 end
 
 # Val{N}: Multi-Root Tracking
 function _calculate_unstable_roots_direct_impl(D_func::NyquistWrapper{P}, p::P, σ::S, ::Val{N}; 
     ω_max=1e6, reltol=1e-5, abstol=1e-5, solver=AutoTsit5(Rosenbrock23()), 
-    n_power_max=nothing, verbosity=0, maxiters=Int(1e6)) where {P, S, N}
+    n_power_max=nothing, verbosity=0, maxiters=Int(1e6),
+    refinement_method=:Polynomial, refinement_steps=3, refinement_degree=3) where {P, S, N}
 
     d_sq_vec = MVector{N, Float64}(fill(Inf, N))
     roots_vec = MVector{N, ComplexF64}(fill(NaN + NaN*im, N))
@@ -218,7 +234,14 @@ function _calculate_unstable_roots_direct_impl(D_func::NyquistWrapper{P}, p::P, 
     n_pow = n_power_max === nothing ? _get_n_power_max_impl(D_func, p, σ, ω_large=ω_max) : n_power_max
     Z_raw = -(1.0 / π) * sol.u[end][1] + n_pow / 2.0
 
-    return round(Int, Z_raw), Z_raw, sqrt.(d_sq_vec), real.(roots_vec), imag.(roots_vec)
+    zi, zr, mds, ess, wcs = round(Int, Z_raw), Z_raw, sqrt.(d_sq_vec), real.(roots_vec), imag.(roots_vec)
+    
+    if refinement_method != :Linear
+        roots = ess .+ 1im .* wcs
+        refined_roots = [refine_roots(D_func, p, r; method=refinement_method, steps=refinement_steps, degree=refinement_degree) for r in roots]
+        return zi, zr, mds, real.(refined_roots), imag.(refined_roots)
+    end
+    return zi, zr, mds, ess, wcs
 end
 
 """
@@ -229,7 +252,8 @@ Vectorized stability sweep using multi-threading.
 function calculate_unstable_roots_p_vec(@nospecialize(D_func), params_vec::AbstractVector{P}; 
     n_roots_to_track=1,
     σ::S=0.0, ω_max=1e6, reltol=1e-5, abstol=1e-5, solver=AutoTsit5(Rosenbrock23()), 
-    parameter_independent_nmax=true, verbosity=0, maxiters=Int(1e6)) where {P, S}
+    parameter_independent_nmax=true, verbosity=0, maxiters=Int(1e6),
+    refinement_method=:Polynomial, refinement_steps=3, refinement_degree=3) where {P, S}
     
     wrapped_D = (D_func isa NyquistWrapper{P}) ? D_func : NyquistWrapper{P}(D_func)
     
@@ -244,13 +268,14 @@ function calculate_unstable_roots_p_vec(@nospecialize(D_func), params_vec::Abstr
         crits = zeros(Float64, n_params)
 
         if verbosity > 0
-            println("Calculating stability over $n_params points (tracking 1 root)...")
+            println("Calculating stability over \$n_params points (tracking 1 root)...")
         end
 
         @inbounds Threads.@threads for i in 1:n_params
             zi, zr, md, es, wc = _calculate_unstable_roots_direct_impl(wrapped_D, params_vec[i], σ, Val(1); 
                 ω_max=ω_max, reltol=reltol, abstol=abstol, solver=solver, 
-                n_power_max=n_pow_fixed, verbosity=verbosity, maxiters=maxiters)
+                n_power_max=n_pow_fixed, verbosity=verbosity, maxiters=maxiters,
+                refinement_method=refinement_method, refinement_steps=refinement_steps, refinement_degree=refinement_degree)
             Z_ints[i] = zi
             Z_raws[i] = zr
             min_Ds[i] = md
@@ -263,13 +288,14 @@ function calculate_unstable_roots_p_vec(@nospecialize(D_func), params_vec::Abstr
         Z_raws = zeros(Float64, n_params)
 
         if verbosity > 0
-            println("Calculating stability over $n_params points (max speed)...")
+            println("Calculating stability over \$n_params points (max speed)...")
         end
 
         @inbounds Threads.@threads for i in 1:n_params
             zi, zr = _calculate_unstable_roots_direct_impl(wrapped_D, params_vec[i], σ, Val(0); 
                 ω_max=ω_max, reltol=reltol, abstol=abstol, solver=solver, 
-                n_power_max=n_pow_fixed, verbosity=verbosity, maxiters=maxiters)
+                n_power_max=n_pow_fixed, verbosity=verbosity, maxiters=maxiters,
+                refinement_method=refinement_method, refinement_steps=refinement_steps, refinement_degree=refinement_degree)
             Z_ints[i] = zi
             Z_raws[i] = zr
         end
@@ -282,13 +308,14 @@ function calculate_unstable_roots_p_vec(@nospecialize(D_func), params_vec::Abstr
         crits_list = [zeros(Float64, n_roots_to_track) for _ in 1:n_params]
 
         if verbosity > 0
-            println("Calculating stability over $n_params points (tracking $n_roots_to_track roots)...")
+            println("Calculating stability over \$n_params points (tracking \$n_roots_to_track roots)...")
         end
 
         @inbounds Threads.@threads for i in 1:n_params
             zi, zr, md, es, wc = _calculate_unstable_roots_direct_impl(wrapped_D, params_vec[i], σ, Val(n_roots_to_track); 
                 ω_max=ω_max, reltol=reltol, abstol=abstol, solver=solver, 
-                n_power_max=n_pow_fixed, verbosity=verbosity, maxiters=maxiters)
+                n_power_max=n_pow_fixed, verbosity=verbosity, maxiters=maxiters,
+                refinement_method=refinement_method, refinement_steps=refinement_steps, refinement_degree=refinement_degree)
             Z_ints[i] = zi
             Z_raws[i] = zr
             min_Ds_list[i] .= md
@@ -440,6 +467,131 @@ function _calculate_unstable_roots_fixed_step_impl(D_func::NyquistWrapper{P}, p:
     n_pow = n_power_max === nothing ? _get_n_power_max_impl(D_func, p, σ, ω_large=ω_max) : n_power_max
     Z_raw = -(1.0 / π) * integral + n_pow / 2.0
     return round(Int, Z_raw), Z_raw, sqrt(min_D_sq), estimated_sigma, ω_crit
+end
+
+"""
+    refine_roots(D_func, p, roots; method=:Newton, steps=3, degree=2, fix_omega=false)
+
+Refines the estimated roots using Newton-Raphson or Polynomial (Taylor) approximation.
+- `method=:Newton`: Performs `steps` iterations of Newton-Raphson.
+- `method=:Polynomial`: Approximates D by a Taylor polynomial of `degree` and finds its root.
+- `fix_omega`: If true, only the real part (sigma) is updated.
+
+Returns the refined complex roots as standard `ComplexF64` values.
+"""
+function refine_roots(@nospecialize(D_func), p::P, roots::AbstractArray; kwargs...) where P
+    return ComplexF64[refine_roots(D_func, p, r; kwargs...) for r in roots]
+end
+
+function refine_roots(@nospecialize(D_func), p::P, λ::Complex{T}; 
+    method=:Newton, steps=3, degree=2, fix_omega=false) where {P, T}
+    
+    if isnan(λ) || isinf(λ)
+        return ComplexF64(λ)
+    end
+
+    curr_λ = ComplexF64(λ)
+
+    # Helper to evaluate D and its 1st derivative efficiently without leaking Duals
+    function eval_D_and_deriv(s, w)
+        dual_s = ForwardDiff.Dual{StandardTag}(s, 1.0)
+        res = D_func(dual_s + 1im * w, p)
+        val = ComplexF64(ForwardDiff.value(real(res)), ForwardDiff.value(imag(res)))
+        deriv = ComplexF64(ForwardDiff.partials(real(res), 1), ForwardDiff.partials(imag(res), 1))
+        return val, deriv
+    end
+
+    if method == :Newton
+        for _ in 1:steps
+            val, deriv = eval_D_and_deriv(real(curr_λ), imag(curr_λ))
+            if abs(deriv) < 1e-15
+                break
+            end
+            Δλ = -val / deriv
+            if fix_omega
+                curr_λ = ComplexF64(real(curr_λ) + real(Δλ), imag(curr_λ))
+            else
+                curr_λ += Δλ
+            end
+        end
+        return curr_λ
+
+    elseif method == :Polynomial
+        if degree == 1
+            return refine_roots(D_func, p, curr_λ, method=:Newton, steps=1, fix_omega=fix_omega)
+        end
+        
+        # For polynomial > 1, we need higher derivatives. To avoid nested ForwardDiff 
+        # which is extremely slow to compile and type-infer, we use finite differences
+        # on the analytically computed first derivative.
+        val, D1 = eval_D_and_deriv(real(curr_λ), imag(curr_λ))
+        D0 = val
+        
+        h = 1e-5
+        _, D1_plus = eval_D_and_deriv(real(curr_λ) + h, imag(curr_λ))
+        _, D1_minus = eval_D_and_deriv(real(curr_λ) - h, imag(curr_λ))
+        
+        D2 = (D1_plus - D1_minus) / (2h)
+        
+        if degree == 2
+            a = 0.5 * D2
+            b = D1
+            c = D0
+            
+            if abs(a) < 1e-15
+                Δλ = -c / b
+            else
+                disc = sqrt(b^2 - 4*a*c)
+                Δλ1 = (-b + disc) / (2*a)
+                Δλ2 = (-b - disc) / (2*a)
+                Δλ = (abs(Δλ1) < abs(Δλ2)) ? Δλ1 : Δλ2
+            end
+            
+            if fix_omega
+                return ComplexF64(real(curr_λ) + real(Δλ), imag(curr_λ))
+            else
+                return curr_λ + Δλ
+            end
+            
+        elseif degree == 3
+            # 3rd derivative via finite diff on D1
+            _, D1_plus2 = eval_D_and_deriv(real(curr_λ) + 2h, imag(curr_λ))
+            _, D1_minus2 = eval_D_and_deriv(real(curr_λ) - 2h, imag(curr_λ))
+            
+            D3 = (D1_plus2 - 2*D1_plus + 2*D1_minus - D1_minus2) / (2 * h^3) # Approx, but (D1_plus - 2D1 + D1_minus)/h^2 is better
+            D3 = (D1_plus - 2*D1 + D1_minus) / (h^2)
+            
+            d = (1/6) * D3
+            a = 0.5 * D2
+            b = D1
+            c = D0
+            
+            if abs(d) < 1e-15
+                if abs(a) < 1e-15
+                    Δλ = -c/b
+                else
+                    disc = sqrt(b^2 - 4*a*c)
+                    Δλ1 = (-b + disc) / (2*a)
+                    Δλ2 = (-b - disc) / (2*a)
+                    Δλ = (abs(Δλ1) < abs(Δλ2)) ? Δλ1 : Δλ2
+                end
+            else
+                M = ComplexF64[0.0 0.0 -c/d; 1.0 0.0 -b/d; 0.0 1.0 -a/d]
+                evs = eigvals(M)
+                Δλ = evs[argmin(abs.(evs))]
+            end
+            
+            if fix_omega
+                return ComplexF64(real(curr_λ) + real(Δλ), imag(curr_λ))
+            else
+                return curr_λ + Δλ
+            end
+        else
+            error("Polynomial refinement only supported up to degree 3.")
+        end
+    else
+        error("Unknown refinement method: $method")
+    end
 end
 
 """

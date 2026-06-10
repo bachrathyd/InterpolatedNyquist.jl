@@ -9,6 +9,7 @@
 - **Standardized Parameter Handling:** Consistent with `DifferentialEquations.jl` (accepts unified parameter collection `p`).
 - **Autodiff-Enhanced:** Uses exact phase derivatives via `ForwardDiff.jl`.
 - **Stiff Integration:** Employs robust ODE solvers (like `Rosenbrock23`) to track rapid phase changes without skipping encirclements.
+- **Higher-Order Root Refinement:** Provides sub-grid precision for characteristic roots using Linear, **3rd-order Polynomial (default)**, or Newton-Raphson approximation.
 - **Hybrid Strategy:** Fast global sweeps for background mapping, high-precision MDBM for boundary tracing.
 - **Error Estimation:** Self-validating numerical integrity based on the winding number's integer requirement.
 

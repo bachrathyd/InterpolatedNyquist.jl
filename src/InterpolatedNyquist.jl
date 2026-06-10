@@ -36,6 +36,7 @@ export calculate_encirclement_number,
        calculate_unstable_roots_quadgk_p_vec,
        calculate_unstable_roots_fixed_step,
        calculate_unstable_roots_fixed_step_p_vec,
+       refine_roots,
        get_D_from_model,
        find_largest_circle,find_largest_circle_transposed,
        generate_ellipse_points,refine_circle_robust,_to_tuples
