@@ -140,10 +140,10 @@ an open-loop stable structure, lie in the left half-plane and leave the
 right-half-plane count untouched), and tends to $1$ at infinity. Then $n=0$
 \emph{exactly}, no estimate is needed, and the enormous magnitudes disappear:
 for the $29$-DOF finite element bar of Appendix~\ref{app:gallery} the raw determinant
-grows like $\lam^{58}$, reaches $10^{298}$, and leaves an integer residual of
-$0.4$ -- a rounded count barely better than a coin toss -- while the return
-difference leaves $10^{-7}$. Where the split exists, it is worth more than
-any tuning of the integrator.
+grows like $\lam^{58}$, reaches $\sim\FemRawMag$, and leaves an integer
+residual of $\FemRawResid$ -- a rounded count barely better than a coin toss
+-- while the return difference leaves $\FemRdResid$. Where the split exists,
+it is worth more than any tuning of the integrator.
 
 The second limitation is more interesting.
 Equation~\eqref{eq:npow} presumes that $\Dfun$ is polynomially bounded in
@@ -307,19 +307,21 @@ belong to the \emph{dominant} root (Section~\ref{sec:tracking}): deep inside
 an unstable domain the roots that make $\Zint>0$ may sit far to the right and
 leave no dip near the line at all, so the tracked root is a stable one and
 disagrees with $\Zint>0$ entirely legitimately. Applied blindly, the test
-therefore fires on about a third of a \emph{fully converged} chart of the
-showcase system, which would make it worthless. A peak can only be stepped
-over where a root lies close to the line, so the informative test is
+therefore fires on \CheckNaiveRef{} of the \CheckNpoints{} points of a
+\emph{fully converged} chart of the showcase system, which would make it
+worthless. A peak can only be stepped over where a root lies close to the
+line, so the informative test is
 \begin{equation}\label{eq:crosscheck}
   \operatorname{sign}(\sest-\sigma)\ \text{disagrees with}\ [\Zint=0]
   \qquad\text{and}\qquad |\sest-\sigma| < h ,
 \end{equation}
 with $h$ a small fraction of the spread of $\sest$ over the chart. With
-$h=10^{-3}$ -- two orders of magnitude below the median $|\sest|$ of the
-spurious disagreements -- the test fires on $3$ of $2000$ points of a
-converged reference chart and catches \emph{both} of the miscounts that a
-deliberately loose run produces in the only place that matters
-(Section~\ref{sec:showcase-tolerance}). That last qualification is the point:
+$h=\CheckH$ -- orders of magnitude below the median $|\sest|\approx
+\CheckMedianSigma$ of those spurious disagreements -- the test fires on only
+\CheckNearRef{} of the same \CheckNpoints{} points, and it catches
+\CheckLooseCaught{} of the \CheckLooseFlips{} miscounts that a deliberately
+loose run ($\mathrm{tol}=\CheckLooseTol$) produces in the only place that
+matters (Section~\ref{sec:showcase-tolerance}). That last qualification is the point:
 skipping one peak only ever changes $\Zint$ by one, so the stable/unstable
 classification a chart displays is affected only where the last unstable root
 crosses -- and that is precisely the regime in which $\sest$ is small and the

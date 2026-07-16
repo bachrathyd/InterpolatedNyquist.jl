@@ -16,6 +16,18 @@
   \newcommand{\CPUmodel}{[CPU]}\newcommand{\RAMgb}{[RAM]}%
   \newcommand{\NumThreads}{[N]}\newcommand{\JuliaVersion}{[ver]}%
   \newcommand{\PkgCommit}{[commit]}}
+% measured cross-check statistics (paper/scripts/studies/s02_tolerance_error.jl)
+\IfFileExists{generated/crosscheck_numbers.tex}{\input{generated/crosscheck_numbers.tex}}{%
+  \newcommand{\CheckNpoints}{[n]}\newcommand{\CheckNaiveRef}{[n]}%
+  \newcommand{\CheckNearRef}{[n]}\newcommand{\CheckMedianSigma}{[s]}%
+  \newcommand{\CheckH}{[h]}\newcommand{\CheckLooseTol}{[tol]}%
+  \newcommand{\CheckLooseFlips}{[n]}\newcommand{\CheckLooseCaught}{[n]}%
+  \newcommand{\CheckLooseWrong}{[n]}\newcommand{\CheckRefTol}{[tol]}}
+% measured FEM / determinant-lemma numbers (paper/scripts/studies/s08_gallery.jl)
+\IfFileExists{generated/fem_numbers.tex}{\input{generated/fem_numbers.tex}}{%
+  \newcommand{\FemLemmaSpeedup}{[x]}\newcommand{\FemLemmaAgree}{[e]}%
+  \newcommand{\FemRawMag}{[m]}\newcommand{\FemRawOrder}{[n]}%
+  \newcommand{\FemRawResid}{[r]}\newcommand{\FemRdResid}{[r]}}
 
 \begin{document}
 

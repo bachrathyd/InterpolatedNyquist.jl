@@ -115,6 +115,31 @@ rapidly decaying tail (Section~\ref{sec:performance-zoo}).
   \maybeinput{tables/tab_grid_timings.tex}
 \end{table}
 
+\begin{table}[tb]
+  \centering
+  \caption{The two operating points of the method on the same
+  $100\times100$ chart: the \emph{accurate} preset (the safe defaults) and
+  the \emph{fast} preset used for the exploratory charts of
+  Appendix~\ref{app:gallery}. The last column counts the points whose
+  $\Zint$ differs from a tight reference, i.e.\ the price of the fast
+  preset, which buys roughly an order of magnitude in
+  time.}\label{tab:presets}
+  \maybeinput{tables/tab_presets.tex}
+\end{table}
+
+Two operating points matter in practice, and Table~\ref{tab:presets}
+separates them because conflating them is what makes performance claims
+about stability charts unfalsifiable. With the \emph{safe} settings --
+$\wmax=10^{6}$ and $\mathrm{tol}=10^{-5}$ -- a complete $100\times100$ chart
+of a scalar characteristic function is a matter of seconds and every count
+matches a tight reference. With an \emph{exploratory} preset --
+$\wmax=10^{4}$, $\mathrm{tol}=10^{-4}$ -- the same grid resolves in a
+fraction of that, at the price of a handful of boundary-adjacent counts
+(Section~\ref{sec:showcase-tolerance}); the traced boundary, which is built
+from $\sest$ rather than from the count, is unaffected. Neither setting is
+``the'' performance of the method: the first is what to quote for a
+published chart, the second for interactive exploration.
+
 Table~\ref{tab:gridtimings} reports the cost of a \emph{complete}
 $100\times100$ chart -- ten thousand parameter points -- on a
 \CPUmodel{} (\NumThreads{} threads, \RAMgb\,GB RAM, Julia~\JuliaVersion,

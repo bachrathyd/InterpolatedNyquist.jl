@@ -165,10 +165,11 @@ The same bar discretized by 29 linear finite elements, with stiffness-
 proportional (Kelvin--Voigt) damping $\mat C=c\mat K$. The naive formulation
 is the raw determinant $\det(\lam^2\mat M+\lam\mat C+\mat K + K_p\,h^{-1}
 \ee^{-\lam\tau}\,\vect e_{29}\vect e_1^{\!\top})$ ($h$ = element length), and
-it is a poor one: it grows like $\lam^{58}$, reaches magnitudes of $10^{298}$
-before overflowing, and forces the counting formula onto an estimate of a very
-large leading order -- which leaves an integer residual near $0.4$, a rounded
-count barely better than a coin toss. Factoring out the open-loop dynamics,
+it is a poor one: it grows like $\lam^{58}$, reaches magnitudes of
+$\sim\FemRawMag$ before overflowing, and forces the counting formula onto an
+estimate of a very large leading order -- which leaves an integer residual of
+$\FemRawResid$, a rounded count barely better than a coin toss. Factoring out
+the open-loop dynamics,
 \begin{equation}\label{eq:returndiff}
   \Dfun(\lam) = \det\!\bigl(\mat I + \mat Q_0(\lam)^{-1}\mat F(\lam)\bigr),
   \qquad \mat Q_0 = \lam^2\mat M+\lam\mat C+\mat K,
@@ -177,7 +178,7 @@ where $\mat F(\lam)=K_p h^{-1}\ee^{-\lam\tau}\vect e_{29}\vect e_1^{\!\top}$
 is the (rank-one) feedback matrix, leaves the zeros untouched, adds poles
 only at the open-loop roots -- all in the left half-plane, so the
 right-half-plane count is unaffected -- and yields $\Dfun\to1$ at infinity,
-hence $n=0$ exactly and a residual of $\sim10^{-7}$. Because the feedback
+hence $n=0$ exactly and a residual of $\FemRdResid$. Because the feedback
 here is a single collocated sensor--actuator pair, $\mat F$ is rank one, and
 the matrix determinant lemma collapses~\eqref{eq:returndiff} to the classical
 scalar return difference $1+L(\lam)$ of~\eqref{eq:beam},
@@ -186,9 +187,10 @@ scalar return difference $1+L(\lam)$ of~\eqref{eq:beam},
                 \vect e_1^{\!\top}\mat Q_0(\lam)^{-1}\vect e_{29},
 \end{equation}
 which replaces a full $29\times29$ solve \emph{and} a $29\times29$
-determinant by one solve with a single right-hand side: identical to machine
-precision and $5.5$ times faster per evaluation, which is what makes this
-panel affordable at the gallery's resolution. For multi-input feedback of
+determinant by one solve with a single right-hand side: agreeing with the
+determinant form to $\FemLemmaAgree$ relative and $\FemLemmaSpeedup$ times
+faster per evaluation, which is what makes this panel affordable at the
+gallery's resolution. For multi-input feedback of
 rank $r$ the same lemma leaves an $r\times r$ determinant. This is the
 large-system economy that Section~\ref{sec:conclusion} points to, and it is
 worth more than any tuning of the integrator. One caveat is inherited from classical loop analysis: an exact

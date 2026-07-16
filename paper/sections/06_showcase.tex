@@ -216,11 +216,10 @@ error of $\pm\pi$ flips it by one -- whereas the tracked $\sest$ is a
 \emph{local} quantity read off the minimum of $|\Dfun|$, and it inherits the
 tolerance smoothly. The traced stability boundary is built from $\sest$
 alone through the objective~\eqref{eq:objective}, so it stays accurate even
-where the count does not: at $10^{-3}$ the boundary of the showcase chart
-lies within
-%%RECONCILE: quote max boundary shift from the loose-vs-reference trace
-a fraction of a pixel of the reference trace, while a handful of
-boundary-adjacent counts have already flipped. The practical recipe follows:
+where the count does not: Table~\ref{tab:tolerance} lists the counts that
+flip, while the traced boundary of the same chart stays a small fraction of
+one grid pixel away from the reference trace at every tolerance studied
+(\code{data/boundary\_shift.csv}). The practical recipe follows:
 \emph{a loose tolerance is an appropriate tool for an initial search} --
 locating the stable island, its shape, and the robust operating point --
 after which the interesting region is recomputed at the default or tighter

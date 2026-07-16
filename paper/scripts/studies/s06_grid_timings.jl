@@ -86,6 +86,50 @@ write_csv("mdbm_stats",
      "time_s", "saving_factor"], mdbm_rows)
 
 # ---------------------------------------------------------------------------
+# The paper's two operating points, measured on the SAME 100x100 chart:
+#   ACCURATE -- the safe defaults (omega_max = 1e6, tol = 1e-5): certified
+#               counts, reference-quality; the claim is "seconds".
+#   FAST     -- an exploratory preset (omega_max = 1e4, tol = 1e-4): a few
+#               boundary-adjacent counts may be off by one; the claim is
+#               "a tenth of a second at the same grid size".
+# Both are reported against the same reference count so the price of the fast
+# preset is stated, not hidden.
+# ---------------------------------------------------------------------------
+preset_rows = with_cache("s06_presets_v1_$(NGRID)") do
+    out = Tuple[]
+    for (cname, D, xr, yr, wm) in CASES
+        xv = LinRange(xr..., NGRID); yv = LinRange(yr..., NGRID)
+        params = vec([(x, y) for x in xv, y in yv])
+        Z_ref, _ = calculate_unstable_roots_p_vec(D, params; ω_max = 1e6,
+            n_roots_to_track = 0, reltol = 1e-8, abstol = 1e-8)
+        for (pname, pwm, ptol) in (("accurate", 1e6, 1e-5), ("fast", 1e4, 1e-4))
+            f = () -> calculate_unstable_roots_p_vec(D, params; ω_max = pwm,
+                reltol = ptol, abstol = ptol)
+            res = benchmark_sweep(f; repeats = FAST[] ? 2 : 5)
+            Z = f()[1]
+            push!(out, (cname, pname, pwm, ptol, length(params), res.t_med,
+                res.t_med / length(params) * 1e6, count(Z .!= Z_ref)))
+            @info "preset" cname pname chart_s = res.t_med wrong = count(Z .!= Z_ref)
+        end
+    end
+    out
+end
+write_csv("presets",
+    ["system", "preset", "wmax", "tol", "n_points", "chart_time_s",
+     "per_point_us", "n_wrong_vs_ref"], preset_rows)
+
+rows_pre = Vector{String}[]
+for (cname, pname, pwm, ptol, n, t, per_pt, nw) in preset_rows
+    push!(rows_pre, [pname == "accurate" ? cname : "", pname,
+        @sprintf("\$10^{%d}\$", round(Int, log10(pwm))),
+        @sprintf("\$10^{%d}\$", round(Int, log10(ptol))),
+        tex_time(t), @sprintf("%.0f", per_pt), string(nw)])
+end
+write_booktabs("tab_presets", "llccccc",
+    ["system", "preset", "\$\\wmax\$", "tol", "chart ($(NGRID)\$\\times\$$(NGRID))",
+     "per point [\$\\mu\$s]", "wrong \$\\Zint\$"], rows_pre)
+
+# ---------------------------------------------------------------------------
 # Cold start probes (fresh processes) -> data/ttfx.csv
 # ---------------------------------------------------------------------------
 ttfx_csv = joinpath(DATA_DIR, "ttfx.csv")

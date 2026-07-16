@@ -227,6 +227,56 @@ function gallery_panel!(fig, r, c, spec)
     return (spec.id, spec.nx * spec.ny, grid.t, bnd === nothing ? NaN : bnd.t)
 end
 
+# ---------------------------------------------------------------------------
+# FEM diagnostics quoted in the appendix: the raw determinant vs the
+# return-difference form, and the determinant-lemma speed-up. Every number the
+# appendix states about this example is measured here.
+# ---------------------------------------------------------------------------
+function D_fem_raw(λ::T, p) where T          # the naive formulation
+    Kp, τ = p
+    Q = λ^2 .* T.(M_f) .+ λ .* T.(C_f) .+ T.(K_f)
+    Q[end, 1] += Kp / T(H_FEM) * exp(-λ * τ)
+    return det(Q)
+end
+function D_fem_full(λ::T, p) where T         # return difference, full 29x29 solve
+    Kp, τ = p
+    Q0 = λ^2 .* T.(M_f) .+ λ .* T.(C_f) .+ T.(K_f)
+    F = zeros(T, size(Q0)); F[end, 1] = Kp / T(H_FEM) * exp(-λ * τ)
+    return det(one(T) * I + (Q0 \ F))
+end
+fem_diag = with_cache("s08_fem_diag_v1") do
+    p_fd = (1.0, 1.0)
+    λs = (0.3 + 2.0im, -0.1 + 15.0im, 0.05 - 40.0im)
+    agree = maximum(abs(D_fem_full(λ, p_fd) - D_fem(λ, p_fd)) /
+                    max(abs(D_fem_full(λ, p_fd)), 1e-300) for λ in λs)
+    # cost per evaluation of each form (median of repeats)
+    bench(f) = (f(λs[1], p_fd); median([(@elapsed for _ in 1:200; f(λs[1], p_fd); end) / 200
+                                        for _ in 1:5]))
+    t_full = bench(D_fem_full); t_lem = bench(D_fem)
+    # magnitude and integer residual of the RAW determinant vs the return difference
+    mag_raw = abs(D_fem_raw(1.0 + 50.0im, p_fd))
+    n_raw = get_n_power_max(D_fem_raw, p_fd)
+    n_rd  = get_n_power_max(D_fem, p_fd)
+    _, zr_raw = calculate_unstable_roots_direct(D_fem_raw, p_fd; ω_max = 200.0,
+        n_roots_to_track = 0)
+    _, zr_rd = calculate_unstable_roots_direct(D_fem, p_fd; ω_max = 200.0,
+        n_roots_to_track = 0)
+    (agree = agree, t_full = t_full, t_lem = t_lem, speedup = t_full / t_lem,
+     mag_raw = mag_raw, n_raw = n_raw, n_rd = n_rd,
+     res_raw = abs(zr_raw - round(zr_raw)), res_rd = abs(zr_rd - round(zr_rd)))
+end
+@info "FEM diagnostics" fem_diag
+write_csv("fem_diagnostics", ["key", "value"],
+    [(string(k), getfield(fem_diag, k)) for k in propertynames(fem_diag)])
+write_macros("fem_numbers", [
+    "FemLemmaSpeedup" => @sprintf("%.1f", fem_diag.speedup),
+    "FemLemmaAgree"   => tex_sci(fem_diag.agree),
+    "FemRawMag"       => @sprintf("10^{%d}", round(Int, log10(max(fem_diag.mag_raw, 1.0)))),
+    "FemRawOrder"     => @sprintf("%.1f", fem_diag.n_raw),
+    "FemRawResid"     => @sprintf("%.2f", fem_diag.res_raw),
+    "FemRdResid"      => tex_sci(fem_diag.res_rd),
+])
+
 timings = Tuple[]
 const N_A = 6           # first figure holds the first six panels
 figa = Figure(size = (W_FULL, W_FULL * 0.60))

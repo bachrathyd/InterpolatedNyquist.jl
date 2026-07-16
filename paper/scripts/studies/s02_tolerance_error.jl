@@ -84,11 +84,61 @@ write_csv("crosscheck",
 @info "cross-check" naive_on_reference = count(naive_flag(ref_g)) near_on_reference =
     count(near_flag(ref_g)) median_abs_sigma_of_naive_flags = ref_med
 
+# Numbers quoted in Sections 3.4 and 6.3 -> TeX macros, so the prose can never
+# drift from the measurement.
+loose_i = 1                       # the loosest tolerance of the ladder
+loose_flips = check_rows[loose_i][4]
+loose_caught = check_rows[loose_i][5]
+write_macros("crosscheck_numbers", [
+    "CheckNpoints"     => string(nP * nD),
+    "CheckNaiveRef"    => string(count(naive_flag(ref_g))),
+    "CheckNearRef"     => string(count(near_flag(ref_g))),
+    "CheckMedianSigma" => @sprintf("%.2g", ref_med),
+    "CheckH"           => @sprintf("%g", CHECK_H),
+    "CheckLooseTol"    => @sprintf("10^{%d}", round(Int, log10(TOLS[loose_i]))),
+    "CheckLooseFlips"  => string(loose_flips),
+    "CheckLooseCaught" => string(loose_caught),
+    "CheckLooseWrong"  => string(n_wrong[loose_i]),
+    "CheckRefTol"      => @sprintf("10^{%d}", round(Int, log10(TOLS[end]))),
+])
+
 # Boundary (traced once, high accuracy) overlaid on every panel
 bnd = with_cache("s02_mdbm_ref_v3") do
     mdbm_boundary(D_TOL, SHOWCASE_PRANGE, SHOWCASE_DRANGE;
         ngrid = 30, Niter = 4, ω_max = WMAX_TOL, reltol = 1e-8, abstol = 1e-8)
 end
+
+# ---------------------------------------------------------------------------
+# Does a LOOSE tolerance move the traced BOUNDARY, or only the counts?
+# The two outputs fail differently: Z is rounded, so it flips discontinuously
+# once the phase error reaches ±π, whereas sigma_est is a local quantity that
+# inherits the tolerance smoothly -- and the boundary is built from sigma_est
+# alone. Measure the displacement (one-sided Hausdorff, in parameter units)
+# of loose traces against the reference trace above.
+# ---------------------------------------------------------------------------
+bnd_loose = [with_cache("s02_mdbm_tol$(tol)_v1") do
+        mdbm_boundary(D_TOL, SHOWCASE_PRANGE, SHOWCASE_DRANGE;
+            ngrid = 30, Niter = 4, ω_max = WMAX_TOL, reltol = tol, abstol = tol)
+    end for tol in TOLS]
+ref_pts = let s = getinterpolatedsolution(bnd.prob)
+    [(s[1][i], s[2][i]) for i in eachindex(s[1])]
+end
+function boundary_shift(prob)
+    s = getinterpolatedsolution(prob)
+    pts = [(s[1][i], s[2][i]) for i in eachindex(s[1])]
+    isempty(pts) && return (NaN, NaN)
+    d = [minimum(hypot(p[1] - q[1], p[2] - q[2]) for q in ref_pts) for p in pts]
+    return (maximum(d), mean(d))
+end
+pix = max(step(Pv), step(Dv))     # one chart pixel, for scale
+shift_rows = Tuple[]
+for (i, tol) in enumerate(TOLS)
+    mx, mn = boundary_shift(bnd_loose[i].prob)
+    push!(shift_rows, (tol, mx, mn, mx / pix, pix))
+    @info "boundary shift vs 1e-8 trace" tol max_shift = mx max_in_pixels = mx / pix
+end
+write_csv("boundary_shift",
+    ["tol", "max_shift", "mean_shift", "max_shift_in_pixels", "pixel_size"], shift_rows)
 
 # ---------------------------------------------------------------------------
 # Figure 1: the four charts with CPU times
