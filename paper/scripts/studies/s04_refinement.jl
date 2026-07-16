@@ -78,6 +78,10 @@ axr = MAxis(fig[1:2, 1], xlabel = "Re λ", ylabel = "Im λ",
     title = "(a) dominant root, zoom ±$(round(pad; sigdigits=2))")
 contour!(axr, σs, ωs, ReD; levels = [0.0], color = Makie.wong_colors()[1])
 contour!(axr, σs, ωs, ImD; levels = [0.0], color = Makie.wong_colors()[2])
+# legend proxies for the two zero-level curves: a characteristic root is
+# exactly where Re D = 0 and Im D = 0 intersect
+lines!(axr, [NaN], [NaN]; color = Makie.wong_colors()[1], label = "Re D(λ) = 0")
+lines!(axr, [NaN], [NaN]; color = Makie.wong_colors()[2], label = "Im D(λ) = 0")
 scatter!(axr, [real(seeds_zoom[k_dom])], [imag(seeds_zoom[k_dom])];
     color = :black, marker = :cross, markersize = 13, label = "integrator seed")
 scatter!(axr, [real(ref_zoom[k_dom])], [imag(ref_zoom[k_dom])];

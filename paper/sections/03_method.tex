@@ -53,9 +53,11 @@ truncated tail shifts $\Zraw$ away from an integer
 decay of the delay-induced phase ripple: if the delayed terms sit at least
 two orders below the leading power of $\Dfun$ -- as for delayed
 \emph{position} feedback on mechanical systems -- the ripple decays at least
-like $\omega^{-2}$, and the march from $\omega=10^{2}$ to $\wmax=10^{6}$ or
-even $10^{10}$ costs only a handful of accepted steps (measured numbers in
-Section~\ref{sec:performance-zoo}). One caution applies to those giant
+like $\omega^{-2}$, and pushing $\wmax$ far beyond the resonances is
+essentially free: for the fourth-order benchmark the march costs $1426$,
+$1474$ and $1506$ evaluations of $\Dfun$ at $\wmax=10^{6}$, $10^{8}$ and
+$10^{10}$ respectively -- four extra decades of frequency for six percent
+more work, with $\Zraw$ unchanged to seven digits. One caution applies to those giant
 steps: an adaptive error estimator only \emph{samples} the local error, so a
 step that grows to many ripple periods can in principle alias a slowly
 decaying oscillation; in practice the embedded error estimate of a
@@ -255,12 +257,14 @@ scales essentially linearly with the requested tolerance -- amplified by
 the accepted-step count, since the per-step error tolerance accumulates
 along the march -- hence the tolerance acts as a universal accuracy dial
 that transfers between systems without re-tuning. In the numerical
-experiments of Section~\ref{sec:showcase-tolerance}, $\varepsilon$ stays
-at least an order of magnitude below the rounding threshold $1/2$ even at
-the loosest setting: $10^{-4}$ produces reliable charts at maximal speed
-and $10^{-8}$ yields reference-quality values at a moderate CPU-time
-premium (Fig.~\ref{fig:tolerance}); the package default $10^{-5}$ is a
-robust compromise between the two.
+experiments of Section~\ref{sec:showcase-tolerance}, $\varepsilon$ tracks
+the tolerance across six decades: at $10^{-2}$ the residual reaches order
+one and genuine miscounts appear -- the deliberate failure demonstration of
+Fig.~\ref{fig:errorfield} -- while $10^{-4}$ already keeps $\varepsilon$ an
+order of magnitude below the rounding threshold $1/2$ and produces reliable
+charts at near-maximal speed, and $10^{-8}$ yields reference-quality values
+at a moderate CPU-time premium; the package default $10^{-5}$ adds a further
+safety decade at little cost.
 
 One caveat is inherited from the argument principle itself and deserves to
 be stated sharply, because it bounds what $\varepsilon$ can certify. A march
@@ -284,24 +288,45 @@ and it remains accurate exactly where the peak is narrow -- that is, exactly
 where the count is fragile. The two therefore cross-validate each other: a
 skipped peak shows up as an \emph{inconsistency} between $\operatorname{sign}
 (\sest-\sigma)$ and the predicate $\Zint=0$; both quantities are standard
-outputs of every sweep, so the check costs one comparison, and it is the
-practical safeguard we recommend. Note also that skipping one peak
-only ever changes $\Zint$ by one, so the stable/unstable classification that
-a chart displays is affected only where the last unstable root crosses --
-precisely the case the sign test catches.
+outputs of every sweep, so the check costs one comparison.
+
+The test must, however, be restricted to a neighbourhood of the line, and the
+reason is instructive. Far from the boundary the tracked minimum need not
+belong to the \emph{dominant} root (Section~\ref{sec:tracking}): deep inside
+an unstable domain the roots that make $\Zint>0$ may sit far to the right and
+leave no dip near the line at all, so the tracked root is a stable one and
+disagrees with $\Zint>0$ entirely legitimately. Applied blindly, the test
+therefore fires on about a third of a \emph{fully converged} chart of the
+showcase system, which would make it worthless. A peak can only be stepped
+over where a root lies close to the line, so the informative test is
+\begin{equation}\label{eq:crosscheck}
+  \operatorname{sign}(\sest-\sigma)\ \text{disagrees with}\ [\Zint=0]
+  \qquad\text{and}\qquad |\sest-\sigma| < h ,
+\end{equation}
+with $h$ a small fraction of the spread of $\sest$ over the chart. With
+$h=10^{-3}$ -- two orders of magnitude below the median $|\sest|$ of the
+spurious disagreements -- the test fires on $3$ of $2000$ points of a
+converged reference chart and catches \emph{both} of the miscounts that a
+deliberately loose run produces in the only place that matters
+(Section~\ref{sec:showcase-tolerance}). That last qualification is the point:
+skipping one peak only ever changes $\Zint$ by one, so the stable/unstable
+classification a chart displays is affected only where the last unstable root
+crosses -- and that is precisely the regime in which $\sest$ is small and the
+test is sharp.
 
 \subsection{Alternative integrators within the same framework}\label{sec:alternatives}
 
 The phase integrand~\eqref{eq:integrand} can also be fed to classical
 adaptive quadrature; the package provides a Gauss--Kronrod back-end
 (\pkg{QuadGK.jl}~\cite{johnson2013quadgk}) with the identical interface.
-For the root count alone it is fully competitive -- within a factor of two of
-the march in evaluations, and up to two orders of magnitude cheaper when the
-phase ripple decays quickly, because a quadrature rule can recognize a
-negligible tail and stop where a march must still walk to $\wmax$
-(Table~\ref{tab:evals}) -- and close to a stability boundary it is the more
-dependable of the two (Section~\ref{sec:performance-convergence}). It is the
-better choice whenever only $\Zint$ is wanted. The decisive difference concerns the rightmost root.
+For the root count alone it is fully competitive: it stays within a factor of
+about three of the march in evaluations either way -- cheaper when the phase
+ripple decays quickly, because a quadrature rule can recognize a negligible
+tail and stop where a march must still walk to $\wmax$, dearer when the
+ripple persists (Table~\ref{tab:evals}) -- and close to a stability boundary
+it is the more dependable of the two
+(Section~\ref{sec:performance-convergence}). It is a reasonable choice
+whenever only $\Zint$ is wanted. The decisive difference concerns the rightmost root.
 Adaptive quadrature subdivides its interval recursively and therefore visits
 the frequencies in an essentially arbitrary order: there is no sweep along
 which a local minimum of $|\Dfun|^{2}$ could be recognized, and the

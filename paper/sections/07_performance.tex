@@ -91,8 +91,11 @@ no more than that strip's width, here $\sim10^{-8}$ in the gain, far below
 the plotting resolution of any chart. Third, where the count
 itself matters the tracked root settles the question: at $\Delta P=10^{-8}$
 it still reports $\sest=+6.6\cdot10^{-10}$, correctly placing a root to the
-right of the axis, so the sign test of Section~\ref{sec:integerness} exposes
-the inconsistency for free. Since that test is available only from the
+right of the axis, so the neighbourhood-restricted sign
+test~\eqref{eq:crosscheck} exposes the inconsistency for free -- and this is
+not a hypothetical safeguard: on the tolerance study of
+Section~\ref{sec:showcase-tolerance} it catches every miscount that flips the
+stable/unstable classification. Since that test is available only from the
 ordered march, the march remains the default; quadrature is the better
 choice when only $\Zint$ is wanted and the characteristic function has a
 rapidly decaying tail (Section~\ref{sec:performance-zoo}).
@@ -230,27 +233,34 @@ boundary, and the dominant root on demand -- at interactive speed.
   \maybeinput{tables/tab_evals.tex}
 \end{table}
 
-Table~\ref{tab:evals} isolates what actually drives the cost, and corrects an
-impression the previous paragraphs might leave. The decisive quantity is not
-the back-end but the decay rate of the phase ripple, which is set by how far
-the delayed terms sit below the leading power of $\Dfun$. Where the ripple
-decays fast -- delayed \emph{position} feedback, $\theta'\sim\omega^{-3}$ --
-quadrature recognizes a negligible tail panel by panel and stops after a few
-dozen evaluations even for $\wmax=10^{6}$, an order of magnitude below what
-the march spends walking there. (One implementation detail matters for
-honesty here: the quadrature is seeded with logarithmically spaced interior
-breakpoints, one per two frequency decades. Without them its \emph{first}
-panel spans the whole window, the lowest node lands above the entire
-resonance region, and the fast-decaying tail looks converged after a single
-panel -- returning $\Zraw=n/2$ with a \emph{perfect} integer residual, a
-silently wrong count that the self-diagnostic cannot flag. The breakpoints
-cost a few dozen extra evaluations and remove the failure mode.) Where the
+Table~\ref{tab:evals} isolates what actually drives the cost, and the
+numbers are more sobering than the folklore on either side. The decisive
+quantity is not the back-end but the decay rate of the phase ripple, which
+is set by how far the delayed terms sit below the leading power of $\Dfun$.
+Where the ripple decays fast -- delayed \emph{position} feedback,
+$\theta'\sim\omega^{-3}$ -- quadrature recognizes the negligible tail panel
+by panel and finishes in roughly $570$ evaluations even for $\wmax=10^{6}$,
+about $2.5$ times fewer than the march spends walking there. Where the
 ripple decays slowly -- delayed \emph{velocity} feedback,
-$\theta'\sim\omega^{-1}$ -- both back-ends must resolve the whole range and
-land within a factor of two of each other. Neither back-end is ever an order
-of magnitude worse than the other on the count at the production setting
-$\wmax=10^{4}$. The lesson for a user is to spend attention on $\wmax$ and on
-the structure of the feedback, not on the choice of integrator.
+$\theta'\sim\omega^{-1}$ -- the ranking reverses: both back-ends must
+resolve the whole range, and the march is then some three times
+\emph{cheaper} than the quadrature. So neither back-end dominates; they stay
+within a factor of about three of each other in both directions, and the
+lesson for a user is to spend attention on $\wmax$ and on the structure of
+the feedback, not on the choice of integrator.
+
+One implementation detail underpins those quadrature numbers and is worth
+stating, because it is a trap rather than a tuning knob: the Gauss--Kronrod
+back-end is seeded with logarithmically spaced interior breakpoints, one per
+two frequency decades. Without them the \emph{first} $G_7$--$K_{15}$ panel
+spans the entire window $[0,\wmax]$, its lowest node lands at
+$\omega\approx0.004\,\wmax$ -- above the whole resonance region for
+$\wmax=10^{6}$ -- and the smooth, fast-decaying tail then passes the error
+test after fifteen evaluations. The routine returns $\Zraw=n/2$ having never
+seen a single root, with an integer residual of \emph{exactly} zero: the
+self-diagnostic of Section~\ref{sec:integerness} cannot flag it, because
+nothing about the quadrature failed. The breakpoints cost a few dozen extra
+evaluations and remove the failure mode entirely.
 
 Figure~\ref{fig:zoo} extends the comparison to a wider selection of ODE
 solvers on the fourth-order benchmark system. The qualitative picture is

@@ -114,22 +114,31 @@ end
 # Panel specifications
 # ---------------------------------------------------------------------------
 half(n) = FAST[] ? max(12, n ÷ 2) : n
+# Gallery A (first six panels): fine BF background (doubled), coarse MDBM
+# initial mesh (halved) with 5 refinement levels, so the traced boundary has
+# an equivalent per-axis resolution ~3-4x the BF grid while the blanket
+# initial sampling stays cheap (13^2 = 169 points instead of 25^2 = 625).
 SPECS = [
     (id = "fourth",  D = D_fourth,     xl = "P",  yl = "D",  xr = (-2.0, 4.0), yr = (-2.0, 5.0),
-     nx = half(80), ny = half(60), ω = 1e6, tol = 1e-5, mdbm = 25, title = "4th-order + delayed PD"),
+     nx = half(160), ny = half(120), ω = 1e6, tol = 1e-5, mdbm = 13, mit = 5,
+     title = "4th-order + delayed PD"),
     (id = "algebraic", D = D_algebraic, xl = "a", yl = "b", xr = (-1.0, 1.0), yr = (-1.0, 1.0),
-     nx = half(60), ny = half(50), ω = 1e6, tol = 1e-5, mdbm = 25, title = "delayed oscillator"),
+     nx = half(120), ny = half(100), ω = 1e6, tol = 1e-5, mdbm = 12, mit = 5,
+     title = "delayed oscillator"),
     (id = "distributed", D = D_distributed, xl = "a", yl = "b", xr = (0.0, 2.0), yr = (-1.0, 5.0),
-     nx = half(60), ny = half(50), ω = 1e6, tol = 1e-5, mdbm = 25, title = "distributed delay"),
+     nx = half(120), ny = half(100), ω = 1e6, tol = 1e-5, mdbm = 12, mit = 5,
+     title = "distributed delay"),
     # NOTE: neutral integrands oscillate persistently up to infinite frequency,
     # so the truncation must stay moderate; the tail error is bounded by
     # asin(|a|)/pi < 1/2, hence the rounded count remains correct.
     (id = "neutral", D = D_neutral, xl = "a", yl = "c", xr = (-0.9, 0.9), yr = (-2.0, 2.0),
-     nx = half(60), ny = half(50), ω = 200.0, tol = 1e-4, mdbm = 20, title = "neutral DDE"),
+     nx = half(120), ny = half(100), ω = 200.0, tol = 1e-4, mdbm = 12, mit = 5,
+     title = "neutral DDE"),
     (id = "neutral_hg", D = D_neutral_hg, xl = "a", yl = "c", xr = (-0.95, 0.95), yr = (-10.0, 10.0),
-     nx = half(60), ny = half(50), ω = 200.0, tol = 1e-4, mdbm = 20, title = "high-gain neutral DDE"),
+     nx = half(120), ny = half(100), ω = 200.0, tol = 1e-4, mdbm = 12, mit = 5,
+     title = "high-gain neutral DDE"),
     (id = "pda", D = D_pda, xl = "P", yl = "A", xr = (-1.5, 2.5), yr = (-1.6, 1.6),
-     nx = half(70), ny = half(70), ω = 500.0, tol = 1e-4, mdbm = 25, cap = 10.0,
+     nx = half(140), ny = half(140), ω = 500.0, tol = 1e-4, mdbm = 13, mit = 5, cap = 10.0,
      hlines = [-1.0, 1.0], title = "PDA control (neutral, essential)"),
     # w starts slightly above 0: at w = 0 the rational D is constant (no roots)
     (id = "turning", D = D_turning, xl = "Ω", yl = "w", xr = (0.08, 1.2), yr = (0.01, 1.2),
@@ -151,6 +160,7 @@ SPECS = [
 
 getcap(s) = hasproperty(s, :cap) ? s.cap : nothing
 gethl(s) = hasproperty(s, :hlines) ? s.hlines : nothing
+getmit(s) = hasproperty(s, :mit) ? s.mit : 4      # MDBM refinement levels
 
 function gallery_panel!(fig, r, c, spec)
     xv = LinRange(spec.xr..., spec.nx)
@@ -158,13 +168,14 @@ function gallery_panel!(fig, r, c, spec)
     # the cache key hashes every numeric knob of the spec, so editing a
     # panel's ranges / ω_max / tolerance can never silently reuse a stale
     # grid computed for different axes (the classic stale-figure trap)
-    skey = string(hash((spec.xr, spec.yr, spec.ω, spec.tol, spec.mdbm)); base = 16)
+    skey = string(hash((spec.xr, spec.yr, spec.ω, spec.tol, spec.mdbm, getmit(spec))); base = 16)
     grid = with_cache("s08_$(spec.id)_$(skey)_$(spec.nx)x$(spec.ny)") do
         sweep_grid(spec.D, xv, yv; ω_max = spec.ω, reltol = spec.tol, abstol = spec.tol)
     end
     bnd = spec.mdbm > 0 ? with_cache("s08_$(spec.id)_$(skey)_mdbm") do
             mdbm_boundary(spec.D, spec.xr, spec.yr; ngrid = spec.mdbm,
-                Niter = FAST[] ? 3 : 4, ω_max = spec.ω, reltol = spec.tol, abstol = spec.tol)
+                Niter = FAST[] ? max(2, getmit(spec) - 2) : getmit(spec),
+                ω_max = spec.ω, reltol = spec.tol, abstol = spec.tol)
         end : nothing
     C = combined_metric(grid.Z, grid.sigma)
     cap = getcap(spec)

@@ -10,7 +10,13 @@ include(joinpath(@__DIR__, "systems.jl"))
 nP, nD = FAST[] ? (50, 40) : (100, 80)
 Pv = LinRange(SHOWCASE_PRANGE..., nP)
 Dv = LinRange(SHOWCASE_DRANGE..., nD)
-TOLS = [1e-3, 1e-5, 1e-7, 1e-9]
+# The ladder deliberately starts at 1e-2, where eps ~ 100*tol predicts
+# residuals of order ONE, i.e. genuine miscounts: the first panel shows what
+# breaking the rule of thumb looks like, the rest how quickly certainty is
+# bought back. (Note: the COUNT is never refined -- the Newton polish of
+# Section 3.3 only touches the root estimate sigma_est, so the residual and
+# wrong-Z columns measure the integrator alone.)
+TOLS = [1e-2, 1e-4, 1e-6, 1e-8]
 
 # This study isolates the INTEGRATOR, so two deliberate choices:
 #
@@ -28,9 +34,8 @@ TOLS = [1e-3, 1e-5, 1e-7, 1e-9]
 const WMAX_TOL = 1e6
 const D_TOL = D_showcase_reduced
 
-# cache v3: v2 predates the D_TOL switch (its cached timings measured the
-# 15x-costlier extracted form and are not comparable)
-tol_grids = with_cache("s02_grids_v3_$(nP)x$(nD)") do
+# cache v4: v3 used the 1e-3..1e-9 ladder
+tol_grids = with_cache("s02_grids_v4_$(nP)x$(nD)") do
     map(TOLS) do tol
         g = sweep_grid(D_TOL, Pv, Dv; ω_max = WMAX_TOL, reltol = tol, abstol = tol)
         @info "tolerance grid done" tol t = g.t
@@ -40,11 +45,44 @@ end
 
 errs = [abs.(g.Z_raw .- round.(g.Z_raw)) for g in tol_grids]
 
-# The tightest-tolerance grid (1e-9) serves as the count reference: the
+# The tightest-tolerance grid (1e-8) serves as the count reference: the
 # "wrong Z" column then reports ACTUAL misclassifications of each looser
 # chart, not merely points whose rounding is uncertain.
 Z_ref_grid = tol_grids[end].Z
 n_wrong = [count(g.Z .!= Z_ref_grid) for g in tol_grids]
+# ... and of those, the ones that flip the stable/unstable map (the errors a
+# stability chart actually shows):
+n_flip = [count((g.Z .== 0) .!= (Z_ref_grid .== 0)) for g in tol_grids]
+
+# ---------------------------------------------------------------------------
+# The sigma-vs-Z cross-check (Section 3.4), MEASURED rather than asserted.
+#
+# The naive test sign(sigma_est) != (Z == 0) is useless on its own: far from
+# the boundary the tracked |D| minimum need not belong to the DOMINANT root
+# (the caveat of Sec. 3.2), so a disagreement there is legitimate and the
+# test fires on ~30% of a fully converged chart. A peak can only be skipped
+# where a root lies CLOSE to the line, so the test is restricted to a
+# neighbourhood |sigma_est| < CHECK_H -- orders of magnitude below the
+# typical |sigma_est| of the deep domain, quantified by ref_med below.
+const CHECK_H = 1e-3
+naive_flag(g) = [(g.sigma[i] < 0) != (g.Z[i] == 0) for i in eachindex(g.Z)]
+near_flag(g) = [((g.sigma[i] < 0) != (g.Z[i] == 0)) && abs(g.sigma[i]) < CHECK_H
+                for i in eachindex(g.Z)]
+ref_g = tol_grids[end]
+ref_med = median(abs.(ref_g.sigma[naive_flag(ref_g)]))
+check_rows = Tuple[]
+for (i, tol) in enumerate(TOLS)
+    g = tol_grids[i]
+    flips = findall((g.Z .== 0) .!= (Z_ref_grid .== 0))
+    nf = near_flag(g)
+    push!(check_rows, (tol, count(naive_flag(g)), count(nf), length(flips),
+        count(nf[flips]), nP * nD))
+end
+write_csv("crosscheck",
+    ["tol", "naive_flags", "near_flags", "n_flips", "flips_caught", "n_points"],
+    check_rows)
+@info "cross-check" naive_on_reference = count(naive_flag(ref_g)) near_on_reference =
+    count(near_flag(ref_g)) median_abs_sigma_of_naive_flags = ref_med
 
 # Boundary (traced once, high accuracy) overlaid on every panel
 bnd = with_cache("s02_mdbm_ref_v3") do
@@ -100,19 +138,20 @@ for (i, tol) in enumerate(TOLS)
     e = errs[i]
     n_uncertain = count(>=(0.25), e)   # points where the rounded count would be uncertain
     push!(rows_csv, (tol, g.t, mean(e), median(e), maximum(e),
-        mean(e) / tol, maximum(e) / tol, n_uncertain, n_wrong[i], nP * nD))
+        mean(e) / tol, maximum(e) / tol, n_uncertain, n_wrong[i], n_flip[i], nP * nD))
     push!(rows_tex, ["\$10^{$(round(Int, log10(tol)))}\$", tex_time(g.t),
         tex_sci(mean(e)), tex_sci(maximum(e)),
         @sprintf("%.0f", mean(e) / tol), @sprintf("%.0f", maximum(e) / tol),
-        string(n_uncertain), string(n_wrong[i])])
+        string(n_uncertain), string(n_wrong[i]), string(n_flip[i])])
 end
 write_csv("tolerance_study",
     ["tol", "grid_time_s", "mean_err", "median_err", "max_err",
-     "mean_over_tol", "max_over_tol", "n_uncertain", "n_wrong_vs_ref", "n_points"],
+     "mean_over_tol", "max_over_tol", "n_uncertain", "n_wrong_vs_ref",
+     "n_flip_vs_ref", "n_points"],
     rows_csv)
-write_booktabs("tab_tolerance", "lccccccc",
+write_booktabs("tab_tolerance", "lcccccccc",
     ["tolerance", "CPU time", "mean \$\\varepsilon\$", "max \$\\varepsilon\$",
-     "mean/tol", "max/tol", "uncertain", "wrong \$Z\$"],
+     "mean/tol", "max/tol", "uncertain", "wrong \$\\Zint\$", "flips"],
     rows_tex)
 
 @info "100*tol rule check" mean_ratios = [r[6] for r in rows_csv] max_ratios = [r[7] for r in rows_csv]

@@ -119,11 +119,15 @@ integer-residual diagnostic below.
   \centering
   \maybefig{fig_tolerance_charts}{\linewidth}
   \caption{The showcase chart computed with solver tolerances
-  $10^{-3}$, $10^{-5}$, $10^{-7}$ and $10^{-9}$ (left to right); the
-  wall-clock time of each full sweep is given in the panel titles. The chart
-  is visually converged already at $10^{-3}$: the tolerance buys certainty
-  rather than appearance, cf.\ Fig.~\ref{fig:errorfield} and
-  Table~\ref{tab:tolerance}. To isolate the integrator, this study uses
+  $10^{-2}$, $10^{-4}$, $10^{-6}$ and $10^{-8}$ (left to right); the
+  wall-clock time of each full sweep is given in the panel titles. The charts
+  are visually near-identical even at $10^{-2}$, where the count is already
+  uncertain: the tolerance buys certainty rather than appearance, cf.\
+  Fig.~\ref{fig:errorfield} and Table~\ref{tab:tolerance}. (The count
+  $\Zint$ is never refined -- the Newton polish of
+  Section~\ref{sec:refinement} only touches the root estimate $\sest$ that
+  colours the stable interior -- so the residuals and miscount columns
+  measure the integrator alone.) To isolate the integrator, this study uses
   $\wmax=10^{6}$ (rather than the $10^{4}$ that suffices for the chart) so
   that the truncated tail does not mask the two tightest tolerances, and
   evaluates the reduced form~\eqref{eq:showcasered} of the same
@@ -150,20 +154,37 @@ integer-residual diagnostic below.
   \caption{Tolerance study on the showcase system
   (grid as in Fig.~\ref{fig:tolerance}): sweep time, integer residual
   statistics, the number of grid points where the rounded count would be
-  ambiguous ($\varepsilon\ge1/4$), and the number of points whose $\Zint$
-  actually deviates from the $10^{-9}$-tolerance
-  reference.}\label{tab:tolerance}
+  ambiguous ($\varepsilon\ge1/4$), the number whose $\Zint$ actually deviates
+  from the $10^{-8}$-tolerance reference, and the subset of those that flip
+  the stable/unstable classification. The ``uncertain'' and ``wrong'' columns
+  measure genuinely different things: a skipped peak shifts $\Zraw$ by
+  exactly one and leaves it just as close to an integer, so a point can be
+  wrong while looking certain -- which is precisely why the
+  cross-check~\eqref{eq:crosscheck} is needed.}\label{tab:tolerance}
   \maybeinput{tables/tab_tolerance.tex}
 \end{table}
 
 Figure~\ref{fig:tolerance} shows the identical chart computed with
-tolerances $10^{-3}$, $10^{-5}$, $10^{-7}$ and $10^{-9}$, together with the
+tolerances $10^{-2}$, $10^{-4}$, $10^{-6}$ and $10^{-8}$, together with the
 measured sweep times, and Fig.~\ref{fig:errorfield} shows the corresponding
-integer-residual fields~\eqref{eq:eps}. Three observations matter for
-practice. First, the charts are visually indistinguishable: the tolerance
-buys \emph{certainty}, not appearance, and even at the loosest setting not a
-single grid point deviates from the $10^{-9}$ reference count
-(Table~\ref{tab:tolerance}, last column).
+integer-residual fields~\eqref{eq:eps}. The ladder deliberately starts \emph{beyond} the safe range: at $10^{-2}$ the
+rule of thumb~\eqref{eq:rule} predicts residuals of order one, i.e.\ genuine
+miscounts. Three observations matter for practice. First, the tolerance buys
+\emph{certainty}, not appearance. The panels are visually near-identical, yet
+the loosest settings do miscount: measured against the $10^{-8}$ reference,
+the number of deviating grid points falls steeply with the tolerance
+(Table~\ref{tab:tolerance}, last two columns), and this is worth spelling out
+because it is the one error the diagnostic of Section~\ref{sec:integerness}
+cannot report. Every deviation is exactly $\pm1$, and the corresponding
+integer residual stays far below the rounding threshold $1/2$ -- the affected
+points look perfectly converged. They are skipped peaks, and they are the
+practical face of the caveat that Section~\ref{sec:integerness} states in
+principle: at the loosest setting the residual field of
+Fig.~\ref{fig:errorfield} is uniformly healthy while a handful of pixels are
+nevertheless wrong. What does report them is the
+cross-check~\eqref{eq:crosscheck}: of the miscounts that flip the
+stable/unstable classification -- the only ones a stability chart displays --
+it catches all, at the price of a few flagged pixels on a converged chart.
 Second -- and this is the most useful outcome for a user -- the integer
 residual tracks the requested tolerance across the whole parameter plane
 with a roughly constant factor, so that
@@ -198,8 +219,10 @@ same number, the diagnostic tells the user which dial to turn next.
   \centering
   \maybefig{fig_refinement}{\linewidth}
   \caption{Rightmost-root accuracy. (a)~Zoom on the dominant root at one
-  parameter point: zero-level curves of $\Real\Dfun$ (blue) and
-  $\Imag\Dfun$ (orange), whose intersection is the root; cross: raw tracked
+  parameter point. The two curves are the zero-level sets
+  $\Real\Dfun(\lam)=0$ (blue) and $\Imag\Dfun(\lam)=0$ (orange) in the
+  complex $\lam$-plane: a characteristic root satisfies both conditions
+  simultaneously, i.e.\ it is exactly their intersection. Cross: raw tracked
   estimate $(\sest,\west)$; red dot: the refined root; diamond: reference.
   (b--e)~Error maps $\log_{10}|\lam-\lam_{\mathrm{ref}}|$ of the refinement
   variants over the chart plane. Titles quote the cost \emph{per parameter

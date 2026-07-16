@@ -49,7 +49,7 @@ end
 @assert z_check == Z_EXACT "independent semi-discretization count is $(z_check), expected $(Z_EXACT)"
 @info "Z_EXACT verified by semi-discretization (dense eig, n=120, order 2)" z_check
 
-TOLS = 10.0 .^ (-3:-1.0:-10)
+TOLS = 10.0 .^ (-2:-1.0:-10)   # starts in the order-one-error regime on purpose
 METHODS = [
     ("Vern9 (default)", tol -> calculate_unstable_roots_direct(D_showcase, p_conv;
         n_roots_to_track = 0, ω_max = WMAX_CONV, reltol = tol, abstol = tol,
@@ -74,7 +74,7 @@ METHODS = [
 # which is itself the relevant information.
 const T_CAP = 20.0
 
-data = with_cache("s03_convergence_v3") do
+data = with_cache("s03_convergence_v4") do
     out = Dict{String, Vector{Tuple{Float64, Float64, Float64}}}()
     for (name, runner) in METHODS
         rows = Tuple{Float64, Float64, Float64}[]
@@ -165,7 +165,7 @@ for (name, _) in METHODS, (tol, err, t) in data[name]
 end
 write_csv("convergence", ["method", "tol", "err", "time_s"], rows_csv)
 
-sel_tols = [1e-3, 1e-5, 1e-7, 1e-9]
+sel_tols = [1e-2, 1e-4, 1e-6, 1e-8]   # same ladder as the tolerance study (s02)
 rows_tex = Vector{String}[]
 for tol in sel_tols
     row = ["\$10^{$(round(Int, log10(tol)))}\$"]

@@ -61,10 +61,12 @@ principle rather than to any implementation of it -- a peak that no sample
 lands on costs exactly $\pm\pi$ and shifts the count by one while leaving it
 an integer, so the residual cannot see it; sufficiently close to a boundary
 the marching solver does step over such peaks. The cross-check between the
-count and the independently tracked root detects this at no cost, and the
-affected classification is confined to the crossing of the last unstable
-root, but a formally guaranteed count would require a different device --
-interval arithmetic, or an a-priori bound on the peak locations. Fourth, for
+count and the independently tracked root detects this at no cost -- provided
+it is restricted to a neighbourhood of the integration line, since farther
+away the tracked root need not be the dominant one -- and the affected
+classification is confined to the crossing of the last unstable root; but a
+formally guaranteed count would require a different device -- interval
+arithmetic, or an a-priori bound on the peak locations. Fourth, for
 neutral systems beyond the essential
 instability threshold the root count diverges with the truncation frequency;
 the classification into stable and unstable domains nevertheless remains

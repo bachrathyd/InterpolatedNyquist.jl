@@ -279,6 +279,23 @@ using StaticArrays
         @test !isfinite(md_o)
     end
 
+    @testset "Peak-skip cross-check" begin
+        # sound direction: a tracked root right of the line contradicts Z == 0
+        @test peak_skip_suspect(0, 1e-4)              # stable count, unstable root
+        @test peak_skip_suspect(1, -1e-4)             # unstable count, stable root
+        @test !peak_skip_suspect(0, -1e-4)            # consistent
+        @test !peak_skip_suspect(2, 1e-4)             # consistent
+        # distance guard: a disagreement far from the line is legitimate (the
+        # tracked minimum need not be the dominant root) and must NOT fire
+        @test !peak_skip_suspect(2, -0.5)
+        @test peak_skip_suspect(2, -0.5; h = 1.0)     # ...unless h says otherwise
+        # shifted line: the comparison is against sigma, not zero
+        @test peak_skip_suspect(0, -0.4 + 1e-5, -0.4)
+        @test !peak_skip_suspect(0, -0.5, -0.4)
+        # non-finite estimate (|D| overflowed everywhere) must not fire
+        @test !peak_skip_suspect(0, NaN)
+    end
+
     @testset "Mass-matrix / DAE extraction" begin
         # Descriptor system with singular mass matrix E = diag(1, m, 0):
         #   x' = v

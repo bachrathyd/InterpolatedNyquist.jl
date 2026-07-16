@@ -116,6 +116,6 @@ for (cname, n0, it, equiv, nev, nsol, t, save) in mdbm_rows
         "$(equiv)\$\\times\$$(equiv)", string(nev), string(nsol), tex_time(t),
         @sprintf("%.0f\$\\times\$", save)])
 end
-write_booktabs("tab_mdbm", "lcccccc",
+write_booktabs("tab_mdbm", "lccccccc",
     ["system", "initial mesh", "levels", "equiv.\\ resolution", "evaluations",
      "boundary pts", "time", "saving"], rows_mdbm)

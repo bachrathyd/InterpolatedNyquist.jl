@@ -193,6 +193,36 @@ function _get_n_power_max_impl(D_func::NyquistWrapper{P}, p::P, σ=0.0; probe=1e
 end
 
 """
+    peak_skip_suspect(Z, σ_est, σ=0.0; h=1e-3)
+
+Cross-check for the one failure mode the integer residual cannot see.
+
+A frequency march that steps *over* a near-singular peak of the phase
+integrand loses exactly `±π`, so `Z_raw` shifts by exactly one and stays just
+as close to an integer as before: `|Z_raw - round(Z_raw)|` certifies the
+quadrature, not the count. The tracked root, however, comes from the minima of
+`|D|²` -- a mechanism independent of the accumulated phase -- so the two must
+agree: a root right of the line (`σ_est > σ`) contradicts `Z == 0`.
+
+Returns `true` when `sign(σ_est - σ)` disagrees with the predicate `Z == 0`
+**and** the root is within `h` of the line.
+
+The distance guard is essential, not cosmetic. Far from the line the tracked
+minimum need not belong to the *dominant* root (see `n_roots_to_track`): deep
+inside an unstable domain the roots responsible for `Z > 0` may sit far to the
+right and leave no dip near the line, so a disagreement there is legitimate
+and the unguarded test fires on a large fraction of a perfectly converged
+chart. A peak can only be skipped where a root is close to the line, which is
+exactly where this test is sharp. Choose `h` a few orders of magnitude below
+the spread of `σ_est` over the chart.
+"""
+@inline function peak_skip_suspect(Z::Integer, σ_est::Real, σ::Real=0.0; h::Real=1e-3)
+    isfinite(σ_est) || return false
+    d = σ_est - σ
+    return ((d < 0) != (Z == 0)) && abs(d) < h
+end
+
+"""
     calculate_unstable_roots_direct(D_func, p, σ=0.0; ...)
 
 Calculates the number of unstable roots using direct integration of the phase.
