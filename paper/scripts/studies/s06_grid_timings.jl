@@ -31,23 +31,36 @@ BACKENDS = [
 
 # ---------------------------------------------------------------------------
 # Brute-force chart timings (median of repeats)
+# Every backend's counts are verified against a tight-tolerance reference of
+# the SAME chart before its time is recorded: a fast backend that returns
+# wrong counts would otherwise be benchmarked as a "speedup". The adaptive
+# backends must match everywhere; the fixed-step backend (hand-set resolution,
+# real-time floor) reports its mismatches honestly in the table.
 # ---------------------------------------------------------------------------
-timing_rows = with_cache("s06_grid_timings_v2_$(NGRID)") do
+timing_rows = with_cache("s06_grid_timings_v3_$(NGRID)") do
     out = Tuple[]
     for (cname, D, xr, yr, wm) in CASES
         xv = LinRange(xr..., NGRID); yv = LinRange(yr..., NGRID)
         params = vec([(x, y) for x in xv, y in yv])
+        Z_ref, _ = calculate_unstable_roots_p_vec(D, params; ω_max = wm,
+            n_roots_to_track = 0, reltol = 1e-8, abstol = 1e-8)
         for (bname, runner) in BACKENDS
+            Z_b = runner(D, params, wm)[1]
+            n_wrong = count(Z_b .!= Z_ref)
+            if n_wrong > 0 && !occursin("fixed-step", bname)
+                error("s06: backend '$bname' returned $n_wrong wrong counts on '$cname'")
+            end
             res = benchmark_sweep(() -> runner(D, params, wm); repeats = FAST[] ? 2 : 5)
             push!(out, (cname, bname, length(params), res.t_med,
-                res.t_med / length(params) * 1e6, res.t_std, res.mem_bytes / 2^20))
-            @info "chart timing" cname bname chart_s = res.t_med
+                res.t_med / length(params) * 1e6, res.t_std, res.mem_bytes / 2^20,
+                n_wrong))
+            @info "chart timing" cname bname chart_s = res.t_med n_wrong
         end
     end
     out
 end
 write_csv("grid_timings",
-    ["system", "backend", "n_points", "chart_time_s", "per_point_us", "t_std_s", "mem_mb"],
+    ["system", "backend", "n_points", "chart_time_s", "per_point_us", "t_std_s", "mem_mb", "n_wrong_Z"],
     timing_rows)
 
 # ---------------------------------------------------------------------------
@@ -89,13 +102,13 @@ end
 # Tables
 # ---------------------------------------------------------------------------
 rows_tex = Vector{String}[]
-for (cname, bname, n, t, per_pt, tstd, mem) in timing_rows
+for (cname, bname, n, t, per_pt, tstd, mem, n_wrong) in timing_rows
     push!(rows_tex, [cname, bname, tex_time(t), @sprintf("%.0f", per_pt),
-        @sprintf("%.0f", mem)])
+        @sprintf("%.0f", mem), string(n_wrong)])
 end
-write_booktabs("tab_grid_timings", "llccc",
+write_booktabs("tab_grid_timings", "llcccc",
     ["system", "back-end", "chart ($(NGRID)\$\\times\$$(NGRID))", "per point [\$\\mu\$s]",
-     "alloc [MB]"], rows_tex)
+     "alloc [MB]", "wrong \$Z\$"], rows_tex)
 
 rows_mdbm = Vector{String}[]
 for (cname, n0, it, equiv, nev, nsol, t, save) in mdbm_rows

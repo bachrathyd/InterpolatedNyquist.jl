@@ -13,7 +13,7 @@ p_check = (1.3, 0.4)
 λ_checks = [0.2 + 1.5im, -0.4 + 3.1im, 0.05 - 0.7im]
 ratios = [D_showcase(λ, p_check) / D_showcase_reduced(λ, p_check) for λ in λ_checks]
 ratio_dev = maximum(abs, ratios ./ ratios[1] .- 1)
-@assert ratio_dev < 1e-8 "DAE extraction mismatch (dev=$(ratio_dev))"
+@assert ratio_dev < 1e-12 "DAE extraction mismatch (dev=$(ratio_dev))"
 @info "showcase DAE extraction verified" ratio_dev
 
 # ---------------------------------------------------------------------------
@@ -39,8 +39,9 @@ circ = find_largest_circle(bnd.prob; N = 5, scale_x = ELL_SX, scale_y = ELL_SY,
     num_angles = 32, tol = 1e-3)
 ell = generate_ellipse_points(circ.x, circ.y, circ.R_scaled; scale_x = ELL_SX, scale_y = ELL_SY)
 
-# Pick a representative stable point (deep stable) and unstable point (Z = 2)
-stable_idx = argmin(replace(x -> x >= 0 ? Inf : x, C))
+# Pick a representative stable point (deep stable) and unstable point (Z = 2).
+# NaN (no finite tracked root) must map to Inf too, or argmin returns it.
+stable_idx = argmin(replace(x -> (isnan(x) || x >= 0) ? Inf : x, C))
 iu = findall(grid.Z .== 2)
 unstable_idx = isempty(iu) ? argmax(grid.Z) : iu[cld(length(iu), 2)]
 p_stable = (Pv[stable_idx[1]], Dv[stable_idx[2]])
@@ -66,7 +67,7 @@ save_fig(fig, "fig_showcase_hybrid")
 # ---------------------------------------------------------------------------
 sol_s = phase_ode_solution(D_showcase, p_stable; ω_max = 1e4)
 sol_u = phase_ode_solution(D_showcase, p_unstable; ω_max = 1e4)
-n_s = get_n_power_max(D_showcase, p_stable; ω_large = 1e4)
+n_s = get_n_power_max(D_showcase, p_stable)
 Zraw_s = -sol_s.u[end][1] / π + n_s / 2
 Zraw_u = -sol_u.u[end][1] / π + n_s / 2
 @info "walkthrough winding numbers" Zraw_s Zraw_u nsteps_s = length(sol_s.t) nsteps_u = length(sol_u.t)

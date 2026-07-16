@@ -28,6 +28,7 @@ const STUDIES = [
     "s08_gallery",
     "s09_sigma_contours",
     "s10_fractional_controller",
+    "s11_diagnostics",
 ]
 
 __results = Dict{String, Any}()

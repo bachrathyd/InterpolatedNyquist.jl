@@ -36,7 +36,8 @@ plain quadrature.
 
 The integrand is evaluated \emph{exactly}: the characteristic function is called
 once per frequency with a dual-number argument
-$\lam = \sigma + \ii(\omega+\epsilon)$, $\epsilon^2=0$, so
+$\lam = \sigma + \ii(\omega+\delta)$, $\delta^2=0$ (distinct from the
+integer residual $\varepsilon$ of Section~\ref{sec:integerness}), so
 forward-mode automatic differentiation~\cite{revels2016forward} delivers
 $\Dfun$ and $\Dfun'=\partial_\omega\Dfun$ simultaneously, without finite
 differencing and without any user-supplied derivative. A tiny offset
@@ -53,7 +54,14 @@ decay of the delay-induced phase ripple: if the delayed terms sit at least
 two orders below the leading power of $\Dfun$ -- as for delayed
 \emph{position} feedback on mechanical systems -- the ripple decays at least
 like $\omega^{-2}$, and the march from $\omega=10^{2}$ to $\wmax=10^{6}$ or
-even $10^{10}$ costs only a handful of accepted steps. If a delayed term
+even $10^{10}$ costs only a handful of accepted steps (measured numbers in
+Section~\ref{sec:performance-zoo}). One caution applies to those giant
+steps: an adaptive error estimator only \emph{samples} the local error, so a
+step that grows to many ripple periods can in principle alias a slowly
+decaying oscillation; in practice the embedded error estimate of a
+high-order pair rejects such steps long before the count is affected, and
+any surviving aliasing is exposed by the integer residual of
+Section~\ref{sec:integerness}. If a delayed term
 sits only one order below the leading power (delayed \emph{velocity}
 feedback), the ripple decays merely like $\omega^{-1}$, the solver keeps
 resolving it (Fig.~\ref{fig:walkthrough}c), and every resolved step
@@ -76,27 +84,69 @@ terms already extinguished:
   \qquad s_\ast \gg 1 ,
 \end{equation}
 the least-squares slope of the log--log magnitude over a handful of
-log-spaced real samples. On the real axis $|\Dfun(s)|\to|c|\,s^{n}$ with a
-smooth algebraic correction, so the estimate converges as $O(1/s_\ast)$ and
-reaches $\sim10^{-9}$ at $s_\ast=10^{8}$ for the systems of this paper --
-including the effective integer order of neutral equations and the
-non-integer order of fractional ones.
+log-spaced real samples. Two points about $s_\ast$ deserve emphasis. It is
+\emph{decoupled from the integration range}: $n$ is a property of $\Dfun$
+alone, so the probe may sit far beyond $\wmax$ -- the default is
+$s_\ast=10^{8}$ whatever $\wmax$ is -- and it costs a handful of evaluations
+once per sweep, not once per frequency. And on the real axis a larger
+$s_\ast$ genuinely buys accuracy: $|\Dfun(s)|\to|c|\,s^{n}$ with a smooth
+algebraic correction, so the estimate converges as $O(1/s_\ast)$, measured
+here as $7.5\cdot10^{-5}$, $7.4\cdot10^{-7}$ and $7.4\cdot10^{-9}$ at
+$s_\ast=10^{4}$, $10^{6}$ and $10^{8}$ -- including the effective integer
+order of neutral equations and the non-integer order of fractional ones.
 
-The contrast with an imaginary-axis fit is instructive, because there
-$|\ee^{-\ii\omega\tau}|=1$: the delay terms superimpose a persistent ripple
-on $\ln|\Dfun(\ii\omega)|$ that never decays, a log-spaced fit aliases
-rather than averages it, and a single-point evaluation of
-$\omega\,\Real(\Dfun'/\Dfun)$ carries an error of $O(b\tau/c)$ for
-arbitrarily large $\omega$ when a delayed term sits one order below the
-leading power ($b$ the delayed-term coefficient, $c$ the leading one) --
-and diverges outright for neutral systems. Moving the probe to the real axis
-removes the difficulty rather than fighting it. The estimator needs no
+That last point is exactly what an imaginary-axis fit cannot offer, and the
+contrast explains why the difficulty is worth side-stepping rather than
+fighting. On the imaginary axis $|\ee^{-\ii\omega\tau}|=1$, so the delay
+terms superimpose a ripple on $\ln|\Dfun(\ii\omega)|$ that a log-spaced fit
+aliases rather than averages; for a neutral system, where the ripple does not
+decay at all, \emph{no} frequency is large enough, and a single-point
+evaluation of $\omega\,\Real(\Dfun'/\Dfun)$ does not merely stall but
+diverges in proportion to $\omega$ (measured: $n_{\mathrm{est}}=-226$, $5132$
+and $80\,028$ at $\omega=10^{3}$, $10^{4}$ and $10^{6}$ for a system whose
+true effective order is $2$). Even for retarded systems the same estimator
+retains an error of $O(b\tau/c)$ at arbitrarily large $\omega$ when a delayed
+term sits one order below the leading power ($b$ the delayed-term
+coefficient, $c$ the leading one). Probing where the delays are
+exponentially small removes all of this at a stroke. The estimator needs no
 structural knowledge of the model, costs a handful of extra evaluations, and
-in parameter sweeps is computed once when $n$ is parameter-independent. Its
-one limitation is representability: $|\Dfun(s)|\sim s^{n}$ overflows for
-large $n$, so $s_\ast$ is reduced automatically until $|\Dfun|$ is finite,
-which for very high-order determinants caps the achievable accuracy; the
-leading order may then be supplied explicitly.
+in parameter sweeps is computed once when $n$ is parameter-independent.
+
+Two limitations are worth naming. The first is representability:
+$|\Dfun(s)|\sim s^{n}$ overflows for large $n$, so $s_\ast$ is reduced
+automatically until $|\Dfun|$ is finite, which for very high-order
+determinants caps the achievable accuracy; the leading order may then be
+supplied explicitly. There is, however, a better answer than fighting the
+symptom, and it costs nothing. Whenever the model offers a natural
+open-loop/feedback split -- as every control problem and every
+regenerative-machining model does -- the \emph{return difference}
+$\Dfun=\det(\mat I+\mat Q_0^{-1}\mat F)=1+L(\lam)$ (with $\mat F$ the
+feedback matrix) has exactly the same zeros
+as $\det(\mat Q_0+\mat F)$, adds poles only at the open-loop roots (which, for
+an open-loop stable structure, lie in the left half-plane and leave the
+right-half-plane count untouched), and tends to $1$ at infinity. Then $n=0$
+\emph{exactly}, no estimate is needed, and the enormous magnitudes disappear:
+for the $29$-DOF finite element bar of Appendix~\ref{app:gallery} the raw determinant
+grows like $\lam^{58}$, reaches $10^{298}$, and leaves an integer residual of
+$0.4$ -- a rounded count barely better than a coin toss -- while the return
+difference leaves $10^{-7}$. Where the split exists, it is worth more than
+any tuning of the integrator.
+
+The second limitation is more interesting.
+Equation~\eqref{eq:npow} presumes that $\Dfun$ is polynomially bounded in
+the right half-plane, which holds for every quasi-polynomial
+$\Dfun=\sum_j a_j\lam^{k_j}\ee^{-\lam\tau_j}$ with $\tau_j\ge0$ -- hence for
+all retarded, neutral and differential--algebraic systems -- but not for the
+transcendental characteristic functions of continua, where
+$\cosh\bigl(\sqrt{\lam^2+c\lam}\,L\bigr)$ grows like $\ee^{\lam L}$ and no
+finite leading power exists on the real axis at all. The package detects this
+automatically -- for a genuine power law the fitted slope must be the same
+one window lower, and for an exponentially growing $\Dfun$ it is not -- and
+falls back to a least-squares fit along the imaginary axis, where such
+functions are bounded and oscillatory and the fit returns the effective order
+the counting formula needs ($n\approx0$ for the beam of Appendix~\ref{app:gallery}).
+The fallback inherits the delay ripple and is correspondingly less accurate,
+which is precisely why it is not the primary route.
 
 The requested relative and absolute solver tolerances control the local
 error of the accumulated phase, measured in radians. Since the exact
@@ -160,21 +210,32 @@ $\hat\lam=\sest+\ii\west$,
    + \tfrac12 \Dfun_{\lam\lam}\,\Delta^{2}
    + \tfrac16 \Dfun_{\lam\lam\lam}\,\Delta^{3} = 0,
 \end{equation}
-the package offers (i) \emph{Newton--Raphson} iterations
-$\Delta=-\Dfun/\Dfun_\lam$; (ii) a single \emph{quadratic} (Poly-2) or
-(iii) \emph{cubic} (Poly-3, default) Taylor solve, where the root of the
-local cubic closest to $\hat\lam$ is selected via the eigenvalues of its
-companion matrix. The first derivative is exact (automatic
+where the subscripts denote derivatives with respect to $\lam$ evaluated at
+$\hat\lam$, the package offers (i) \emph{Newton--Raphson} iterations
+$\Delta=-\Dfun/\Dfun_\lam$ (four steps by default); (ii) a single
+\emph{quadratic} (Poly-2) or (iii) \emph{cubic} (Poly-3) Taylor solve, where
+the root of the local cubic closest to $\hat\lam$ is selected via the
+eigenvalues of its companion matrix. The first derivative is exact (automatic
 differentiation); the higher derivatives are obtained by central differences
 of the exact first derivative, which avoids the compilation cost of nested
 dual numbers while keeping truncation errors far below the achievable
 accuracy. An optional mode freezes $\west$ and corrects only the real part,
 which is convenient when the frequency is pinned by measurement. The
 accuracy and cost of the variants are quantified in
-Section~\ref{sec:showcase-roots}; the practical summary is that Poly-3
-gains several orders of magnitude over the raw estimate at a cost that is
-invisible next to the phase integration, and a few Newton steps converge to
-machine precision near the boundary. If several estimates are tracked, the
+Section~\ref{sec:showcase-roots}; the practical summary is that every
+variant costs a few percent of the phase integration, that Newton is
+simultaneously the cheapest and the most accurate -- hence the default --
+and that a few steps converge to machine precision near the
+boundary.\footnote{Like any local root iteration, neither correction is
+guaranteed to converge: a Newton step can leave the basin of the intended
+root, a Taylor root can be spurious when the seed is poor, and at a
+defective (multiple) root, where $\Dfun_\lam\to0$, Newton's convergence
+degrades from quadratic to linear. The implementation therefore rejects
+runaway steps, which suffices in every case study of this paper; should a
+chart nevertheless show isolated irregular root estimates, refinement can be
+switched off (\code{refinement\_method=:Linear}) to fall back to the raw
+tracked estimate, whose sign -- the quantity the charts rely on -- is
+unaffected.} If several estimates are tracked, the
 same refinement applied to each returns a set of dominant roots, comparable
 to the output of dedicated root finders such as
 QPmR~\cite{vyhlidal2009mapping} -- with the difference that here the root
@@ -206,11 +267,10 @@ be stated sharply, because it bounds what $\varepsilon$ can certify. A march
 that steps \emph{over} a peak loses exactly $\pm\pi$ of phase, so $\Zraw$
 shifts by exactly one and remains just as close to an integer as before:
 $\varepsilon$ measures the \emph{quadrature} quality and is structurally
-blind to a skipped peak. Nor is this hypothetical. Approaching a stability
-boundary the peak half-width $|\sigma_r-\sigma|$ collapses -- at a distance
-of $10^{-8}$ in the gain the peak of the showcase system is $6.6\cdot
-10^{-10}$ wide and $1.5\cdot10^{9}$ tall, while a step of $10^{-3}$ passes
-within $2\%$ of the smooth background -- and the marching solver then strides
+blind to a skipped peak. Nor is this hypothetical: approaching a stability
+boundary the peak half-width $|\sigma_r-\sigma|$ collapses to many orders of
+magnitude below any practical step size (quantified in
+Table~\ref{tab:boundarystress}), and the marching solver then strides
 past it and reports success. No pointwise method is immune: quadrature
 rules that happen to place all their nodes outside such a spike are equally
 blind, and only survive here because the delay ripple forces them to
@@ -223,8 +283,9 @@ $|\Dfun|^{2}$, a mechanism entirely independent of the accumulated phase,
 and it remains accurate exactly where the peak is narrow -- that is, exactly
 where the count is fragile. The two therefore cross-validate each other: a
 skipped peak shows up as an \emph{inconsistency} between $\operatorname{sign}
-(\sest-\sigma)$ and the predicate $\Zint=0$, which is free to evaluate and
-is the practical safeguard we recommend. Note also that skipping one peak
+(\sest-\sigma)$ and the predicate $\Zint=0$; both quantities are standard
+outputs of every sweep, so the check costs one comparison, and it is the
+practical safeguard we recommend. Note also that skipping one peak
 only ever changes $\Zint$ by one, so the stable/unstable classification that
 a chart displays is affected only where the last unstable root crosses --
 precisely the case the sign test catches.
@@ -234,10 +295,13 @@ precisely the case the sign test catches.
 The phase integrand~\eqref{eq:integrand} can also be fed to classical
 adaptive quadrature; the package provides a Gauss--Kronrod back-end
 (\pkg{QuadGK.jl}~\cite{johnson2013quadgk}) with the identical interface.
-For the root count alone it is fully competitive, and close to a stability
-boundary it is the more dependable of the two
-(Section~\ref{sec:performance-convergence}); we recommend it whenever only
-$\Zint$ is wanted. The decisive difference concerns the rightmost root.
+For the root count alone it is fully competitive -- within a factor of two of
+the march in evaluations, and up to two orders of magnitude cheaper when the
+phase ripple decays quickly, because a quadrature rule can recognize a
+negligible tail and stop where a march must still walk to $\wmax$
+(Table~\ref{tab:evals}) -- and close to a stability boundary it is the more
+dependable of the two (Section~\ref{sec:performance-convergence}). It is the
+better choice whenever only $\Zint$ is wanted. The decisive difference concerns the rightmost root.
 Adaptive quadrature subdivides its interval recursively and therefore visits
 the frequencies in an essentially arbitrary order: there is no sweep along
 which a local minimum of $|\Dfun|^{2}$ could be recognized, and the

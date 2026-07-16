@@ -29,14 +29,17 @@ if !isfile(ZOO_CSV) || FORCE[]
         println(io, "method,control,mean_err,median_err,max_err,time_s,mem_mb")
     end
 end
-existing = Set{Tuple{String, Float64}}()
+# Existing rows are skipped on rerun, but their recorded time is still
+# returned, so the escalation loops below re-hit the time cap in the same
+# place instead of proceeding past the point a previous session stopped at.
+existing_t = Dict{Tuple{String, Float64}, Float64}()
 for line in readlines(ZOO_CSV)[2:end]
     f = split(line, ',')
-    push!(existing, (String(f[1]), parse(Float64, f[2])))
+    existing_t[(String(f[1]), parse(Float64, f[2]))] = parse(Float64, f[6])
 end
 
 function zoo_run!(method::String, control::Float64, sweep::Function)
-    (method, control) in existing && return
+    haskey(existing_t, (method, control)) && return existing_t[(method, control)]
     res = benchmark_sweep(sweep; repeats = 3)
     Z_raws = sweep()
     err = abs.(Z_raws .- Zref)
@@ -64,8 +67,8 @@ for tol in TOLS_ZOO
             ω_max = ZOO_WMAX, reltol = tol, abstol = tol)[2])
     t !== nothing && t > ZOO_TIME_CAP && break
 end
-for (name, solver) in [("BS3", BS3()), ("Tsit5", Tsit5()),
-                       ("Rosenbrock23", Rosenbrock23()),
+for (name, solver) in [("BS3", BS3()), ("Tsit5", Tsit5()), ("Vern9", Vern9()),
+                       ("Rosenbrock23", Rosenbrock23()), ("Rodas5P", Rodas5P()),
                        ("AutoTsit5(Rosenbrock23)", AutoTsit5(Rosenbrock23()))]
     for tol in TOLS_ZOO
         t = zoo_run!(name, tol, () ->
@@ -90,7 +93,8 @@ for (i, m) in enumerate(methods)
     ts = Float64.(raw[sel, 6])
     es = max.(Float64.(raw[sel, 3]), 1e-16)
     ord = sortperm(ts)
-    scatterlines!(ax, ts[ord], es[ord]; label = m, color = cols[mod1(i, 7)], markersize = 5)
+    scatterlines!(ax, ts[ord], es[ord]; label = m, color = cols[mod1(i, 7)],
+        linestyle = i > 7 ? :dash : :solid, markersize = 5)
 end
 axislegend(ax; position = :lb, labelsize = 7)
 save_fig(fig, "fig_solver_zoo")

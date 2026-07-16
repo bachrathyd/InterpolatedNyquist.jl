@@ -9,6 +9,7 @@
 include(joinpath(@__DIR__, "studies_common.jl"))
 include(joinpath(@__DIR__, "systems.jl"))
 using QuadGK
+import SemiDiscretizationMethod   # only for the independent Z_EXACT check
 
 # Evaluation point: the unstable point selected by s01 (fallback: fixed)
 p_conv = if csv_exists("showcase_summary")
@@ -24,8 +25,29 @@ end
 # velocity-feedback system) stays far below the tightest tolerance studied.
 const WMAX_CONV = 1e6
 n_pow = get_n_power_max(D_showcase, p_conv)
-Z_EXACT = 2      # exact integer count at p_conv (verified by continuity in P)
+Z_EXACT = 2
 @info "leading order" n_pow err = abs(n_pow - 4)
+
+# Verify Z_EXACT with a method that shares NOTHING with the one under study:
+# dense generalized eigenvalues of the semi-discretized transition mapping
+# (no phase integral, no leading-order estimate, no ω_max truncation). Each
+# characteristic exponent with Re λ > 0 maps to a multiplier |μ| > 1; the
+# spurious discretization modes cluster far inside the unit circle.
+z_check = with_cache("s03_zexact_check_v1") do
+    A, B = showcase_AB(p_conv)
+    Δt = SM.tau / 120
+    lddep = SemiDiscretizationMethod.LDDEProblem(
+        SemiDiscretizationMethod.ProportionalMX(A),
+        [SemiDiscretizationMethod.DelayMX(t -> SM.tau, B)],
+        SemiDiscretizationMethod.Additive(zeros(4)))
+    m = SemiDiscretizationMethod.DiscreteMapping_LR(lddep,
+        SemiDiscretizationMethod.SemiDiscretization(2, Δt), SM.tau;
+        n_steps = 1, calculate_additive = true)
+    μ = eigen(collect(m.RmappingMX), collect(m.LmappingMX)).values
+    count(x -> abs(x) > 1, μ)
+end
+@assert z_check == Z_EXACT "independent semi-discretization count is $(z_check), expected $(Z_EXACT)"
+@info "Z_EXACT verified by semi-discretization (dense eig, n=120, order 2)" z_check
 
 TOLS = 10.0 .^ (-3:-1.0:-10)
 METHODS = [
@@ -45,16 +67,27 @@ METHODS = [
         ω_max = WMAX_CONV, reltol = tol, abstol = tol, n_power_max = n_pow)[2]),
 ]
 
-data = with_cache("s03_convergence_v2") do
+# A single evaluation of a low-order pair at a tight tolerance over this
+# frequency range can take a minute, so each method stops escalating once one
+# point exceeds the cap. The dropped points are logged rather than silently
+# omitted, and the curves simply end where the method becomes impractical --
+# which is itself the relevant information.
+const T_CAP = 20.0
+
+data = with_cache("s03_convergence_v3") do
     out = Dict{String, Vector{Tuple{Float64, Float64, Float64}}}()
     for (name, runner) in METHODS
         rows = Tuple{Float64, Float64, Float64}[]
         for tol in TOLS
+            t = time_point(() -> runner(tol))
             Zraw = runner(tol)
             err = abs(Zraw - Z_EXACT)          # reference-free: exact integer
-            t = time_point(() -> runner(tol))
             push!(rows, (tol, err, t))
             @info "convergence" name tol err t
+            if t > T_CAP
+                @warn "stopping tolerance sweep: cost cap exceeded" name tol t T_CAP
+                break
+            end
         end
         out[name] = rows
     end
@@ -66,11 +99,11 @@ end
 #         -- error is on the VERTICAL axis in both (a) and (c)
 # ---------------------------------------------------------------------------
 fig = Figure(size = (W_FULL, W_FULL * 0.32))
-axa = MAxis(fig[1, 1], xlabel = "requested tolerance", ylabel = "integer residual ε",
+axa = MAxis(fig[1, 1], xlabel = "requested tolerance", ylabel = "count error |Z̃ - Z|",
     xscale = log10, yscale = log10, title = "(a) accuracy")
 axb = MAxis(fig[1, 2], xlabel = "requested tolerance", ylabel = "CPU time [s]",
     xscale = log10, yscale = log10, title = "(b) cost")
-axc = MAxis(fig[1, 3], xlabel = "CPU time [s]", ylabel = "integer residual ε",
+axc = MAxis(fig[1, 3], xlabel = "CPU time [s]", ylabel = "count error |Z̃ - Z|",
     xscale = log10, yscale = log10, title = "(c) efficiency front")
 cols = Makie.wong_colors()
 for (i, (name, _)) in enumerate(METHODS)
@@ -83,7 +116,7 @@ for (i, (name, _)) in enumerate(METHODS)
     scatterlines!(axc, ts, errs; color = cols[i], label = name, markersize = 5)
 end
 lines!(axa, TOLS, 100 .* TOLS; color = :black, linestyle = :dot)
-text!(axa, 1e-6, 3e-4; text = "ε = 100·tol", color = :black, fontsize = 7)
+text!(axa, 1e-6, 3e-4; text = "100·tol", color = :black, fontsize = 7)
 axislegend(axa; position = :lt, labelsize = 6)
 save_fig(fig, "fig_convergence")
 
@@ -136,13 +169,13 @@ sel_tols = [1e-3, 1e-5, 1e-7, 1e-9]
 rows_tex = Vector{String}[]
 for tol in sel_tols
     row = ["\$10^{$(round(Int, log10(tol)))}\$"]
-    for (name, _) in METHODS
+    for (name, _) in METHODS          # error block
         idx = findfirst(r -> r[1] == tol, data[name])
-        push!(row, tex_sci(data[name][idx][2]))
+        push!(row, idx === nothing ? "--" : tex_sci(data[name][idx][2]))
     end
-    for (name, _) in METHODS
+    for (name, _) in METHODS          # time block
         idx = findfirst(r -> r[1] == tol, data[name])
-        push!(row, tex_time(data[name][idx][3]))
+        push!(row, idx === nothing ? "--" : tex_time(data[name][idx][3]))
     end
     push!(rows_tex, row)
 end

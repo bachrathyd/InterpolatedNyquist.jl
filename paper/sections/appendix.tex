@@ -17,7 +17,12 @@ encodes the estimated decay rate $\sest<0$, i.e.\ the spectral gap: the
 darker the shade, the faster every disturbance decays, and the colour varies
 smoothly because $\sest$ does. One map therefore answers three questions at
 once -- where the system is stable, how robustly, and how many roots must be
-stabilized elsewhere. The black curve is the stability boundary traced by
+stabilized elsewhere. (One qualification from Section~\ref{sec:tracking}
+applies: the gallery sweeps track a single $|\Dfun|$ minimum per point, so
+deep inside the stable domain the colour may reflect a non-dominant root
+branch; near the boundary -- the region the charts are read for -- the
+crossing root always produces the global minimum and the shading is
+faithful.) The black curve is the stability boundary traced by
 MDBM from the objective~\eqref{eq:objective}, not a contour of the coloured
 grid. Each panel is annotated with the wall-clock cost of both stages: the
 brute-force sweep that produces the colour, and the MDBM trace that produces
@@ -37,7 +42,7 @@ the boundary.
   \centering
   \maybefig{fig_gallery_b}{\linewidth}
   \caption{Case studies, part II: (top row) multi-mode turning lobes,
-  transcendental beam, 29-DOF finite element beam; (bottom row)
+  transcendental beam, 29-DOF finite element bar; (bottom row)
   $50\times50$ matrix determinant, fractional-order
   oscillator.}\label{fig:galleryb}
 \end{figure}
@@ -106,40 +111,77 @@ family of curves of which almost none bounds the stable region, whereas the
 boundary objective~\eqref{eq:objective} follows only the true stability
 limit~\cite{bachrathy2013improved}.
 
-\paragraph{A.8 Transcendental beam.}
-Longitudinal vibration of an elastic bar with delayed boundary force
-feedback leads -- \emph{without any spatial discretization} -- to the exact
-transcendental characteristic function
-$\Dfun(\lam)=\cosh\!\bigl(\sqrt{\lam^2+c\lam}\,L\bigr)+K_p\,\ee^{-\lam\tau}$
-(dimensionless form with unit length $L=1$ and internal damping $c=0.4$), cf.\ the exact stability
-analysis of Zhang and St\'ep\'an~\cite{zhang2016exact} and the finite-DOF
-hierarchy of Kidd and St\'ep\'an~\cite{kidd2014delayed}. The damping is
-deliberately generous: for a lightly damped bar the higher modes remain
-almost undamped and the stable bands degenerate into an ever finer comb --
-zero-measure in the limit, which is exactly the phenomenon
-analysed in~\cite{zhang2016exact} and which no finite grid can render
-honestly. Since the method
-only evaluates $\Dfun$ at complex points, the continuum model is handled
-verbatim; the chart over $(K_p,\tau)$ in Fig.~\ref{fig:galleryb} shows the
-alternating stable bands typical of such systems. This case study doubles
-as a comparison target for its finite element counterpart below.
+\paragraph{A.8 Transcendental beam, and why the damping model decides
+everything.}
+Longitudinal vibration of an elastic bar with delayed boundary feedback gives
+-- \emph{without any spatial discretization} -- the exact transcendental
+return difference
+\begin{equation}\label{eq:beam}
+  \Dfun(\lam) = 1 + K_p\,\ee^{-\lam\tau}\,\operatorname{sech}\bigl(\gamma(\lam)\,L\bigr),
+  \qquad L=1,
+\end{equation}
+cf.\ the exact analysis of Zhang and St\'ep\'an~\cite{zhang2016exact} and the
+finite-DOF hierarchy of Kidd and St\'ep\'an~\cite{kidd2014delayed}. Whether a
+finite count even exists is decided entirely by the damping model, and this is
+the instructive point of the example. With external (viscous) damping,
+$\gamma=\sqrt{\lam^2+c\lam}$, every mode is damped equally: the closed-loop
+roots accumulate along a vertical line $\Real\lam\to\mathrm{const}$, so the
+number of unstable roots is $0$ or $\infty$ -- the essential-spectrum
+obstruction of a neutral system (A.6) -- and $\operatorname{sech}(\gamma L)$
+does not decay on the imaginary axis. Real materials, however, dissipate
+through \emph{rate-dependent} (Kelvin--Voigt) internal damping,
+$\gamma=\lam/\sqrt{1+c\lam}$, for which $\gamma\sim\sqrt{\lam/c}$: the high
+modes are damped ever harder, $\Real\lam_k\to-\infty$ (here
+$-0.06,-0.56,-1.54,-3.02,\dots$), only finitely many roots sit near the axis,
+and $|\operatorname{sech}(\gamma L)|$ decays like $\ee^{-\sqrt{\omega/2c}}$.
+The count is then well posed, and the chart over $(K_p,\tau)$ in
+Fig.~\ref{fig:galleryb} shows the resulting stable bands with an integer
+residual of $\sim10^{-7}$ (the physically wrong viscous model gives $6368$
+for the same gains -- a diagnostic that the model, not the method, is at
+fault). The example thus doubles as a reminder that the right damping law is a
+modelling decision the method faithfully reflects rather than papers over.
 
-\paragraph{A.9 Finite element beam (29 DOF).}
-The same bar discretized by 29 linear finite elements:
-$\Dfun(\lam)=\det(\lam^2\mat M+\lam\mat C+\mat K + K_p\,h^{-1}
-\ee^{-\lam\tau}\,\vect e_{29}\vect e_1^{\!\top})$ ($h$ being the element
-length), a $29\times29$ determinant
-with a rank-one delayed term. The chart reproduces the transcendental
-result within the resolved frequency range, at the cost of a determinant
-evaluation per frequency -- a direct measure of what the exact continuum
-formulation saves. (For repeated evaluations the rank-one structure admits
-determinant-lemma accelerations; not exploited here.)
+\paragraph{A.9 Finite element bar (29 DOF), and the return difference.}
+The same bar discretized by 29 linear finite elements, with stiffness-
+proportional (Kelvin--Voigt) damping $\mat C=c\mat K$. The naive formulation
+is the raw determinant $\det(\lam^2\mat M+\lam\mat C+\mat K + K_p\,h^{-1}
+\ee^{-\lam\tau}\,\vect e_{29}\vect e_1^{\!\top})$ ($h$ = element length), and
+it is a poor one: it grows like $\lam^{58}$, reaches magnitudes of $10^{298}$
+before overflowing, and forces the counting formula onto an estimate of a very
+large leading order -- which leaves an integer residual near $0.4$, a rounded
+count barely better than a coin toss. Factoring out the open-loop dynamics,
+\begin{equation}\label{eq:returndiff}
+  \Dfun(\lam) = \det\!\bigl(\mat I + \mat Q_0(\lam)^{-1}\mat F(\lam)\bigr),
+  \qquad \mat Q_0 = \lam^2\mat M+\lam\mat C+\mat K,
+\end{equation}
+where $\mat F(\lam)=K_p h^{-1}\ee^{-\lam\tau}\vect e_{29}\vect e_1^{\!\top}$
+is the (rank-one) feedback matrix, leaves the zeros untouched, adds poles
+only at the open-loop roots -- all in the left half-plane, so the
+right-half-plane count is unaffected -- and yields $\Dfun\to1$ at infinity,
+hence $n=0$ exactly and a residual of $\sim10^{-7}$. Because the feedback
+here is a single collocated sensor--actuator pair, $\mat F$ is rank one and
+\eqref{eq:returndiff} reduces to the classical scalar return difference
+$1+L(\lam)$ used in~\eqref{eq:beam}; for multi-input feedback the
+determinant form remains valid, at the cost of one extra LU solve per
+evaluation. One caveat is inherited from classical loop analysis: an exact
+pole--zero cancellation between the open loop and the feedback (an
+unobservable or uncontrollable mode) would remove that root
+from~\eqref{eq:returndiff} -- as it does from every input--output method --
+so the split should only be applied when the open-loop model is stabilizable
+and detectable through the chosen loop. The finite element chart reproduces
+the continuum result of A.8 within the resolved frequency range: the two are
+consistency checks on each other. As Section~\ref{sec:phaseode} argues,
+where such an open-loop/feedback split exists it is worth more than any
+tuning of the integrator.
 
 \paragraph{A.10 Large dense determinant.}
 A synthetic stress test: $\Dfun(\lam)=\det(\lam^2\mat M+\lam\mat C+\mat K+
 g\,\ee^{-\lam\tau}\mat K)$ with dense random symmetric positive definite
 $50\times50$ matrices, $\mat C=0.25\,\mat K$, swept over a delayed stiffness
-gain $g$ and the delay $\tau$. The evaluation cost is dominated by the LU
+gain $g>-1$ and the delay $\tau$. (At $g=-1$ exactly, the delayed stiffness
+cancels the static one and a characteristic root sits \emph{on} the
+integration line; the package then reports the invalid-count marker instead
+of an arbitrary integer.) The evaluation cost is dominated by the LU
 factorization per frequency; the adaptive sweep keeps the number of
 evaluations low, so even this case yields charts in tens of seconds. This
 example also exercises the overflow guards of
@@ -153,7 +195,14 @@ $\Dfun(\lam)=\lam^{1.8}+0.5\,\lam^{0.8}+k\,\ee^{-\lam\tau}$ over
 $(k,\tau)$, with the principal branch of the fractional powers. The
 half-line count applies with the non-integer effective order estimated
 by~\eqref{eq:npow}; the origin offset of Section~\ref{sec:phaseode}
-regularizes the branch point at $\lam=0$.
+regularizes the branch point at $\lam=0$. For $\sigma=0$ the integration
+line stays right of the branch cut and the count is unambiguous; shifted
+lines with $\sigma<0$ cross the cut of the principal branch, so
+$\gamma$-stability contours of fractional systems refer to the roots of the
+principal-branch extension of $\Dfun$ (see Section~\ref{sec:counting}) --
+consistent with the convention of the fractional-systems
+literature~\cite{petras2011fractional,fioravanti2012numerical}, but worth
+keeping in mind when comparing against time-domain simulations.
 
 \begin{figure}[tb]
   \centering
@@ -168,7 +217,7 @@ regularizes the branch point at $\lam=0$.
   points tabulated in~\cite{gao2017robust}.}\label{fig:fraccontroller}
 \end{figure}
 
-\paragraph{A.12 Fractional controller chart from the literature.}
+\paragraph{A.11 Fractional controller chart from the literature.}
 As an external validation of the fractional capability,
 Fig.~\ref{fig:fraccontroller} reproduces the stabilizing-region chart of
 Gao, Zhai and Liu~\cite{gao2017robust} (Example~1), computed there by

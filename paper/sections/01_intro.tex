@@ -4,7 +4,7 @@ Time delays are inherent in a wide range of engineering systems: regenerative
 machine-tool vibrations~\cite{tobias1958theory,tlusty1963stability,altintas1995analytical,munoa2016chatter},
 digitally controlled and teleoperated machines, active vibration suppression,
 wheel shimmy, and traffic or population dynamics all lead to delay differential
-equations (DDEs)~\cite{stepan1989retarded,hale1993introduction,michiels2014stability}.
+equations (DDEs)~\cite{bellman1963differential,stepan1989retarded,hale1993introduction,michiels2014stability}.
 Since the characteristic function $\Dfun(\lam)$ of even the simplest linear
 autonomous DDE is transcendental, it possesses infinitely many characteristic
 roots, and the stability of an equilibrium can rarely be decided in closed
@@ -48,19 +48,25 @@ each require dedicated, nontrivial extensions in the time domain.
 
 The frequency domain offers a complementary route, since all the listed
 system classes share the same abstract object: an analytic characteristic
-function $\Dfun(\lam)$ whose roots in the right half-plane must be counted.
+function $\Dfun(\lam)$ whose roots in the right half-plane must be counted
+(for a comprehensive treatment see~\cite{gu2003stability}).
 Classical tools include the D-subdivision method~\cite{neimark1949decomposition},
 the analytical stability criteria of St\'ep\'an~\cite{stepan1989retarded},
 the Nyquist and Mikhailov criteria~\cite{nyquist1932regeneration,mikhailov1938method},
 the direct method of Walton and Marshall~\cite{walton1987direct}, the
-Rekasius substitution~\cite{rekasius1980stability}, and the cluster treatment
-of characteristic roots~\cite{olgac2002exact}; the Lambert-$W$
+Rekasius substitution~\cite{rekasius1980stability}, the cluster treatment
+of characteristic roots~\cite{olgac2002exact}, and the frequency-sweeping
+tests of Li, Niculescu and \c{C}ela~\cite{li2015analytic}; the Lambert-$W$
 formalism~\cite{yi2010timedelay} and the matrix method of
-Louisell~\cite{louisell2001matrix} target the dominant roots directly, while
-the quasi-polynomial root finder QPmR~\cite{vyhlidal2009mapping,vyhlidal2014qpmr}
+Louisell~\cite{louisell2001matrix} target the dominant roots directly, the
+quasi-polynomial root finder QPmR~\cite{vyhlidal2009mapping,vyhlidal2014qpmr}
 computes all roots in a prescribed rectangle from the values of
-$\Dfun(\lam)$ on a grid. A recent survey of argument-principle-based
-counting techniques is given in~\cite{niculescu2023counting}.
+$\Dfun(\lam)$ on a grid -- a contour-integral strategy also developed for
+general nonlinear eigenvalue problems by Beyn~\cite{beyn2012integral} --
+and the YALTA toolbox~\cite{avanessoff2013yalta} automates root-locus and
+stability analysis for classical and fractional delay systems. A recent
+survey of argument-principle-based counting techniques is given
+in~\cite{niculescu2023counting}.
 
 Two frequency-domain strategies are particularly relevant here. The first
 solves the two real equations $\Real\Dfun(\ii\omega)=\Imag\Dfun(\ii\omega)=0$
@@ -160,5 +166,5 @@ $\Dfun(\lam)$ from a time-domain model. Section~\ref{sec:showcase} walks
 through the complete workflow on a constrained two-degree-of-freedom system
 with delayed control, Section~\ref{sec:performance} quantifies accuracy, CPU
 time and memory, including a comparison with the semi-discretization method,
-and Section~\ref{sec:conclusion} concludes. \ref{app:gallery} collects twelve
+and Section~\ref{sec:conclusion} concludes. Appendix~\ref{app:gallery} collects twelve
 further case studies from all supported system classes.

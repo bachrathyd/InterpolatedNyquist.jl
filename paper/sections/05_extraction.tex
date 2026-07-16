@@ -61,6 +61,8 @@ function rhs(u, h, p, t)              # simulation model (DDE interface)
 end
 
 D(lam, p)  = get_D_from_model(rhs, lam, p, Val(7); mass_matrix = E)
+                                      # Val(7): the model has 7 states;
+                                      # E is the (singular) mass matrix
 Z, Zraw, minD, sigma_est, omega_est =
     calculate_unstable_roots_direct(D, (2.0, 1.0))
 \end{verbatim}

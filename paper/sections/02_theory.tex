@@ -81,6 +81,35 @@ For $\sigma=0$, $\Zint$ counts the unstable roots; for $\sigma<0$ it counts
 the roots violating the prescribed spectral gap, so the same formula draws
 $\gamma$-stability charts.
 
+Three standing assumptions deserve explicit statement. \emph{(i)~Finitely many
+roots right of the line, none on it.} For retarded systems and regular DDAEs
+of low index this holds for every $\sigma$ greater than some abscissa; for
+DDAEs of higher index the spectrum can acquire advanced-type root chains that
+run into the right half-plane, and the count is then infinite for any
+line~\cite{michiels2011spectrum,ha2016analysis} -- such systems are outside
+the scope of~\eqref{eq:count}, although the diagnostic of
+Section~\ref{sec:integerness} flags them, because the truncated integral then
+fails to settle to an integer. \emph{(ii)~Neutral tail.} For neutral systems
+$\Dfun\sim c\lam^{n}\bigl(1+\sum_j b_j\ee^{-\lam\tau_j}\bigr)$ and the phase
+of the parenthesis oscillates without decay as $\omega\to\infty$: the
+integral in~\eqref{eq:count} does not converge but oscillates within a
+bounded envelope. If the neutral amplitude satisfies $\beta=\sum_j|b_j|<1$ --
+the strong-stability condition of the difference
+operator~\cite{hale2002strong,michiels2005eigenvalue} -- that envelope is
+bounded by $\arcsin(\beta)/\pi<1/2$ per delay term, so truncating at a
+generic $\wmax$ and rounding still recovers the exact count. As $\beta\to1$
+(essential instability approaching) the bound saturates and the integer
+residual of Section~\ref{sec:integerness} grows accordingly -- the diagnostic
+degrades exactly where the answer itself becomes fragile, which is the honest
+behaviour (see the acceleration-feedback case study A.6 in
+Appendix~\ref{app:gallery}). \emph{(iii)~Analyticity right of the line.} Fractional
+powers $\lam^{\alpha}$ are taken on the principal branch, whose cut lies on
+the negative real axis; for $\sigma\ge0$ the region right of the line is then
+free of branch points, and~\eqref{eq:count} applies verbatim. A shifted line
+with $\sigma<0$, however, crosses the cut, and the count refers to the roots
+of the principal-branch extension; case study A.11 in
+Appendix~\ref{app:gallery} discusses the practical consequences.
+
 \subsection{Why the naive evaluation is impractical}\label{sec:naive}
 
 Formula~\eqref{eq:count} looks like a textbook quadrature problem, but three

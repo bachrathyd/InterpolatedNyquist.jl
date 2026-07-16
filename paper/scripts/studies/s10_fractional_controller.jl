@@ -36,7 +36,7 @@ for (ic, case) in enumerate(CASES_G)
         sweep_grid(D, kpv, kiv; ω_max = 1e4)
     end
     ax = MAxis(fig[1, ic], xlabel = "k_p", ylabel = ic == 1 ? "k_i" : "",
-        title = "λ = $(case.lam)")
+        title = "μ = $(case.lam)")
     stability_panel!(ax, kpv, kiv, combined_metric(grid.Z, grid.sigma))
     cmap = cgrad([:black, :red])
     for (k, sd) in enumerate(case.sig_degs)

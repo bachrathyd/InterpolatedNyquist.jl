@@ -5,17 +5,31 @@ if !@isdefined(STUDIES_COMMON_INCLUDED)
 using Statistics
 
 """
-Median wall time of `f()`, auto-scaling the repetition count so that each
-sample takes at least 20 ms (removes timer granularity), after a warm-up call.
+Median wall time of `f()`, after a warm-up call.
+
+Cheap calls are batched so that each sample lasts at least `min_batch_s`
+(removing timer granularity); expensive calls are sampled fewer times instead,
+because a single evaluation can already take tens of seconds (a low-order pair
+at a tight tolerance over a wide frequency range) and seven repeats of that
+would dominate the whole study.
 """
 function time_point(f; samples = 7, min_batch_s = 0.02)
     f()
     t1 = @elapsed f()
+    if t1 > 1.0
+        return t1                      # already precise; repeating is pure waste
+    end
+    n = t1 > 0.05 ? 3 : samples
     k = max(1, ceil(Int, min_batch_s / max(t1, 1e-9)))
     ts = Float64[]
-    for _ in 1:samples
+    for _ in 1:n
         GC.gc()
-        push!(ts, (@elapsed for _ in 1:k; f(); end) / k)
+        t = @elapsed begin
+            for _ in 1:k
+                f()
+            end
+        end
+        push!(ts, t / k)
     end
     return median(ts)
 end

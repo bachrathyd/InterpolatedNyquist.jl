@@ -57,6 +57,20 @@ end
 const SHOWCASE_PRANGE = (0.0, 4.0)
 const SHOWCASE_DRANGE = (-0.5, 3.0)
 
+"First-order (A, B) matrices of the reduced showcase system, x'(t) = A x(t) + B x(t-tau)."
+function showcase_AB(p)
+    P, Dg = p
+    m23 = SM.m2 + SM.m3
+    K = [SM.k1 + SM.k2 -SM.k2; -SM.k2 SM.k2]
+    C = [SM.c1 + SM.c2 -SM.c2; -SM.c2 SM.c2]
+    Minv = [1 / SM.m1 0.0; 0.0 1 / m23]
+    A = [zeros(2, 2) I; -Minv*K -Minv*C]
+    B = zeros(4, 4)
+    B[3, 1] = -P / SM.m1
+    B[3, 3] = -Dg / SM.m1
+    return A, B
+end
+
 # ===========================================================================
 # 4th-order delayed oscillator (benchmark workhorse, same as tests/examples)
 # ===========================================================================
@@ -72,6 +86,7 @@ end
 "Threaded brute-force sweep over a 2-parameter grid; returns matrices + wall time."
 function sweep_grid(D_func, xv, yv; kwargs...)
     params = vec([(x, y) for x in xv, y in yv])
+    calculate_unstable_roots_p_vec(D_func, params[1:1]; kwargs...)  # JIT warm-up, outside the timer
     t0 = time()
     Z_ints, Z_raws, min_Ds, sigmas, crits = calculate_unstable_roots_p_vec(D_func, params; kwargs...)
     t = time() - t0
@@ -88,6 +103,7 @@ the correct spectral-gap measure even where root branches cross.
 """
 function sweep_grid_dominant(D_func, xv, yv; nroots = 5, kwargs...)
     params = vec([(x, y) for x in xv, y in yv])
+    calculate_unstable_roots_p_vec(D_func, params[1:1]; n_roots_to_track = nroots, kwargs...)  # JIT warm-up
     t0 = time()
     Z_ints, Z_raws, min_Ds, es_list, wc_list =
         calculate_unstable_roots_p_vec(D_func, params; n_roots_to_track = nroots, kwargs...)
@@ -146,7 +162,7 @@ function phase_ode_solution(D_func, p; σ = 0.0, ω_max = 1e6, reltol = 1e-5, ab
         return SA[imag(Dp / Dval)]
     end
     prob = ODEProblem{false}(f, SA[0.0], (0.0, Float64(ω_max)))
-    return solve(prob, AutoTsit5(Rosenbrock23());
+    return solve(prob, Vern9();
         reltol = reltol, abstol = abstol, save_everystep = true, maxiters = 10^6)
 end
 

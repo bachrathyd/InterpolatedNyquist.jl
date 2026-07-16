@@ -34,31 +34,55 @@ function D_pda(λ::T, p) where T
     return λ^2 + T(0.1) * λ + one(T) + (P + T(0.1) * λ + A * λ^2) * exp(-λ)
 end
 
-# Internal damping raised from 0.1 to 0.4: with light damping the higher bar
-# modes stay almost undamped and the stable bands become a fine, visually noisy
-# comb; 0.4 keeps the physics (alternating bands) but resolves them cleanly.
-const BEAM_C = 0.4
+# Transcendental beam with KELVIN-VOIGT (material) damping and delayed boundary
+# feedback, in return-difference form D = 1 + Kp e^{-λτ} sech(γ L), γ = λ/√(1+cλ).
+#
+# The choice of damping model is what makes this a valid counting problem.
+# External/viscous damping (γ = √(λ²+cλ)) damps every mode equally, so the
+# roots accumulate on a vertical line and Z is 0 or ∞ -- the essential-spectrum
+# obstruction of a neutral system. Kelvin-Voigt damping is both physically
+# correct (real material damping is rate-dependent) and mathematically
+# benign: γ ~ √(λ/c) for large λ, so the high modes are damped ever harder,
+# Re λ_k → −∞, only finitely many roots sit near the axis, and |sech(γ)| decays
+# like e^{−√ω} on the imaginary axis. The count is then well defined.
+# The return-difference form additionally gives D → 1 (n = 0), no discretization.
+const BEAM_C = 0.05      # Kelvin-Voigt damping coefficient
 function D_beam(λ::T, p) where T
     Kp, τ = p
-    γ = sqrt((λ^2 + T(BEAM_C) * λ))
-    return cosh(γ) + Kp * exp(-λ * τ)
+    γ = λ / sqrt(one(T) + T(BEAM_C) * λ)
+    return one(T) + Kp * exp(-λ * τ) / cosh(γ)
 end
 
-function build_fem(N)
-    h = 1.0 / N
-    M = zeros(N, N); K = zeros(N, N)
-    for i in 1:N-1
+# n_el elements of length h = 1/n_el on n_el+1 nodes -> the bar has UNIT length,
+# so the FE model discretizes exactly the continuum bar of the beam panel and
+# the two charts are directly comparable. (An earlier version assembled N-1
+# elements of length 1/N: a bar of length (N-1)/N, whose ~3% frequency shift
+# visibly displaces the stability bands.)
+function build_fem(n_el)
+    h = 1.0 / n_el
+    n_nodes = n_el + 1
+    M = zeros(n_nodes, n_nodes); K = zeros(n_nodes, n_nodes)
+    for i in 1:n_el
         ke = (1 / h) * [1 -1; -1 1]; me = (h / 6) * [2 1; 1 2]
         K[i:i+1, i:i+1] += ke; M[i:i+1, i:i+1] += me
     end
-    return M[2:end, 2:end], 0.05 .* K[2:end, 2:end], K[2:end, 2:end]
+    # clamp node 1 -> n_el free DOFs
+    return M[2:end, 2:end], 0.05 .* K[2:end, 2:end], K[2:end, 2:end], h
 end
-const M_f, C_f, K_f = build_fem(30)
+const M_f, C_f, K_f, H_FEM = build_fem(29)   # 29 elements -> 29 DOF, length 1
+# Written as a RETURN DIFFERENCE det(I + Q0^-1 E) rather than the raw
+# determinant det(Q0 + E). Same zeros; the poles it introduces are the
+# open-loop roots, all in the left half-plane, so they do not affect the
+# right-half-plane count. The pay-off is that D -> 1 at infinity (n = 0)
+# instead of D ~ λ^58, which (i) removes the 1e298-scale magnitudes that
+# overflow, and (ii) removes the need to estimate a large leading order at all:
+# the raw form leaves an integer residual of ~0.4 (a coin flip), this one ~1e-7.
 function D_fem(λ::T, p) where T
     Kp, τ = p
-    Q = λ^2 .* T.(M_f) .+ λ .* T.(C_f) .+ T.(K_f)
-    Q[end, 1] += Kp * T(30.0) * exp(-λ * τ)
-    return det(Q)
+    Q0 = λ^2 .* T.(M_f) .+ λ .* T.(C_f) .+ T.(K_f)
+    F = zeros(T, size(Q0))
+    F[end, 1] = Kp / T(H_FEM) * exp(-λ * τ)   # strain reading at the clamped end
+    return det(one(T) * I + (Q0 \ F))
 end
 
 # 50x50 dense stress test. The previous parameters put the whole window deep in
@@ -110,13 +134,16 @@ SPECS = [
     # w starts slightly above 0: at w = 0 the rational D is constant (no roots)
     (id = "turning", D = D_turning, xl = "Ω", yl = "w", xr = (0.08, 1.2), yr = (0.01, 1.2),
      nx = half(100), ny = half(70), ω = 1e4, tol = 1e-5, mdbm = 35, title = "multi-DOF turning lobes"),
-    (id = "beam", D = D_beam, xl = "Kp", yl = "τ", xr = (0.0, 2.0), yr = (0.1, 3.0),
-     nx = half(60), ny = half(50), ω = 200.0, tol = 1e-5, mdbm = 20, title = "transcendental beam"),
-    # ω above the highest structural mode so the leading-order fit samples the
-    # asymptotic regime (FE bar modes reach ~60, the random 50x50 pencil ~30)
-    (id = "fem", D = D_fem, xl = "Kp", yl = "τ", xr = (0.0, 1.0), yr = (0.1, 7.5),
-     nx = half(60), ny = half(48), ω = 500.0, tol = 1e-5, mdbm = 0, title = "29-DOF FEM beam"),
-    (id = "bigmat", D = D_bigmat, xl = "gain", yl = "τ", xr = (-1.0, 1.0), yr = (0.05, 1.5),
+    (id = "beam", D = D_beam, xl = "Kp", yl = "τ", xr = (0.0, 5.0), yr = (0.2, 3.0),
+     nx = half(60), ny = half(50), ω = 1e4, tol = 1e-5, mdbm = 25, title = "transcendental beam"),
+    # SAME window as the beam panel (same physical feedback law: tip force
+    # from clamped-end strain, KV damping) so the two charts are directly
+    # comparable. ω above the highest structural mode (FE bar modes reach ~60).
+    (id = "fem", D = D_fem, xl = "Kp", yl = "τ", xr = (0.0, 5.0), yr = (0.2, 3.0),
+     nx = half(60), ny = half(50), ω = 500.0, tol = 1e-5, mdbm = 20, title = "29-DOF FEM bar"),
+    # gain > -1: at gain = -1 exactly, the delayed stiffness cancels the static
+    # one and a characteristic root sits ON the integration line (Z undefined)
+    (id = "bigmat", D = D_bigmat, xl = "gain", yl = "τ", xr = (-0.95, 1.0), yr = (0.05, 1.5),
      nx = half(28), ny = half(22), ω = 200.0, tol = 1e-5, mdbm = 10, title = "50x50 matrix determinant"),
     (id = "frac", D = D_frac, xl = "k", yl = "τ", xr = (0.0, 5.0), yr = (0.1, 2.0),
      nx = half(50), ny = half(50), ω = 100.0, tol = 1e-5, mdbm = 20, title = "fractional oscillator"),
@@ -128,10 +155,14 @@ gethl(s) = hasproperty(s, :hlines) ? s.hlines : nothing
 function gallery_panel!(fig, r, c, spec)
     xv = LinRange(spec.xr..., spec.nx)
     yv = LinRange(spec.yr..., spec.ny)
-    grid = with_cache("s08_$(spec.id)_v2_$(spec.nx)x$(spec.ny)") do
+    # the cache key hashes every numeric knob of the spec, so editing a
+    # panel's ranges / ω_max / tolerance can never silently reuse a stale
+    # grid computed for different axes (the classic stale-figure trap)
+    skey = string(hash((spec.xr, spec.yr, spec.ω, spec.tol, spec.mdbm)); base = 16)
+    grid = with_cache("s08_$(spec.id)_$(skey)_$(spec.nx)x$(spec.ny)") do
         sweep_grid(spec.D, xv, yv; ω_max = spec.ω, reltol = spec.tol, abstol = spec.tol)
     end
-    bnd = spec.mdbm > 0 ? with_cache("s08_$(spec.id)_v2_mdbm") do
+    bnd = spec.mdbm > 0 ? with_cache("s08_$(spec.id)_$(skey)_mdbm") do
             mdbm_boundary(spec.D, spec.xr, spec.yr; ngrid = spec.mdbm,
                 Niter = FAST[] ? 3 : 4, ω_max = spec.ω, reltol = spec.tol, abstol = spec.tol)
         end : nothing
@@ -153,15 +184,16 @@ function gallery_panel!(fig, r, c, spec)
 end
 
 timings = Tuple[]
+const N_A = 6           # first figure holds the first six panels
 figa = Figure(size = (W_FULL, W_FULL * 0.60))
-for (k, spec) in enumerate(SPECS[1:6])
+for (k, spec) in enumerate(SPECS[1:N_A])
     r, c = fldmod1(k, 3)
     push!(timings, gallery_panel!(figa, r, c, spec))
 end
 save_fig(figa, "fig_gallery_a")
 
 figb = Figure(size = (W_FULL, W_FULL * 0.60))
-for (k, spec) in enumerate(SPECS[7:11])
+for (k, spec) in enumerate(SPECS[N_A+1:end])
     r, c = fldmod1(k, 3)
     push!(timings, gallery_panel!(figb, r, c, spec))
 end

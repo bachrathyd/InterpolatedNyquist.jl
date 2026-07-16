@@ -123,7 +123,13 @@ integer-residual diagnostic below.
   wall-clock time of each full sweep is given in the panel titles. The chart
   is visually converged already at $10^{-3}$: the tolerance buys certainty
   rather than appearance, cf.\ Fig.~\ref{fig:errorfield} and
-  Table~\ref{tab:tolerance}.}\label{fig:tolerance}
+  Table~\ref{tab:tolerance}. To isolate the integrator, this study uses
+  $\wmax=10^{6}$ (rather than the $10^{4}$ that suffices for the chart) so
+  that the truncated tail does not mask the two tightest tolerances, and
+  evaluates the reduced form~\eqref{eq:showcasered} of the same
+  characteristic function, which is identical to the extracted one to machine
+  precision but avoids the $7\times7$ determinant; Table~\ref{tab:gridtimings}
+  gives the cost of the extracted form.}\label{fig:tolerance}
 \end{figure}
 
 \begin{figure}[tb]
@@ -143,8 +149,10 @@ integer-residual diagnostic below.
   \centering
   \caption{Tolerance study on the showcase system
   (grid as in Fig.~\ref{fig:tolerance}): sweep time, integer residual
-  statistics and the number of grid points where the rounded count would be
-  ambiguous ($\varepsilon\ge1/4$).}\label{tab:tolerance}
+  statistics, the number of grid points where the rounded count would be
+  ambiguous ($\varepsilon\ge1/4$), and the number of points whose $\Zint$
+  actually deviates from the $10^{-9}$-tolerance
+  reference.}\label{tab:tolerance}
   \maybeinput{tables/tab_tolerance.tex}
 \end{table}
 
@@ -153,8 +161,9 @@ tolerances $10^{-3}$, $10^{-5}$, $10^{-7}$ and $10^{-9}$, together with the
 measured sweep times, and Fig.~\ref{fig:errorfield} shows the corresponding
 integer-residual fields~\eqref{eq:eps}. Three observations matter for
 practice. First, the charts are visually indistinguishable: the tolerance
-buys \emph{certainty}, not appearance, and not a single grid point is
-misclassified even at the loosest setting (Table~\ref{tab:tolerance}).
+buys \emph{certainty}, not appearance, and even at the loosest setting not a
+single grid point deviates from the $10^{-9}$ reference count
+(Table~\ref{tab:tolerance}, last column).
 Second -- and this is the most useful outcome for a user -- the integer
 residual tracks the requested tolerance across the whole parameter plane
 with a roughly constant factor, so that
