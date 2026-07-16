@@ -35,16 +35,18 @@ encodes the estimated decay rate $\sest<0$, i.e.\ the spectral gap: the
 darker the shade, the faster every disturbance decays, and the colour varies
 smoothly because $\sest$ does. One map therefore answers three questions at
 once -- where the system is stable, how robustly, and how many roots must be
-stabilized elsewhere. (One qualification from Section~\ref{sec:tracking}
-applies: the gallery sweeps track a single $|\Dfun|$ minimum per point, so
-deep inside the stable domain the colour may reflect a non-dominant root
-branch; near the boundary -- the region the charts are read for -- the
-crossing root always produces the global minimum and the shading is
-faithful.) The black curve is the stability boundary traced by
+stabilized elsewhere. Following Section~\ref{sec:tracking}, the shading uses
+the \emph{dominant} root -- five tracked minima, all refined, maximal real
+part -- rather than the single closest minimum, which would switch branch
+where another mode overtakes it and shade the deep stable domain with a
+non-dominant root. The black curve is the stability boundary traced by
 MDBM from the objective~\eqref{eq:objective}, not a contour of the coloured
-grid. Each panel is annotated with the wall-clock cost of both stages: the
-brute-force sweep that produces the colour, and the MDBM trace that produces
-the boundary.
+grid; the same dominant-root convention makes that objective continuous
+across a branch crossing, which matters more than it sounds -- a jump there
+lets MDBM's linear in-cell interpolation invent a spurious boundary point in
+the middle of the stable domain. Each panel is annotated with the wall-clock
+cost of both stages: the brute-force sweep that produces the colour, and the
+MDBM trace that produces the boundary.
 
 \begin{figure}[tb]
   \centering

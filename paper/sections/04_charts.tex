@@ -44,7 +44,15 @@ outside, crosses zero exactly on the stability boundary, and -- unlike
 $\Zint$ itself -- varies almost linearly across it, because near the
 boundary $\sest$ is an accurate estimate of the dominant root's real part
 (Section~\ref{sec:tracking}). MDBM can therefore interpolate the zero
-crossing within each bracketing cell to sub-cell accuracy. Note the contrast
+crossing within each bracketing cell to sub-cell accuracy. One detail is
+essential rather than incidental: $\sest$ here must be the \emph{dominant}
+root of Section~\ref{sec:tracking} (several tracked minima, maximal real
+part), not the single closest minimum. The latter jumps where one branch
+overtakes another, and a linear model fitted inside a cell straddling that
+jump interpolates a zero that does not exist -- a phantom boundary point in
+the interior of the stable domain, which is invisible in the traced curve but
+corrupts anything built on the point cloud, such as the inscribed circle of
+Section~\ref{sec:robust}. Note the contrast
 with applying MDBM to the pair
 $\Real\Dfun=\Imag\Dfun=0$ in the parameter--frequency space: that approach
 traces \emph{all} root-crossing D-curves, most of which lie deep in the

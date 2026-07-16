@@ -209,9 +209,22 @@ different root branch may produce a deeper dip. When the true dominant root
 is required away from the boundary, several minima should be tracked
 ($N_r\approx5$--$10$), all of them refined, and the dominant root taken as
 the one with the maximal real part -- this recipe is validated against an
-independent eigenvalue method in Section~\ref{sec:performance-sd}. For the
-stability chart itself the caveat is immaterial, since near the boundary the
-crossing root always produces the global minimum.
+independent eigenvalue method in Section~\ref{sec:performance-sd}.
+
+That recommendation is worth more than a footnote, because the single-minimum
+estimate is not merely inaccurate away from the boundary: it is
+\emph{discontinuous}. Where one branch overtakes another as the closest one,
+$\west$ jumps between modes and $\sest$ jumps with it -- on the showcase
+system, from $-0.194$ to $-0.053$ as $\west$ jumps from $0.96$ to $2.34$,
+across a single step in the gain. Any quantity built on it inherits the jump,
+and a method that fits a local linear model -- as the boundary tracer of
+Section~\ref{sec:mdbm} does inside each cell -- will read a steep gradient as
+a zero crossing and place a spurious boundary point in the middle of the
+stable domain. The dominant root passes through a branch crossing smoothly,
+because it is a maximum over branches rather than the nearest one, so
+building the coloring and the boundary objective from it removes the artefact
+at its source. For the count itself the caveat is immaterial, since near the
+boundary the crossing root always produces the global minimum.
 
 \subsection{Higher-order root refinement}\label{sec:refinement}
 

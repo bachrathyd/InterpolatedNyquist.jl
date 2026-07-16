@@ -137,14 +137,17 @@ end
 # is exactly the trade a first exploration should make, and invisible at
 # chart resolution.
 #
-# MDBM: a 7x7 initial mesh with 6 refinement levels -> 7*2^6 = 448 equivalent
-# per-axis resolution, i.e. ~4.5x the background grid, from only 49 blanket
-# evaluations. The refinement concentrates on the boundary, so the trace stays
-# cheaper than the sweep it overlays.
+# MDBM: a 7x7 initial mesh refined until the traced boundary has ~4x the
+# per-axis resolution of the panel's background grid, from only 49 blanket
+# evaluations. The refinement depth is derived from the grid rather than fixed,
+# because a fixed depth is either too coarse for a fine panel or -- on the two
+# panels whose D costs milliseconds (FEM bar, 50x50 determinant) -- spends
+# minutes resolving a boundary far beyond the resolution anyone will look at.
 half(n) = FAST[] ? max(12, n ÷ 2) : n
 const NBF = 100        # background grid, all panels
 const MDBM_N0_G = 7    # MDBM initial mesh per axis
-const MDBM_IT_G = 6    # MDBM refinement levels -> 448-equivalent
+mdbm_levels(nx) = clamp(ceil(Int, log2(4 * nx / MDBM_N0_G)), 3, 6)
+mdbm_equiv(nx) = MDBM_N0_G * 2^mdbm_levels(nx)
 SPECS = [
     (id = "fourth",  D = D_fourth,     xl = "P",  yl = "D",  xr = (-2.0, 4.0), yr = (-2.0, 5.0),
      nx = half(NBF), ny = half(NBF), ω = 1e4, tol = 1e-4, title = "4th-order + delayed PD"),
@@ -189,7 +192,8 @@ function gallery_panel!(fig, r, c, spec)
     # the cache key hashes every numeric knob of the spec, so editing a
     # panel's ranges / ω_max / tolerance can never silently reuse a stale
     # grid computed for different axes (the classic stale-figure trap)
-    skey = string(hash((spec.xr, spec.yr, spec.ω, spec.tol, MDBM_N0_G, MDBM_IT_G)); base = 16)
+    mit = mdbm_levels(spec.nx)
+    skey = string(hash((spec.xr, spec.yr, spec.ω, spec.tol, MDBM_N0_G, mit)); base = 16)
     # the DOMINANT root (max Re over several tracked minima) -- a single
     # tracked minimum can belong to a non-dominant branch away from the
     # boundary, which shows up as discontinuous shading
@@ -199,7 +203,7 @@ function gallery_panel!(fig, r, c, spec)
     end
     bnd = with_cache("s08_$(spec.id)_$(skey)_mdbm") do
         mdbm_boundary(spec.D, spec.xr, spec.yr; ngrid = MDBM_N0_G,
-            Niter = FAST[] ? MDBM_IT_G - 2 : MDBM_IT_G,
+            Niter = FAST[] ? max(3, mit - 2) : mit,
             ω_max = spec.ω, reltol = spec.tol, abstol = spec.tol)
     end
     C = combined_metric(grid.Z, grid.sigma)
@@ -224,7 +228,8 @@ function gallery_panel!(fig, r, c, spec)
     text!(ax, 0.03, 0.03; text = lab, space = :relative, align = (:left, :bottom),
         fontsize = 6, color = :white,
         strokecolor = :black, strokewidth = 0.6)
-    return (spec.id, spec.nx * spec.ny, grid.t, bnd === nothing ? NaN : bnd.t)
+    return (spec.id, spec.nx * spec.ny, grid.t, bnd === nothing ? NaN : bnd.t,
+            spec.ω, spec.tol, MDBM_N0_G, mit, mdbm_equiv(spec.nx))
 end
 
 # ---------------------------------------------------------------------------
@@ -249,9 +254,22 @@ fem_diag = with_cache("s08_fem_diag_v1") do
     λs = (0.3 + 2.0im, -0.1 + 15.0im, 0.05 - 40.0im)
     agree = maximum(abs(D_fem_full(λ, p_fd) - D_fem(λ, p_fd)) /
                     max(abs(D_fem_full(λ, p_fd)), 1e-300) for λ in λs)
-    # cost per evaluation of each form (median of repeats)
-    bench(f) = (f(λs[1], p_fd); median([(@elapsed for _ in 1:200; f(λs[1], p_fd); end) / 200
-                                        for _ in 1:5]))
+    # cost per evaluation of each form (median of repeats).
+    # NOTE: `@elapsed for ... end` does not parse -- the loop must be wrapped
+    # in a begin block for the macro to take a single expression.
+    function bench(f)
+        f(λs[1], p_fd)                      # warm-up
+        ts = Float64[]
+        for _ in 1:5
+            t = @elapsed begin
+                for _ in 1:200
+                    f(λs[1], p_fd)
+                end
+            end
+            push!(ts, t / 200)
+        end
+        return median(ts)
+    end
     t_full = bench(D_fem_full); t_lem = bench(D_fem)
     # magnitude and integer residual of the RAW determinant vs the return difference
     mag_raw = abs(D_fem_raw(1.0 + 50.0im, p_fd))
@@ -293,4 +311,6 @@ for (k, spec) in enumerate(SPECS[N_A+1:end])
 end
 save_fig(figb, "fig_gallery_b")
 
-write_csv("gallery_timings", ["system", "n_points", "grid_time_s", "mdbm_time_s"], timings)
+write_csv("gallery_timings",
+    ["system", "n_points", "grid_time_s", "mdbm_time_s", "wmax", "tol",
+     "mdbm_n0", "mdbm_levels", "mdbm_equiv_res"], timings)
