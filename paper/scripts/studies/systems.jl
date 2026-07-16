@@ -117,14 +117,30 @@ function sweep_grid_dominant(D_func, xv, yv; nroots = 5, kwargs...)
             sigma = reshape(sig, nx, ny), t = t)
 end
 
-"MDBM boundary trace with the scalar sign(Z==0)*|σ_est - σ| objective."
+"""
+MDBM boundary trace with the scalar sign(Z==0)*|σ_dom - σ| objective.
+
+The objective uses the DOMINANT root -- several tracked |D| minima, all
+refined, maximal real part -- not the single closest minimum. This matters and
+is not a refinement of taste: the single tracked minimum switches root branch
+wherever another mode becomes the closest one, so its σ_est jumps
+discontinuously (on the showcase system, from -0.194 to -0.053 across one cell
+as ω_crit jumps 0.96 -> 2.34). MDBM fits a linear model inside each cell, and
+across such a cliff it manufactures a spurious zero -- a phantom "boundary"
+point in the middle of the stable domain, which then blocks the largest
+inscribed circle. The dominant root varies smoothly through the branch
+crossing (it is the max over branches, not the nearest one), so the objective
+stays continuous and the trace stays clean.
+"""
 function mdbm_boundary(D_func, xrange, yrange; ngrid = 30, Niter = 4, σ = 0.0,
-                       ω_max = 1e6, reltol = 1e-5, abstol = 1e-5)
+                       ω_max = 1e6, reltol = 1e-5, abstol = 1e-5, nroots = 5)
     function wrapper(x, y)::Float64
         zi, zr, md, es, wc = calculate_unstable_roots_direct(D_func, (x, y), σ;
-            ω_max = ω_max, reltol = reltol, abstol = abstol)
+            ω_max = ω_max, reltol = reltol, abstol = abstol,
+            n_roots_to_track = nroots)
         sign_val = (max(zi, 0) == 0) ? 1.0 : -1.0
-        g = sign_val * abs(es - σ)
+        σ_dom = maximum(filter(isfinite, es); init = -Inf)
+        g = sign_val * abs(σ_dom - σ)
         # undefined root estimate (D' ≡ 0, e.g. zero-gain edge): far from boundary
         return isfinite(g) ? g : sign_val * 1.0e3
     end

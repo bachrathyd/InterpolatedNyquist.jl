@@ -212,22 +212,36 @@ function argument_principle_solver_with_MDBM(D_func, axlist, ω_coars; σ=0.0)
 end
 
 """
-    sensitivity_mapping_with_MDBM(D_func, axlist; σ=0.0, ω_max=1e6, Niter=4)
+    sensitivity_mapping_with_MDBM(D_func, axlist; σ=0.0, ω_max=1e6, Niter=4, n_roots=5)
 
 HIGH-LEVEL: Uses the integration-based sensitivity metric (estimated σ) as the MDBM objective.
 This provides the most robust and informative stability map.
+
+The objective is built from the **dominant** root -- `n_roots` tracked minima of
+`|D|`, all refined, maximal real part -- rather than from the single closest
+minimum. The distinction is essential here, not cosmetic: the closest minimum
+switches root branch wherever another mode overtakes it, so its `σ_est` jumps
+discontinuously. MDBM fits a linear model within each cell and across such a
+jump it produces a *spurious* zero, i.e. a phantom boundary point in the middle
+of the stable domain. The dominant root passes through a branch crossing
+continuously, so the objective is continuous and the traced set contains only
+genuine boundary points. Pass `n_roots=1` to recover the old (cheaper,
+discontinuous) behaviour.
 """
-function sensitivity_mapping_with_MDBM(D_func, axlist; σ=0.0, ω_max=1e6, Niter=4)
-    
+function sensitivity_mapping_with_MDBM(D_func, axlist; σ=0.0, ω_max=1e6, Niter=4, n_roots::Int=5)
+
     function mdbm_objective(p_all...)
         p = length(p_all) > 1 ? Tuple(p_all) : p_all[1]
-        zi, zr, md, es, wc = calculate_unstable_roots_direct(D_func, p, σ; ω_max=ω_max)
-        sign_val = (zi == 0) ? 1.0 : -1.0
-        # es is the absolute real part of the closest root; its distance to the
-        # integration line λ = σ + im*ω is |es - σ|. If the root estimate is
-        # undefined (e.g. D is constant because a gain parameter is zero, so
-        # D' ≡ 0), return a large signed value: far from the boundary.
-        g = sign_val * abs(es - σ)
+        zi, zr, md, es, wc = calculate_unstable_roots_direct(D_func, p, σ;
+            ω_max=ω_max, n_roots_to_track=n_roots)
+        sign_val = (max(zi, 0) == 0) ? 1.0 : -1.0
+        # `es` holds the absolute real parts of the tracked roots; the dominant
+        # one is the largest. Its distance to the integration line λ = σ + im*ω
+        # is |σ_dom - σ|. If the root estimate is undefined (e.g. D is constant
+        # because a gain parameter is zero, so D' ≡ 0), return a large signed
+        # value: far from the boundary.
+        σ_dom = n_roots == 1 ? es : maximum(filter(isfinite, es); init=-Inf)
+        g = sign_val * abs(σ_dom - σ)
         return isfinite(g) ? g : sign_val * 1.0e3
     end
 

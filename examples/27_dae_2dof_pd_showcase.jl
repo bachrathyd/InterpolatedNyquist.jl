@@ -87,9 +87,22 @@ Pv = LinRange(0.0, 4.0, 90)
 Dv = LinRange(-0.5, 3.0, 70)
 params_vec = vec([(Pv[i], Dv[j]) for i in 1:length(Pv), j in 1:length(Dv)])
 
+# DEMO SETTINGS: deliberately fast rather than maximally safe.
+#   ω_max = 1e4  -- three decades above the highest resonance. ω_max = 1e6 is
+#                   the safe default and costs ~50x more evaluations here
+#                   (this system's velocity feedback makes the phase ripple
+#                   decay only like 1/ω, so the march must resolve the whole
+#                   range); 1e4 leaves a truncated tail of ~0.2/ω_max ~ 2e-5
+#                   in Z̃, far below the 1/2 rounding threshold -> same chart.
+#   tol   = 1e-4 -- one decade looser than the package default. The chart and
+#                   the traced boundary are indistinguishable from the
+#                   reference; only the count of a few boundary-adjacent
+#                   pixels can differ by one (see the paper, Sec. 6.3).
+# For a final, publication-quality chart use the defaults (tol 1e-5, ω_max 1e6).
 println("Grid sweep (7x7 DAE determinant, $(length(params_vec)) points)...")
 @time Z_ints_vec, Z_raws_vec, min_Ds_vec, σ_ests_vec, ω_crits_vec =
-    calculate_unstable_roots_p_vec(D_dae, params_vec; ω_max=1e4, verbosity=1)
+    calculate_unstable_roots_p_vec(D_dae, params_vec; ω_max=1e4,
+        reltol=1e-4, abstol=1e-4, verbosity=1)
 
 Z_mat_int = reshape(Z_ints_vec, length(Pv), length(Dv))
 σ_mat_est = reshape(σ_ests_vec, length(Pv), length(Dv))
@@ -99,10 +112,16 @@ C_to_plot = Z_mat_int .+ (Z_mat_int .== 0) .* σ_mat_est
 # 4. Hybrid Strategy Part 2: high-resolution MDBM boundary trace
 # ---------------------------------------------------------------------------
 println("\nTracing stability boundary with MDBM...")
+# The objective uses the DOMINANT root (several tracked minima, max real part),
+# not the single closest one: the closest minimum switches root branch where
+# another mode overtakes it, and the resulting jump in σ_est makes MDBM
+# interpolate a spurious "boundary" point in the middle of the stable domain.
 function mdbm_wrapper(pp, dd)::Float64
-    zi, zr, md, es, wc = calculate_unstable_roots_direct(D_dae, (pp, dd); ω_max=1e4)
+    zi, zr, md, es, wc = calculate_unstable_roots_direct(D_dae, (pp, dd);
+        ω_max=1e4, reltol=1e-4, abstol=1e-4, n_roots_to_track=5)
     sign_val = (max(zi, 0) == 0) ? 1.0 : -1.0
-    return sign_val * abs(es)
+    σ_dom = maximum(filter(isfinite, es); init=-Inf)
+    return sign_val * abs(σ_dom)
 end
 
 boundary_mdbm = MDBM_Problem(mdbm_wrapper, [LinRange(0.0, 4.0, 30), LinRange(-0.5, 3.0, 30)])

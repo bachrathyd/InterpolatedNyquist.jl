@@ -108,10 +108,13 @@ precisely the features a fixed frequency grid tends to miss. Panel~(c) shows
 the same march continuing over more than two further decades of frequency:
 since the delayed \emph{velocity} feedback of this system produces a phase
 ripple decaying only like $\omega^{-1}$ (Section~\ref{sec:phaseode}), the
-solver keeps taking moderate steps through the tail, and $\wmax=10^{4}$ --
-roughly three decades above the resonances -- is the economical choice used
-for all sweeps of this section; the truncation is fully exposed by the
-integer-residual diagnostic below.
+solver keeps taking moderate steps through the tail. This section is about
+accuracy, so the accuracy-critical studies below use the safe
+$\wmax=10^{6}$; $\wmax=10^{4}$ -- three decades above the resonances --
+leaves a truncated tail of $\approx0.2/\wmax\approx2\cdot10^{-5}$ in $\Zraw$,
+far below the rounding threshold, and is the economical choice for the charts
+themselves and for the gallery of Appendix~\ref{app:gallery}. Either way the
+truncation is exposed by the integer-residual diagnostic below, never hidden.
 
 \subsection{Tolerance as a universal accuracy dial}\label{sec:showcase-tolerance}
 
@@ -201,7 +204,29 @@ Equation~\eqref{eq:rule} therefore lets the accuracy of $\Zint$ be
 to $10^{-3}$ asks for $10^{-5}$, which is exactly the package default.
 Third, the CPU-time premium of tightening the tolerance by six decades is
 well below two orders of magnitude, because the extra effort is spent only
-near the integrand peaks.
+near the integrand peaks -- and this asymmetry has a practical corollary
+worth stating plainly, since it runs against the instinct that a loose
+tolerance is dangerous.
+
+A miscount is not the same kind of error as a displaced boundary, and for
+chart work it is the milder one. The two outputs of the sweep degrade
+completely differently with the tolerance: the count $\Zint$ is a
+\emph{rounded} quantity, so it fails discontinuously -- an accumulated phase
+error of $\pm\pi$ flips it by one -- whereas the tracked $\sest$ is a
+\emph{local} quantity read off the minimum of $|\Dfun|$, and it inherits the
+tolerance smoothly. The traced stability boundary is built from $\sest$
+alone through the objective~\eqref{eq:objective}, so it stays accurate even
+where the count does not: at $10^{-3}$ the boundary of the showcase chart
+lies within
+%%RECONCILE: quote max boundary shift from the loose-vs-reference trace
+a fraction of a pixel of the reference trace, while a handful of
+boundary-adjacent counts have already flipped. The practical recipe follows:
+\emph{a loose tolerance is an appropriate tool for an initial search} --
+locating the stable island, its shape, and the robust operating point --
+after which the interesting region is recomputed at the default or tighter
+setting to certify the counts. What must not be done is to report a count
+from a loose sweep without the cross-check~\eqref{eq:crosscheck}, because
+that is the one number whose error the residual will not reveal.
 
 Two limits deserve mention, since both are visible in
 Fig.~\ref{fig:errorfield} if the settings are pushed. The rule~\eqref{eq:rule}

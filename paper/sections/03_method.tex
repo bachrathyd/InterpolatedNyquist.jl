@@ -67,11 +67,22 @@ Section~\ref{sec:integerness}. If a delayed term
 sits only one order below the leading power (delayed \emph{velocity}
 feedback), the ripple decays merely like $\omega^{-1}$, the solver keeps
 resolving it (Fig.~\ref{fig:walkthrough}c), and every resolved step
-contributes its share of local error; then $\wmax$ is best placed two to three
-decades above the highest resonance (which also keeps the sampling window
-of the order fit~\eqref{eq:npow} in the asymptotic regime), and the integer-residual indicator of
-Section~\ref{sec:integerness} exposes both a truncated tail and an
-excessively long march at a glance.
+contributes its share of local error; there $\wmax$ does cost, and the
+integer-residual indicator of Section~\ref{sec:integerness} exposes both a
+truncated tail and an excessively long march at a glance.
+
+The resulting recommendation is asymmetric, and deliberately so.
+\emph{For accuracy, be generous}: $\wmax=10^{6}$ is a safe default for every
+system in this paper, and $10^{8}$ costs almost nothing extra where the
+ripple decays quickly. \emph{For speed, be frugal}: two to three decades
+above the highest resonance ($\wmax=10^{4}$ for the mechanical systems here)
+leaves a truncated tail of order $0.2/\wmax$ in $\Zraw$ -- five orders of
+magnitude below the rounding threshold -- and, for a slowly decaying ripple,
+cuts the evaluation count by more than an order of magnitude. The charts of
+Section~\ref{sec:showcase} exploit the first setting; the gallery of
+Appendix~\ref{app:gallery} exploits the second. Since a too-small $\wmax$
+announces itself in the residual, the choice can be made empirically rather
+than by analysis.
 
 The leading order $n$ in~\eqref{eq:phaseode} is estimated numerically, and
 the natural place to do so is not the imaginary axis at all. The term $n/2$

@@ -7,8 +7,26 @@ supported model classes, plus the reproduction of a published design
 chart. The complete scripts, grid resolutions and timings are part of the
 package repository.
 
+\paragraph{These charts are the speed argument.} Sections~\ref{sec:showcase}
+and~\ref{sec:performance} make the accuracy case, at $\wmax=10^{6}$ and
+tolerances down to $10^{-8}$. The gallery answers the complementary question
+-- \emph{what does a chart cost when one simply wants to see the picture?} --
+and so every panel here is computed at settings chosen for speed rather than
+for certainty: a generous $100\times100$ background grid, but $\wmax$ only a
+few decades above the highest resonance and a tolerance of $10^{-4}$, one
+decade looser than the package default. Each panel is annotated with the
+measured wall-clock cost of both stages. At these settings the count of a few
+boundary-adjacent pixels may be off by one (Section~\ref{sec:showcase-tolerance});
+that is precisely the trade a first exploration should make, it is invisible
+at chart resolution, and the traced boundary -- which is built from $\sest$,
+not from the count -- is unaffected. The MDBM traces start from a $7\times7$
+mesh and refine six times, reaching a $448\times448$-equivalent boundary
+resolution -- roughly four times the background grid -- from $49$ blanket
+evaluations.
+
 \paragraph{Reading the charts.} Every panel uses the same convention, the
-combined field $C=\Zint+[\Zint=0]\,\sest$ of~\eqref{eq:coloring}. Outside
+combined field $C$ of~\eqref{eq:coloring}: $\sest$ where $\Zint=0$, and
+$\Zint$ elsewhere. Outside
 the stable domain the colour encodes the \emph{integer} number of
 characteristic roots to the right of the imaginary axis, so those regions
 appear as flat plateaus with sharp steps between them. Inside the stable
@@ -131,12 +149,13 @@ obstruction of a neutral system (A.6) -- and $\operatorname{sech}(\gamma L)$
 does not decay on the imaginary axis. Real materials, however, dissipate
 through \emph{rate-dependent} (Kelvin--Voigt) internal damping,
 $\gamma=\lam/\sqrt{1+c\lam}$, for which $\gamma\sim\sqrt{\lam/c}$: the high
-modes are damped ever harder, $\Real\lam_k\to-\infty$ (here
-$-0.06,-0.56,-1.54,-3.02,\dots$), only finitely many roots sit near the axis,
-and $|\operatorname{sech}(\gamma L)|$ decays like $\ee^{-\sqrt{\omega/2c}}$.
-The count is then well posed, and the chart over $(K_p,\tau)$ in
-Fig.~\ref{fig:galleryb} shows the resulting stable bands with an integer
-residual of $\sim10^{-7}$ (the physically wrong viscous model gives $6368$
+modes are damped ever harder, $\Real\lam_k\to-\infty$, only finitely many
+roots sit near the axis, and $|\operatorname{sech}(\gamma L)|$ decays like
+$\ee^{-\sqrt{\omega/2c}}$. Note how little is needed: the chart uses
+$c=0.02$, a light damping that leaves the low modes essentially unaffected
+and the chart shape intact, yet it is what makes the count exist at all.
+The chart over $(K_p,\tau)$ in Fig.~\ref{fig:galleryb} shows the resulting
+stable bands (the physically wrong viscous model gives a nonsensical count
 for the same gains -- a diagnostic that the model, not the method, is at
 fault). The example thus doubles as a reminder that the right damping law is a
 modelling decision the method faithfully reflects rather than papers over.
@@ -159,11 +178,20 @@ is the (rank-one) feedback matrix, leaves the zeros untouched, adds poles
 only at the open-loop roots -- all in the left half-plane, so the
 right-half-plane count is unaffected -- and yields $\Dfun\to1$ at infinity,
 hence $n=0$ exactly and a residual of $\sim10^{-7}$. Because the feedback
-here is a single collocated sensor--actuator pair, $\mat F$ is rank one and
-\eqref{eq:returndiff} reduces to the classical scalar return difference
-$1+L(\lam)$ used in~\eqref{eq:beam}; for multi-input feedback the
-determinant form remains valid, at the cost of one extra LU solve per
-evaluation. One caveat is inherited from classical loop analysis: an exact
+here is a single collocated sensor--actuator pair, $\mat F$ is rank one, and
+the matrix determinant lemma collapses~\eqref{eq:returndiff} to the classical
+scalar return difference $1+L(\lam)$ of~\eqref{eq:beam},
+\begin{equation}\label{eq:detlemma}
+  \Dfun(\lam) = 1 + K_p h^{-1}\ee^{-\lam\tau}\,
+                \vect e_1^{\!\top}\mat Q_0(\lam)^{-1}\vect e_{29},
+\end{equation}
+which replaces a full $29\times29$ solve \emph{and} a $29\times29$
+determinant by one solve with a single right-hand side: identical to machine
+precision and $5.5$ times faster per evaluation, which is what makes this
+panel affordable at the gallery's resolution. For multi-input feedback of
+rank $r$ the same lemma leaves an $r\times r$ determinant. This is the
+large-system economy that Section~\ref{sec:conclusion} points to, and it is
+worth more than any tuning of the integrator. One caveat is inherited from classical loop analysis: an exact
 pole--zero cancellation between the open loop and the feedback (an
 unobservable or uncontrollable mode) would remove that root
 from~\eqref{eq:returndiff} -- as it does from every input--output method --

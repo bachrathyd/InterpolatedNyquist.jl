@@ -75,9 +75,16 @@ results are preliminary in the sense that the argument-principle counting on
 the principal branch was validated here numerically -- including the
 reproduction of a published fractional-controller design chart -- but a
 rigorous treatment of branch-cut effects, in particular for shifted
-integration lines, is left for future work. Extending the automatic
-extraction to neutral right-hand sides and coupling the interactive charts
-to formal optimization loops are further natural continuations.
+integration lines, is left for future work. Finally, for large models the
+cost is dominated not by the method but by each evaluation of $\Dfun$: the
+gallery's scalar systems yield a $100\times100$ chart in a fraction of a
+second, whereas the finite element and dense-matrix cases spend their time
+inside a factorization per frequency. Where the feedback has low rank the
+matrix determinant lemma already removes most of that
+cost~\eqref{eq:detlemma}; caching or updating the factorization across
+frequencies, and exploiting sparsity, are the natural next steps. Extending
+the automatic extraction to neutral right-hand sides and coupling the
+interactive charts to formal optimization loops are further continuations.
 
 \section*{Software and reproducibility}
 The method is implemented in the open-source Julia package

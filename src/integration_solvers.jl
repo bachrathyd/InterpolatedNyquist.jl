@@ -740,14 +740,20 @@ Refines the estimated roots using Newton-Raphson or Polynomial (Taylor) approxim
 - `method=:Polynomial`: Approximates D by a Taylor polynomial of `degree` and finds its root.
 - `fix_omega`: If true, only the real part (sigma) is updated.
 
-A runaway-step guard rejects any update larger than `10^6` times the seed
-magnitude (or non-finite) and returns the last sane iterate. This is an
-overflow guard, not a convergence guarantee: it prevents the next iteration
-from evaluating the user's `D_func` at, e.g., `λ ~ 1e300`, where `λ^2`
-overflows inside `D_func` before any guard here could act. Steps below that
-threshold are accepted unconditionally, so a poor seed can still converge to
-a non-nearby root; refinement quality is only assured near the tracked
-minimum it is designed to polish.
+Refinement is a **local** polish and is confined to a trust region: iterates
+that leave the disc of radius `max(|λ_seed|, 1)` around the seed are rejected
+and the last sane iterate is returned. Without it the iteration can converge
+to a different -- perfectly valid, but non-dominant -- root of `D`: for a
+distributed-delay system, where `|D|` grows without bound to the left, a
+single Newton step can land on a root at `Re λ ~ -1e4` and have it reported as
+the nearest one. The guard also keeps the next evaluation of the user's
+`D_func` away from `λ ~ 1e300`, where `λ^2` overflows inside `D_func` before
+anything here could intercept it.
+
+The trust region bounds the damage of a poor seed but does not make the
+iteration globally convergent; refinement quality is assured only near the
+tracked minimum it is designed to polish. Pass `method=:Linear` to switch
+refinement off and keep the raw tracked estimate.
 
 Returns the refined complex roots as standard `ComplexF64` values.
 """
@@ -764,14 +770,22 @@ function refine_roots(@nospecialize(D_func), p::P, λ::Complex{T};
 
     curr_λ = ComplexF64(λ)
 
-    # Overflow guard (not a locality guarantee): a runaway step of ~1e6 times
-    # the seed magnitude means the iteration has left the basin of the root it
-    # was meant to polish, and the NEXT evaluation of a user-supplied D at,
-    # say, λ ~ 1e300 overflows (λ^2 = Inf) inside D itself, where no guard of
-    # ours can intercept it. Such steps are rejected and the last sane iterate
-    # is kept.
-    scale = max(1.0, abs(curr_λ))
-    step_ok(Δ) = isfinite(abs(Δ)) && abs(Δ) <= 1e6 * scale
+    # TRUST REGION. Refinement is a local polish of an estimate that is already
+    # one Newton step from the tracked minimum of |D|, so the true root sits a
+    # short distance away and any large step means the iteration has left the
+    # basin it was meant to refine. It will then happily converge to some OTHER
+    # root -- a perfectly valid root of D, and useless here: for a distributed
+    # delay, where D ~ b*e^{-λτ}/λ grows without bound to the left, a step can
+    # land on a root at Re λ ~ -1e4 and report it as the dominant one, which
+    # destroys the chart's colour scale. Steps leaving the disc of radius
+    # `trust` around the SEED are therefore rejected and the last sane iterate
+    # is returned. This also keeps the next evaluation of a user-supplied D away
+    # from λ ~ 1e300, where λ^2 overflows inside D itself, beyond our reach.
+    seed_λ = curr_λ
+    trust = max(abs(seed_λ), 1.0)
+    # cumulative displacement from the seed, so a sequence of small steps
+    # cannot walk out of the region either
+    step_ok(Δ) = isfinite(abs(Δ)) && abs((curr_λ + Δ) - seed_λ) <= trust
 
     # Helper to evaluate D and its 1st derivative efficiently without leaking Duals
     function eval_D_and_deriv(s, w)

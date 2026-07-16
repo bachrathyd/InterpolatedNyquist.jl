@@ -10,9 +10,13 @@ The integer field $\Zint$ alone is a poor plotting quantity -- flat plateaus
 separated by jumps -- but the estimated root location repairs precisely this
 deficiency. The combined field
 \begin{equation}\label{eq:coloring}
-  C(\vect p) = \Zint(\vect p) + \bigl[\Zint(\vect p)=0\bigr]\cdot\sest(\vect p)
+  C(\vect p) =
+  \begin{cases}
+    \sest(\vect p), & \text{if } \Zint(\vect p) = 0,\\[2pt]
+    \Zint(\vect p), & \text{otherwise,}
+  \end{cases}
 \end{equation}
--- where $[\cdot]$ denotes the Iverson bracket -- is a remarkably efficient
+is a remarkably efficient
 coloring trick for visual inspection: inside the
 stable domain ($\Zint=0$, $\sest<0$) it varies \emph{smoothly} and displays
 the spectral gap, i.e., how far the dominant root lies from the imaginary
