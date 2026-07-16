@@ -23,7 +23,7 @@ cv = LinRange(-2.0, 2.0, 50)
 params_vec = vec([(av[i], cv[j]) for i in 1:length(av), j in 1:length(cv)])
 
 println("Grid sweep (Neutral System)...")
-# Neutral systems can be very stiff, we use a slightly larger tolerance for the grid
+# The neutral phase integrand has a persistent non-decaying ripple; a slightly relaxed tolerance keeps the grid sweep fast
 @time Z_ints_vec, Z_raws_vec, min_Ds_vec, σ_ests_vec, ω_crits_vec = 
     calculate_unstable_roots_p_vec(D_chareq, params_vec, reltol=1e-4, verbosity=1)
 
@@ -34,7 +34,7 @@ C_to_plot = Z_mat_int .+ (Z_mat_int .== 0) .* σ_mat_est
 # 3. Hybrid Strategy Part 2: Detailed MDBM Boundary Trace
 println("\nTracing stability boundary with MDBM...")
 function mdbm_wrapper(a, c)::Float64
-    # For neutral systems, we must be careful with stiffness
+    # (neutral system: the integrand ripple never decays, see relaxed grid tolerance above)
     zi, zr, md, es, wc = calculate_unstable_roots_direct(D_chareq, (a, c), verbosity=0)
     sign_val = (max(zi, 0) == 0) ? 1.0 : -1.0
     return sign_val * abs(es)

@@ -14,7 +14,7 @@ using Interpolations
 Calculates the number of encirclements of the origin for a given list of complex values `D_values`
 corresponding to a list of frequencies `omega_values`.
 """
-function calculate_encirclement_number(D_values::AbstractVector{<:Complex}, omega_values::AbstractVector{<:Real}; n_power_max::Integer=0)
+function calculate_encirclement_number(D_values::AbstractVector{<:Complex}, omega_values::AbstractVector{<:Real}; n_power_max::Real=0)
     if length(D_values) != length(omega_values)
         error("D_values and omega_values must have the same length.")
     end
@@ -53,7 +53,7 @@ end
 
 Calculates the number of encirclements by evaluating a characteristic equation `D_func(λ, p)` where `λ = σ + 1im * ω`.
 """
-function calculate_encirclement_number(D_func::Function, omega_values::AbstractVector{<:Real}, p; n_power_max::Integer=0, σ=0.0)
+function calculate_encirclement_number(D_func::Function, omega_values::AbstractVector{<:Real}, p; n_power_max::Real=0, σ=0.0)
     D_complex = [D_func(σ + 1im * ω, p) for ω in omega_values]
     return calculate_encirclement_number(D_complex, omega_values; n_power_max=n_power_max)
 end
@@ -231,7 +231,7 @@ function sensitivity_mapping_with_MDBM(D_func, axlist; σ=0.0, ω_max=1e6, Niter
         return isfinite(g) ? g : sign_val * 1.0e3
     end
 
-    @info "High-Fidelity Boundary Tracing (MDBM + Stiff ODE)"
+    @info "High-Fidelity Boundary Tracing (MDBM + adaptive phase integration)"
     boundary_mdbm = MDBM_Problem(mdbm_objective, axlist)
     MDBM.solve!(boundary_mdbm, Niter, verbosity=1, checkneighbourNum=2, doThreadprecomp=true, normp=10.0, ncubetolerance=0.6)
 

@@ -33,8 +33,8 @@ end
 
 # ---------------------------------------------------------------------------
 # 1. Coarse grid sweep across the essential boundary |A| = 1
-#    (moderate ω_max: enough to classify; reltol relaxed for the stiff
-#     neutral phase integrand)
+#    (moderate ω_max: enough to classify; reltol relaxed because the neutral
+#     phase integrand has a persistent non-decaying ripple)
 # ---------------------------------------------------------------------------
 Pv = LinRange(-1.5, 2.5, 90)
 Av = LinRange(-1.6, 1.6, 90)

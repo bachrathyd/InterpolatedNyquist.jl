@@ -3,27 +3,27 @@ using GLMakie
 using MDBM
 
 # 1. Infinite-Dimensional Beam Characteristic Equation
-# Longitudinal beam: clamped at x=0, controlled at x=L.
-# Control law: Force(L, t) = -Kp * Force(0, t-τ)
-# D(λ) = cosh(γ(λ)*L) + Kp * exp(-λ*τ)
+# Longitudinal bar: clamped at x=0, controlled at x=L, no spatial discretization.
+#
+# TWO modelling choices matter, and both are made deliberately here:
+#
+# (a) KELVIN-VOIGT (material) damping, EA(1 + c d/dt) u'' = ρA u_tt, so
+#     γ = λ / sqrt(1 + c λ)  (NOT sqrt(λ² + c λ), which is external/viscous drag).
+#     With viscous damping every mode is damped equally and the roots pile up
+#     on a vertical line -> the count is 0 or ∞ (a neutral-type obstruction).
+#     Kelvin-Voigt damps high modes ever harder (Re λ_k -> -∞), so only finitely
+#     many roots sit near the axis and the count is well posed. Real material
+#     damping IS rate-dependent, so this is also the physically correct model.
+#
+# (b) RETURN-DIFFERENCE form D = 1 + Kp e^{-λτ} sech(γL) rather than the raw
+#     cosh(γL) + Kp e^{-λτ}. Same zeros; the added poles are the open-loop roots
+#     (left half-plane), and D -> 1 at infinity so the leading order is exactly 0.
 function D_chareq(λ::T, p) where T
     Kp, τ_val = p
-    
-    # Beam parameters
     L = T(1.0)
-    ρA = T(1.0)
-    EA = T(1.0)
-    c_damping = T(0.1) # Internal damping
-    
-    # Wave propagation constant
-    γ = sqrt((ρA * λ^2 + c_damping * λ) / EA)
-    
-    # Transcendental characteristic equation
-    # Force(L) = EA*U'(L) = EA*B*γ*cosh(γL)
-    # Force(0) = EA*U'(0) = EA*B*γ
-    # Control: Force(L) + Kp*Force(0)*exp(-λτ) = 0
-    # => cosh(γL) + Kp*exp(-λτ) = 0
-    return cosh(γ * L) + Kp * exp(-λ * τ_val)
+    c_damping = T(0.05)                       # Kelvin-Voigt coefficient
+    γ = λ / sqrt(one(T) + c_damping * λ)
+    return one(T) + Kp * exp(-λ * τ_val) / cosh(γ * L)
 end
 
 # 2. Hybrid Strategy
@@ -32,7 +32,8 @@ tauv = LinRange(0.1, 3.0, 50)
 params_vec = vec([(Kpv[i], tauv[j]) for i in 1:length(Kpv), j in 1:length(tauv)])
 
 println("Grid sweep (Infinite DOF Beam Model)...")
-# We use a larger ω_max because beam modes extend to infinity
+# A moderate ω_max suffices: the Kelvin-Voigt damping suppresses the high
+# beam modes, so only the low-frequency ones can destabilize
 @time Z_ints_vec, Z_raws_vec, min_Ds_vec, σ_ests_vec, ω_crits_vec = 
     calculate_unstable_roots_p_vec(D_chareq, params_vec, ω_max=200.0, verbosity=1)
 

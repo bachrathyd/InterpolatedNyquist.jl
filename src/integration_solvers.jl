@@ -23,6 +23,15 @@ using StaticArrays
     return (dis * rs - drs * is_) / d_sq_s
 end
 
+# The counting formula presumes no characteristic root sits exactly ON the
+# integration line. If that assumption is violated (e.g. a parameter point on a
+# structural singularity, such as a delayed stiffness exactly cancelling the
+# static one), Z_raw can come out non-finite. Rather than throwing an
+# InexactError deep inside a threaded sweep, return the count -1 -- the
+# "invalid" marker the boundary objectives already treat as such via
+# `max(Z, 0)` -- and let the caller see the non-finite Z_raw.
+@inline _safe_round_count(Z_raw) = isfinite(Z_raw) ? round(Int, Z_raw) : -1
+
 # Standardized Tag for ForwardDiff specialization
 struct NyquistTag end
 const StandardTag = ForwardDiff.Tag{NyquistTag, Float64}
@@ -55,6 +64,14 @@ therefore already negligible: `|D(s)| → |c| s^n` with a smooth algebraic
 correction that decays like `1/s`, so the fitted slope converges as `O(1/probe)`
 (and as `O(probe^(-1/2))` for fractional-order corrections).
 
+The fitted slope is validated against a second window one decade lower (the
+two must agree to 5%, which accepts the genuine `O(1/s)` drift but rejects
+exponential growth), and the two windows are Richardson-extrapolated, removing
+the leading `1/s` correction — the retarded-case convergence is therefore
+effectively `O(1/probe^2)`. The validation window doubles the evaluation cost
+and extends the `s`-range down to `probe/10^(2 decades)`, which `D` must
+tolerate numerically.
+
 Evaluating instead along the imaginary axis -- where `|e^{-iωτ}| = 1` -- makes
 the delay terms superimpose a persistent ripple on `log|D|` that a log-spaced
 fit aliases rather than averages out; that variant loses several orders of
@@ -76,28 +93,102 @@ function get_n_power_max(@nospecialize(D_func), p::P, σ=0.0; probe=1e8, decades
     return _get_n_power_max_impl(wrapped_D, p, σ; probe=probe, decades=decades, samples=samples)
 end
 
-function _get_n_power_max_impl(D_func::NyquistWrapper{P}, p::P, σ=0.0; probe=1e8, decades=1.0, samples=8) where P
-    s_hi = Float64(probe)
+# Least-squares slope of log|D| vs log(coordinate) over one decade-wide window.
+# `axis = :real` walks the positive real axis, `:imag` the line σ + iω.
+# Returns (slope, n_used_samples).
+function _ls_slope(D_func::NyquistWrapper{P}, p::P, σ, hi, decades, samples, axis::Symbol) where P
+    sx = 0.0; sy = 0.0; sxx = 0.0; sxy = 0.0; K = 0
     zero_dual = ForwardDiff.Dual{StandardTag}(0.0, 0.0)
-    for _ in 1:16   # back off until |D| is representable at the probe location
-        sx = 0.0; sy = 0.0; sxx = 0.0; sxy = 0.0; K = 0
-        for t in range(log(s_hi) - decades * log(10.0), log(s_hi); length=samples)
-            dual_s = ForwardDiff.Dual{StandardTag}(exp(t), 0.0)
-            res = D_func(Complex(dual_s, zero_dual), p)
-            absD = hypot(ForwardDiff.value(real(res)), ForwardDiff.value(imag(res)))
-            (isfinite(absD) && absD > 0) || continue
-            y = log(absD)
-            sx += t; sy += y; sxx += t * t; sxy += t * y; K += 1
+    for t in range(log(hi) - decades * log(10.0), log(hi); length=samples)
+        v = exp(t)
+        λ = if axis === :real
+            Complex(ForwardDiff.Dual{StandardTag}(v, 0.0), zero_dual)
+        else
+            Complex(ForwardDiff.Dual{StandardTag}(σ, 0.0), ForwardDiff.Dual{StandardTag}(v, 0.0))
         end
-        if K >= 2
-            denom = K * sxx - sx * sx
-            if denom > 0
-                n_est = (K * sxy - sx * sy) / denom
-                isfinite(n_est) && return n_est
+        res = D_func(λ, p)
+        absD = hypot(ForwardDiff.value(real(res)), ForwardDiff.value(imag(res)))
+        (isfinite(absD) && absD > 0) || continue
+        y = log(absD)
+        sx += t; sy += y; sxx += t * t; sxy += t * y; K += 1
+    end
+    K < 2 && return (NaN, K)
+    denom = K * sxx - sx * sx
+    denom > 0 || return (NaN, K)
+    return ((K * sxy - sx * sy) / denom, K)
+end
+
+function _get_n_power_max_impl(D_func::NyquistWrapper{P}, p::P, σ=0.0; probe=1e8, decades=1.0, samples=8) where P
+    # --- preferred: real-axis probe, backing off until |D| is representable ---
+    s_hi = Float64(probe)
+    for _ in 1:16
+        n_hi, K = _ls_slope(D_func, p, σ, s_hi, decades, samples, :real)
+        if isfinite(n_hi) && K >= samples ÷ 2
+            # Validate the power-law assumption: for D ~ c s^n (1 + O(1/s)) the
+            # slope must be nearly the same one window lower. It is NOT for
+            # functions that are not polynomially bounded in the right half-plane
+            # -- e.g. the cosh-type characteristic function of an elastic
+            # continuum grows like e^s, whose "slope" scales with s itself --
+            # and there the real-axis probe is meaningless.
+            #
+            # The tolerance must be loose enough to accept the genuine O(1/s)
+            # drift (which is large in absolute terms for high-order
+            # determinants: ~0.2 out of 58 for a 29-DOF FEM model) and tight
+            # enough to reject exponential growth (where the two slopes differ
+            # by an order of magnitude). 5% separates the two cases cleanly.
+            n_lo, _ = _ls_slope(D_func, p, σ, s_hi / 10.0^decades, decades, samples, :real)
+            if isfinite(n_lo) && abs(n_hi - n_lo) <= 0.05 * max(1.0, abs(n_hi))
+                if s_hi < Float64(probe)
+                    # Overflow back-off can push the fit window below the
+                    # asymptotic regime (|D| ~ s^n hits floatmax at
+                    # s ≈ 10^(308/n), i.e. s ≈ 10 for n ≈ 300, where the
+                    # estimate is unusable). The validation above catches most
+                    # such cases, but the user should know the probe moved.
+                    @warn "get_n_power_max: |D| overflowed at the requested probe; " *
+                        "fitted the leading order on s ∈ [$(s_hi / 10.0^decades), $(s_hi)] " *
+                        "instead. For very high orders (n ≳ 150) this window is " *
+                        "pre-asymptotic and the estimate degrades; pass n_power_max " *
+                        "explicitly if the leading order is known." maxlog = 1
+                end
+                # Richardson: the windows differ by a factor 10^decades in s and
+                # the leading correction decays like 1/s, so extrapolate it away.
+                r = 10.0^decades
+                return n_hi + (n_hi - n_lo) / (r - 1.0)
             end
+            break   # not a power law on the real axis -> fall back
         end
         s_hi /= 10.0
     end
+
+    # --- fallback: imaginary-axis fit ---
+    # Used when |D| is not polynomially bounded in the right half-plane. There
+    # |D(σ+iω)| is typically bounded and oscillatory, and the least-squares
+    # slope recovers the effective order the counting formula needs (0 for a
+    # cosh-type continuum). The delay ripple makes this less accurate than the
+    # real-axis probe, which is why it is only the fallback -- and it is
+    # subject to the same two-window drift validation (with a looser tolerance
+    # matching the ripple amplitude), so that a pre-asymptotic fit cannot be
+    # returned silently as a confident answer.
+    n_first = NaN
+    for ω_hi in (1e4, 1e3, 1e2, 1e1)
+        n_est, K = _ls_slope(D_func, p, σ, ω_hi, 2.0, 4 * samples, :imag)
+        (isfinite(n_est) && K >= samples) || continue
+        isnan(n_first) && (n_first = n_est)
+        n_lo, K2 = _ls_slope(D_func, p, σ, ω_hi / 10.0, 2.0, 4 * samples, :imag)
+        if isfinite(n_lo) && K2 >= samples && abs(n_est - n_lo) <= 0.25 * max(1.0, abs(n_est))
+            return n_est
+        end
+    end
+    if isfinite(n_first)
+        @warn "get_n_power_max: the leading-order fit did not pass slope-invariance " *
+            "validation on either axis; returning the unvalidated imaginary-axis " *
+            "estimate $(n_first). Pass n_power_max explicitly if the leading order " *
+            "is known, and treat non-integer Z_raw values with suspicion." maxlog = 1
+        return n_first
+    end
+    @warn "get_n_power_max: could not fit a leading order at all (|D| non-finite " *
+        "or zero on every probe window); returning 0.0. Pass n_power_max " *
+        "explicitly." maxlog = 1
     return 0.0
 end
 
@@ -178,7 +269,7 @@ function _calculate_unstable_roots_direct_impl(D_func::NyquistWrapper{P}, p::P, 
     n_pow = n_power_max === nothing ? _get_n_power_max_impl(D_func, p, σ) : n_power_max
     Z_raw = -(1.0 / π) * sol.u[end][1] + n_pow / 2.0
 
-    return round(Int, Z_raw), Z_raw
+    return _safe_round_count(Z_raw), Z_raw
 end
 
 # Val{1}: Single Root Tracking
@@ -188,8 +279,12 @@ function _calculate_unstable_roots_direct_impl(D_func::NyquistWrapper{P}, p::P, 
     refinement_method=:Newton, refinement_steps=4, refinement_degree=3) where {P, S}
 
     min_D_sq = Ref(Inf)
-    root_ref = Ref(0.0 + 0.0im)
-    
+    # NaN until the first representable |D|^2 is seen (see quadgk impl note);
+    # refine_roots passes NaN seeds through unchanged, so a point where |D|
+    # overflows everywhere reports (Inf, NaN, NaN) instead of a fabricated
+    # root polished from the 0+0im placeholder.
+    root_ref = Ref(NaN + NaN*im)
+
     function phase_ode(y, params, ω)
         pure_ω = max(ForwardDiff.value(ω), 1e-9)
         dual_ω = ForwardDiff.Dual{StandardTag}(pure_ω, 1.0)
@@ -222,7 +317,7 @@ function _calculate_unstable_roots_direct_impl(D_func::NyquistWrapper{P}, p::P, 
     n_pow = n_power_max === nothing ? _get_n_power_max_impl(D_func, p, σ) : n_power_max
     Z_raw = -(1.0 / π) * sol.u[end][1] + n_pow / 2.0
 
-    zi, zr, md, es, wc = round(Int, Z_raw), Z_raw, sqrt(min_D_sq[]), real(root_ref[]), imag(root_ref[])
+    zi, zr, md, es, wc = _safe_round_count(Z_raw), Z_raw, sqrt(min_D_sq[]), real(root_ref[]), imag(root_ref[])
     
     if refinement_method != :Linear
         refined_root = refine_roots(D_func, p, es + 1im*wc; method=refinement_method, steps=refinement_steps, degree=refinement_degree)
@@ -241,7 +336,11 @@ function _calculate_unstable_roots_direct_impl(D_func::NyquistWrapper{P}, p::P, 
     roots_vec = MVector{N, ComplexF64}(fill(NaN + NaN*im, N))
     
     # Boundary check at ω = 0
-    # Because |D(ω)|^2 is even, a positive derivative at ω ≈ 0 implies a local minimum at 0.
+    # Because |D(ω)|^2 is even, a positive derivative at ω ≈ 0 implies a local
+    # minimum at 0. NOTE: evenness holds for real-coefficient D (conjugate
+    # symmetry D(conj(λ)) = conj(D(λ))) -- the same assumption the half-line
+    # counting formula itself rests on; for complex-coefficient systems the
+    # full-line integral must be used anyway.
     pure_ω_0 = 1e-9
     dual_ω_0 = ForwardDiff.Dual{StandardTag}(pure_ω_0, 1.0)
     dual_λ_0 = σ + 1im * dual_ω_0
@@ -272,7 +371,8 @@ function _calculate_unstable_roots_direct_impl(D_func::NyquistWrapper{P}, p::P, 
         dre, dim = ForwardDiff.partials(rv, 1), ForwardDiff.partials(iv, 1)
 
         d_sq = re_val^2 + im_val^2
-        if !isfinite(d_sq) || !(isfinite(dre) && isfinite(dim))
+        if d_sq < 1e-20 || !isfinite(d_sq) || !(isfinite(dre) && isfinite(dim))
+            # same near-root/overflow handling as the other backends
             return SA[_safe_darg(re_val, im_val, dre, dim)]
         end
         d_sq_deriv = 2*(re_val * dre + im_val * dim)
@@ -282,25 +382,51 @@ function _calculate_unstable_roots_direct_impl(D_func::NyquistWrapper{P}, p::P, 
         if prev_d_sq_deriv[] < 0 && d_sq_deriv > 0 && curr_ω > prev_ω[]
             est_sigma = σ - (re_val * dim - im_val * dre) / (dim^2 + dre^2)
             new_root = est_sigma + 1im * curr_ω
-            
-            if d_sq < d_sq_vec[N]
+
+            # The solver's RK stages and rejected/retried steps do not sample
+            # ω monotonically, so the same minimum can be detected more than
+            # once at nearly identical ω. Deduplicate by ω-proximity: keep the
+            # deeper of the two detections instead of storing both.
+            insert_val = d_sq
+            dup_idx = 0
+            for j in 1:N
+                if isfinite(imag(roots_vec[j])) &&
+                   abs(curr_ω - imag(roots_vec[j])) <= 1e-6 * max(curr_ω, 1.0)
+                    dup_idx = j
+                    break
+                end
+            end
+            if dup_idx > 0
+                if insert_val < d_sq_vec[dup_idx]
+                    # drop the shallower duplicate, then re-insert sorted below
+                    for j in dup_idx:N-1
+                        d_sq_vec[j] = d_sq_vec[j+1]
+                        roots_vec[j] = roots_vec[j+1]
+                    end
+                    d_sq_vec[N] = Inf
+                    roots_vec[N] = NaN + NaN*im
+                else
+                    insert_val = Inf   # shallower re-detection: skip the insert
+                end
+            end
+
+            if insert_val < d_sq_vec[N]
                 idx = N
-                while idx > 1 && d_sq < d_sq_vec[idx-1]
+                while idx > 1 && insert_val < d_sq_vec[idx-1]
                     idx -= 1
                 end
                 for j in N:-1:idx+1
                     d_sq_vec[j] = d_sq_vec[j-1]
                     roots_vec[j] = roots_vec[j-1]
                 end
-                d_sq_vec[idx] = d_sq
+                d_sq_vec[idx] = insert_val
                 roots_vec[idx] = new_root
             end
         end
         prev_d_sq_deriv[] = d_sq_deriv
         prev_ω[] = curr_ω
 
-        d_sq_safe = max(d_sq, 1e-20)
-        return SA[(dim * re_val - dre * im_val) / d_sq_safe]
+        return SA[(dim * re_val - dre * im_val) / d_sq]
     end
 
     prob = ODEProblem{false}(phase_ode, SA[0.0], (0.0, Float64(ω_max)))
@@ -309,11 +435,24 @@ function _calculate_unstable_roots_direct_impl(D_func::NyquistWrapper{P}, p::P, 
     n_pow = n_power_max === nothing ? _get_n_power_max_impl(D_func, p, σ) : n_power_max
     Z_raw = -(1.0 / π) * sol.u[end][1] + n_pow / 2.0
 
-    zi, zr, mds, ess, wcs = round(Int, Z_raw), Z_raw, sqrt.(d_sq_vec), real.(roots_vec), imag.(roots_vec)
-    
+    zi, zr, mds, ess, wcs = _safe_round_count(Z_raw), Z_raw, sqrt.(d_sq_vec), real.(roots_vec), imag.(roots_vec)
+
     if refinement_method != :Linear
         roots = ess .+ 1im .* wcs
         refined_roots = [refine_roots(D_func, p, r; method=refinement_method, steps=refinement_steps, degree=refinement_degree) for r in roots]
+        # The ω-proximity dedupe above cannot catch re-detections of the same
+        # minimum at stage abscissae further apart than its window; those
+        # collapse onto the SAME root only after refinement. Blank the
+        # duplicates (entries are depth-sorted, so the first is the deepest).
+        for j in 2:N
+            for k in 1:j-1
+                if isfinite(abs(refined_roots[j])) && isfinite(abs(refined_roots[k])) &&
+                   abs(refined_roots[j] - refined_roots[k]) <= 1e-6 * max(1.0, abs(refined_roots[k]))
+                    refined_roots[j] = NaN + NaN*im
+                    break
+                end
+            end
+        end
         return zi, zr, mds, real.(refined_roots), imag.(refined_roots)
     end
     return zi, zr, mds, ess, wcs
@@ -386,8 +525,11 @@ function calculate_unstable_roots_p_vec(@nospecialize(D_func), params_vec::Abstr
             println("Calculating stability over \$n_params points (tracking \$n_roots_to_track roots)...")
         end
 
+        # hoisted: one runtime Val construction instead of one per point (the
+        # per-point call still dispatches dynamically, amortized by the solve)
+        V = Val(n_roots_to_track)
         @inbounds Threads.@threads for i in 1:n_params
-            zi, zr, md, es, wc = _calculate_unstable_roots_direct_impl(wrapped_D, params_vec[i], σ, Val(n_roots_to_track); 
+            zi, zr, md, es, wc = _calculate_unstable_roots_direct_impl(wrapped_D, params_vec[i], σ, V;
                 ω_max=ω_max, reltol=reltol, abstol=abstol, solver=solver, 
                 n_power_max=n_pow_fixed, verbosity=verbosity, maxiters=maxiters,
                 refinement_method=refinement_method, refinement_steps=refinement_steps, refinement_degree=refinement_degree)
@@ -418,9 +560,12 @@ function _calculate_unstable_roots_quadgk_impl(D_func::NyquistWrapper{P}, p::P, 
     ω_max=1e6, reltol=1e-5, abstol=1e-5, n_power_max=nothing) where {P, S}
     
     min_D_sq = Ref(Inf)
-    estimated_sigma = Ref(Inf)
-    ω_crit = Ref(0.0)
-    
+    # NaN until the first representable |D|^2 is seen: if |D| overflows at
+    # EVERY sample (astronomically scaled determinants), no tracking is
+    # possible and the root estimate must come back invalid, not fabricated.
+    estimated_sigma = Ref(NaN)
+    ω_crit = Ref(NaN)
+
     function phase_integrand(ω)
         # TRICK: Add a tiny offset to avoid singularities in fractional derivatives at ω=0
         pure_ω = max(ω, 1e-9)
@@ -442,10 +587,20 @@ function _calculate_unstable_roots_quadgk_impl(D_func::NyquistWrapper{P}, p::P, 
         return (dim * re_val - dre * im_val) / d_sq
     end
 
-    integral, err = quadgk(phase_integrand, 0.0, Float64(ω_max), rtol=reltol, atol=abstol)
+    # Log-spaced interior breakpoints (one per two decades) force at least one
+    # G7-K15 panel into every frequency band. Without them the FIRST panel
+    # spans [0, ω_max] and its lowest node sits at ω ≈ 0.0043·ω_max; for
+    # ω_max = 1e6 and a system whose resonances live at ω ~ 1-10 the quadrature
+    # then never samples the resonance region at all, the fast-decaying tail
+    # looks converged after 15 evaluations, and Z_raw = n/2 is returned with a
+    # PERFECT integer residual -- a silent wrong count the self-diagnostic
+    # cannot flag. The extra panels cost a few dozen evaluations.
+    ω_hi = Float64(ω_max)
+    interior = ω_hi > 10.0 ? exp10.(0.0:2.0:(log10(ω_hi) - 1.0)) : Float64[]
+    integral, err = quadgk(phase_integrand, 0.0, interior..., ω_hi, rtol=reltol, atol=abstol)
     n_pow = n_power_max === nothing ? _get_n_power_max_impl(D_func, p, σ) : n_power_max
     Z_raw = -(1.0 / π) * integral + n_pow / 2.0
-    return round(Int, Z_raw), Z_raw, sqrt(min_D_sq[]), estimated_sigma[], ω_crit[]
+    return _safe_round_count(Z_raw), Z_raw, sqrt(min_D_sq[]), estimated_sigma[], ω_crit[]
 end
 
 """
@@ -500,13 +655,16 @@ end
 function _calculate_unstable_roots_fixed_step_impl(D_func::NyquistWrapper{P}, p::P, σ::S=0.0; 
     ω_max=1e6, steps=1000, n_power_max=nothing) where {P, S}
     
-    min_D_sq = Inf
-    estimated_sigma = Inf
-    ω_crit = 0.0
-    
+    # Refs, not plain locals: reassigning a captured local inside the closure
+    # would box all three (Core.Box) and make the innermost loop dynamically
+    # typed -- in the one backend whose point is raw speed.
+    min_D_sq = Ref(Inf)
+    estimated_sigma = Ref(NaN)
+    ω_crit = Ref(NaN)
+
     h = Float64(ω_max) / steps
     integral = 0.0
-    
+
     function get_darg(ω_val)
         # TRICK: Add a tiny offset to avoid singularities in fractional derivatives at ω=0
         pure_ω = max(ω_val, 1e-9)
@@ -522,10 +680,10 @@ function _calculate_unstable_roots_fixed_step_impl(D_func::NyquistWrapper{P}, p:
             return _safe_darg(re_val, im_val, dre, dim)
         end
 
-        if d_sq < min_D_sq
-            min_D_sq = d_sq
-            ω_crit = ω_val
-            estimated_sigma = σ - (re_val * dim - im_val * dre) / (dim^2 + dre^2)
+        if d_sq < min_D_sq[]
+            min_D_sq[] = d_sq
+            ω_crit[] = ω_val
+            estimated_sigma[] = σ - (re_val * dim - im_val * dre) / (dim^2 + dre^2)
         end
 
         return (dim * re_val - dre * im_val) / d_sq
@@ -541,16 +699,25 @@ function _calculate_unstable_roots_fixed_step_impl(D_func::NyquistWrapper{P}, p:
 
     n_pow = n_power_max === nothing ? _get_n_power_max_impl(D_func, p, σ) : n_power_max
     Z_raw = -(1.0 / π) * integral + n_pow / 2.0
-    return round(Int, Z_raw), Z_raw, sqrt(min_D_sq), estimated_sigma, ω_crit
+    return _safe_round_count(Z_raw), Z_raw, sqrt(min_D_sq[]), estimated_sigma[], ω_crit[]
 end
 
 """
-    refine_roots(D_func, p, roots; method=:Newton, steps=3, degree=2, fix_omega=false)
+    refine_roots(D_func, p, roots; method=:Newton, steps=4, degree=3, fix_omega=false)
 
 Refines the estimated roots using Newton-Raphson or Polynomial (Taylor) approximation.
-- `method=:Newton`: Performs `steps` iterations of Newton-Raphson.
+- `method=:Newton`: Performs `steps` iterations of Newton-Raphson (the solver default).
 - `method=:Polynomial`: Approximates D by a Taylor polynomial of `degree` and finds its root.
 - `fix_omega`: If true, only the real part (sigma) is updated.
+
+A runaway-step guard rejects any update larger than `10^6` times the seed
+magnitude (or non-finite) and returns the last sane iterate. This is an
+overflow guard, not a convergence guarantee: it prevents the next iteration
+from evaluating the user's `D_func` at, e.g., `λ ~ 1e300`, where `λ^2`
+overflows inside `D_func` before any guard here could act. Steps below that
+threshold are accepted unconditionally, so a poor seed can still converge to
+a non-nearby root; refinement quality is only assured near the tracked
+minimum it is designed to polish.
 
 Returns the refined complex roots as standard `ComplexF64` values.
 """
@@ -558,14 +725,23 @@ function refine_roots(@nospecialize(D_func), p::P, roots::AbstractArray; kwargs.
     return ComplexF64[refine_roots(D_func, p, r; kwargs...) for r in roots]
 end
 
-function refine_roots(@nospecialize(D_func), p::P, λ::Complex{T}; 
-    method=:Newton, steps=3, degree=2, fix_omega=false) where {P, T}
+function refine_roots(@nospecialize(D_func), p::P, λ::Complex{T};
+    method=:Newton, steps=4, degree=3, fix_omega=false) where {P, T}
     
     if isnan(λ) || isinf(λ)
         return ComplexF64(λ)
     end
 
     curr_λ = ComplexF64(λ)
+
+    # Overflow guard (not a locality guarantee): a runaway step of ~1e6 times
+    # the seed magnitude means the iteration has left the basin of the root it
+    # was meant to polish, and the NEXT evaluation of a user-supplied D at,
+    # say, λ ~ 1e300 overflows (λ^2 = Inf) inside D itself, where no guard of
+    # ours can intercept it. Such steps are rejected and the last sane iterate
+    # is kept.
+    scale = max(1.0, abs(curr_λ))
+    step_ok(Δ) = isfinite(abs(Δ)) && abs(Δ) <= 1e6 * scale
 
     # Helper to evaluate D and its 1st derivative efficiently without leaking Duals
     function eval_D_and_deriv(s, w)
@@ -579,15 +755,15 @@ function refine_roots(@nospecialize(D_func), p::P, λ::Complex{T};
     if method == :Newton
         for _ in 1:steps
             val, deriv = eval_D_and_deriv(real(curr_λ), imag(curr_λ))
-            if abs(deriv) < 1e-15
+            if abs(deriv) < 1e-15 || !isfinite(abs(val)) || !isfinite(abs(deriv))
                 break
             end
             Δλ = -val / deriv
-            if fix_omega
-                curr_λ = ComplexF64(real(curr_λ) + real(Δλ), imag(curr_λ))
-            else
-                curr_λ += Δλ
-            end
+            step_ok(Δλ) || break
+            next_λ = fix_omega ? ComplexF64(real(curr_λ) + real(Δλ), imag(curr_λ)) :
+                                 curr_λ + Δλ
+            isfinite(abs(next_λ)) || break
+            curr_λ = next_λ
         end
         return curr_λ
 
@@ -624,22 +800,16 @@ function refine_roots(@nospecialize(D_func), p::P, λ::Complex{T};
                 Δλ2 = (-b - disc) / (2*a)
                 Δλ = (abs(Δλ1) < abs(Δλ2)) ? Δλ1 : Δλ2
             end
-            if !isfinite(abs(Δλ))
-                return curr_λ
-            end
+            step_ok(Δλ) || return curr_λ
 
             if fix_omega
                 return ComplexF64(real(curr_λ) + real(Δλ), imag(curr_λ))
             else
                 return curr_λ + Δλ
             end
-            
+
         elseif degree == 3
-            # 3rd derivative via finite diff on D1
-            _, D1_plus2 = eval_D_and_deriv(real(curr_λ) + 2h, imag(curr_λ))
-            _, D1_minus2 = eval_D_and_deriv(real(curr_λ) - 2h, imag(curr_λ))
-            
-            D3 = (D1_plus2 - 2*D1_plus + 2*D1_minus - D1_minus2) / (2 * h^3) # Approx, but (D1_plus - 2D1 + D1_minus)/h^2 is better
+            # 3rd derivative via central finite difference on the AD-exact D1
             D3 = (D1_plus - 2*D1 + D1_minus) / (h^2)
             
             d = (1/6) * D3
@@ -661,10 +831,8 @@ function refine_roots(@nospecialize(D_func), p::P, λ::Complex{T};
             else
                 Δλ = -c/b
             end
-            if !isfinite(abs(Δλ))
-                return curr_λ
-            end
-            
+            step_ok(Δλ) || return curr_λ
+
             if fix_omega
                 return ComplexF64(real(curr_λ) + real(Δλ), imag(curr_λ))
             else

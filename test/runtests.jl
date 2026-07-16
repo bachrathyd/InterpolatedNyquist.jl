@@ -102,6 +102,25 @@ using StaticArrays
         end
         @test isapprox(get_n_power_max(D_rat, (0.5, 0.6)), 0.0; atol=1e-8)
 
+        # transcendental continuum: D = cosh(sqrt(λ²+cλ)) + Kp exp(-λτ) grows
+        # like e^λ in the right half-plane, so it is NOT polynomially bounded
+        # and the real-axis probe is meaningless there. The estimator must
+        # detect that (the slope is not scale-invariant) and fall back to the
+        # imaginary axis, where |D| is bounded and oscillatory -> effective n = 0.
+        function D_beam(λ::T, p) where T
+            Kp, τ = p
+            return cosh(sqrt(λ^2 + T(0.4) * λ)) + Kp * exp(-λ * τ)
+        end
+        n_beam = get_n_power_max(D_beam, (0.5, 1.0))
+        @test isfinite(n_beam)
+        @test abs(n_beam) < 0.5          # effective order 0, not a huge number
+        Z_b, Zr_b = calculate_unstable_roots_direct(D_beam, (0.5, 1.0);
+            n_roots_to_track=0, ω_max=200.0)
+        # Like a neutral system, |D(iω)| stays oscillatory for all ω, so the
+        # effective order carries a bounded residual; the count still rounds
+        # correctly (the residual stays well inside the 1/2 threshold).
+        @test abs(Zr_b - round(Zr_b)) < 0.25
+
         # overflow guard: |D| of a high-order determinant overflows at s = 1e8,
         # so the probe must back off automatically instead of returning NaN.
         # Accuracy degrades for such systems because the back-off caps s well
@@ -125,6 +144,141 @@ using StaticArrays
         end
     end
 
+    @testset "Non-finite count degrades to the invalid marker -1" begin
+        # A root exactly ON the integration line (or any other violation of the
+        # counting assumptions) must not throw an InexactError inside a threaded
+        # sweep; the count degrades to -1, which the boundary objectives already
+        # treat as invalid via max(Z, 0).
+        D_ok(λ::T, p) where T = λ^2 + p[1] * λ + p[2] * exp(-λ / 2)
+        Z_nf, Zr_nf = calculate_unstable_roots_direct(D_ok, (0.5, 1.0);
+            n_roots_to_track=0, ω_max=1e3, n_power_max=NaN)
+        @test Z_nf == -1
+        @test isnan(Zr_nf)
+    end
+
+    @testset "Refinement stays local (no runaway into overflow)" begin
+        # A characteristic function that overflows if evaluated far from the
+        # origin -- exactly what a runaway Newton step causes, and the overflow
+        # then happens INSIDE the user's D where no guard of ours can intercept.
+        # A refinement step must therefore stay local.
+        function D_fragile(λ::T, p) where T
+            abs(λ) > 1e50 && error("D evaluated absurdly far from the seed: $λ")
+            return (λ^2 + p[1] * λ + p[2])^60      # overflows for |λ| ≳ 1e5
+        end
+        for m in (:Newton, :Polynomial)
+            for seed in (0.5 + 1.0im, 1e3 + 0.0im, -2.0 + 5.0im)
+                r = refine_roots(D_fragile, (0.5, 1.0), seed; method = m,
+                                 steps = 6, degree = 3)
+                @test isfinite(abs(r))
+            end
+        end
+        # a seed where D' vanishes must not throw either
+        D_flat(λ::T, p) where T = one(T) + 0 * λ + 0 * p[1]
+        @test isfinite(abs(refine_roots(D_flat, (1.0, 1.0), 1.0 + 1.0im; method = :Newton, steps = 4)))
+    end
+
+    @testset "QuadGK panel coverage over a wide frequency window" begin
+        # Regression test: with a huge ω_max and a fast-decaying integrand
+        # ripple (position-only feedback, ω^-3), the FIRST Gauss-Kronrod panel
+        # over [0, ω_max] has its lowest node above the entire resonance
+        # region; without interior breakpoints the quadrature converges after
+        # one panel to Z_raw = n/2 -- a wrong count with a PERFECT integer
+        # residual. The log-spaced breakpoints must prevent this.
+        D_pos(λ::T, p) where T =
+            T(0.03) * λ^4 + λ^2 + T(0.04) * λ + one(T) + p[1] * exp(-λ / 2)
+        for P in (0.5, 2.0, -1.5, 3.5)
+            Z_ref, _ = calculate_unstable_roots_direct(D_pos, (P,); ω_max=1e6,
+                n_roots_to_track=0, reltol=1e-8, abstol=1e-8)
+            Z_gk, Zr_gk = calculate_unstable_roots_quadgk(D_pos, (P,); ω_max=1e6)
+            @test Z_gk == Z_ref
+            @test abs(Zr_gk - Z_gk) < 0.1
+        end
+    end
+
+    @testset "MDBM enrichment accepts the estimated (non-integer) order" begin
+        # get_n_power_max returns a Float64; the enrichment path passes it to
+        # calculate_encirclement_number, whose keyword must therefore accept
+        # any Real (a ::Integer restriction makes the documented workflow
+        # throw a TypeError at run time).
+        D_enr(λ, p) = λ^2 + 0.1 * λ + p + 0.5 * exp(-λ)
+        n_est = get_n_power_max(D_enr, 1.0)
+        @test n_est isa Float64   # the exact situation that used to throw (::Integer kwarg)
+        ωs = collect(range(0.0, 50.0, length=400))
+        ωs_full = vcat(ωs, -ωs)
+        Dv = [D_enr(1im * w, 1.0) for w in ωs]
+        Nc = calculate_encirclement_number(vcat(Dv, conj.(Dv)), ωs_full; n_power_max=n_est)
+        @test isfinite(Nc)
+        @test abs(Nc - round(Nc)) < 0.1
+
+        # smoke test of the full exported workflow (would have caught the bug)
+        foo_ri(p, ω) = (real(D_enr(1im * ω, p)), imag(D_enr(1im * ω, p)))
+        mdbm = InterpolatedNyquist.MDBM.MDBM_Problem(foo_ri,
+            [LinRange(0.5, 2.0, 4), LinRange(0.0, 10.0, 10)])
+        InterpolatedNyquist.MDBM.solve!(mdbm, 1, verbosity=0)
+        p_uniq, Ncirc = argument_principle_with_MDBM(D_enr, mdbm, ωs)
+        @test !isempty(Ncirc)
+        @test all(isfinite, Ncirc)
+    end
+
+    @testset "Multi-root tracking on a shifted σ-line (absolute coords)" begin
+        # two known conjugate pairs: -0.3 ± 2im and -1.5 ± 8im (well separated
+        # in ω so both produce distinct |D| minima along the march)
+        function D_two(λ::T, p) where T
+            r1 = p[1] + 1im * p[2]; r2 = p[3] + 1im * p[4]
+            return (λ - r1) * (λ - conj(r1)) * (λ - r2) * (λ - conj(r2))
+        end
+        p2 = (-0.3, 2.0, -1.5, 8.0)
+        Z, Zr, mds, ess, wcs = calculate_unstable_roots_direct(D_two, p2, -2.0;
+            n_roots_to_track=5, ω_max=1e3, refinement_steps=8)
+        @test Z == 4                        # all four roots right of Re λ = -2
+        found = [complex(ess[i], wcs[i]) for i in eachindex(ess) if isfinite(ess[i])]
+        @test any(r -> abs(r - (-0.3 + 2.0im)) < 1e-6, found)
+        @test maximum(real, found) ≈ -0.3 atol=1e-6   # dominant root, absolute coords
+        # every reported root is a true root, and no refined duplicates remain
+        @test all(r -> abs(D_two(r, p2)) < 1e-6, found)
+        for i in 1:length(found), j in i+1:length(found)
+            @test abs(found[i] - found[j]) > 1e-3
+        end
+    end
+
+    @testset "Multi-root tracking captures a real root at ω = 0" begin
+        # dominant root is REAL (divergence-type instability): only the ω = 0
+        # boundary branch can capture it. The ω = 0 Newton seed is crude for a
+        # cubic (it lands at 2.0 for this D), so allow enough polish steps.
+        D_real(λ::T, p) where T = (λ - p[1]) * (λ + 1) * (λ + 2)
+        Z, Zr, mds, ess, wcs = calculate_unstable_roots_direct(D_real, (0.5,);
+            n_roots_to_track=3, ω_max=1e3, refinement_steps=12)
+        @test Z == 1
+        good = findall(isfinite, ess)
+        i = good[argmax(ess[good])]
+        @test ess[i] ≈ 0.5 atol=1e-8
+        @test abs(wcs[i]) < 1e-6
+    end
+
+    @testset "Overflow scale: quadgk and fixed-step backends" begin
+        D_huge2(λ::T, p) where T = T(1e280) * (λ^2 + p[1] * λ + p[2] * exp(-λ / 2))
+        D_norm2(λ::T, p) where T = λ^2 + p[1] * λ + p[2] * exp(-λ / 2)
+        for p in ((0.5, 1.0), (0.1, -0.5))
+            Zg_h, _ = calculate_unstable_roots_quadgk(D_huge2, p; ω_max=1e4)
+            Zg_n, _ = calculate_unstable_roots_quadgk(D_norm2, p; ω_max=1e4)
+            @test Zg_h == Zg_n
+            Zf_h, _ = calculate_unstable_roots_fixed_step(D_huge2, p; ω_max=1e3, steps=20000)
+            Zf_n, _ = calculate_unstable_roots_fixed_step(D_norm2, p; ω_max=1e3, steps=20000)
+            @test Zf_h == Zf_n
+        end
+    end
+
+    @testset "Total overflow yields an invalid root estimate, not a fabricated one" begin
+        # |D| overflows at EVERY sample -> no minimum can be tracked; the root
+        # estimate must come back NaN instead of a "root" polished from the
+        # 0 + 0im placeholder.
+        D_allovf(λ::T, p) where T = T(1e200) * (T(1e200) * (λ^2 + p[1] * λ + p[2]))
+        Z_o, Zr_o, md_o, es_o, wc_o = calculate_unstable_roots_direct(D_allovf, (0.5, 1.0);
+            ω_max=1e3, n_power_max=2.0)
+        @test isnan(es_o) && isnan(wc_o)
+        @test !isfinite(md_o)
+    end
+
     @testset "Mass-matrix / DAE extraction" begin
         # Descriptor system with singular mass matrix E = diag(1, m, 0):
         #   x' = v
@@ -146,6 +300,9 @@ using StaticArrays
         for λtest in (0.3 + 1.7im, -0.2 + 0.9im, 1.1 - 2.4im)
             D_ext = get_D_from_model(dae_rhs, λtest, p_dae, Val(3); mass_matrix=E)
             @test abs(D_ext - D_true(λtest)) < 1e-10
+            # a plain (non-static) Matrix must work identically
+            D_ext_mat = get_D_from_model(dae_rhs, λtest, p_dae, Val(3); mass_matrix=Matrix(E))
+            @test abs(D_ext_mat - D_true(λtest)) < 1e-10
         end
 
         # Default mass_matrix = I must reproduce the old behaviour (explicit ODE part)
