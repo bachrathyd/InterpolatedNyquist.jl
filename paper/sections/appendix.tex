@@ -1,0 +1,182 @@
+\section{Case-study gallery}\label{app:gallery}
+
+This appendix demonstrates the identical workflow of
+Section~\ref{sec:workflow} -- coarse colored sweep, MDBM boundary, combined
+coloring~\eqref{eq:coloring} -- on eleven further systems covering all
+supported model classes, plus the reproduction of a published design
+chart. The complete scripts, grid resolutions and timings are part of the
+package repository.
+
+\paragraph{Reading the charts.} Every panel uses the same convention, the
+combined field $C=\Zint+[\Zint=0]\,\sest$ of~\eqref{eq:coloring}. Outside
+the stable domain the colour encodes the \emph{integer} number of
+characteristic roots to the right of the imaginary axis, so those regions
+appear as flat plateaus with sharp steps between them. Inside the stable
+domain ($\Zint=0$) the same colour axis continues \emph{below zero} and
+encodes the estimated decay rate $\sest<0$, i.e.\ the spectral gap: the
+darker the shade, the faster every disturbance decays, and the colour varies
+smoothly because $\sest$ does. One map therefore answers three questions at
+once -- where the system is stable, how robustly, and how many roots must be
+stabilized elsewhere. The black curve is the stability boundary traced by
+MDBM from the objective~\eqref{eq:objective}, not a contour of the coloured
+grid. Each panel is annotated with the wall-clock cost of both stages: the
+brute-force sweep that produces the colour, and the MDBM trace that produces
+the boundary.
+
+\begin{figure}[tb]
+  \centering
+  \maybefig{fig_gallery_a}{\linewidth}
+  \caption{Case studies, part I: (top row) fourth-order delayed
+  oscillator, delayed oscillator, distributed delay; (bottom row) neutral
+  DDE, high-gain neutral DDE, and PDA control with essential instability
+  (the analytic essential boundaries $|A|=1$ are dashed
+  red).}\label{fig:gallerya}
+\end{figure}
+
+\begin{figure}[tb]
+  \centering
+  \maybefig{fig_gallery_b}{\linewidth}
+  \caption{Case studies, part II: (top row) multi-mode turning lobes,
+  transcendental beam, 29-DOF finite element beam; (bottom row)
+  $50\times50$ matrix determinant, fractional-order
+  oscillator.}\label{fig:galleryb}
+\end{figure}
+
+\paragraph{A.1 Fourth-order delayed oscillator.}
+$\Dfun(\lam)=c_1\lam^4+\lam^2+2\zeta\lam+1+(P+D\lam)\ee^{-\lam\tau}$ with
+$c_1=0.03$, $\zeta=0.02$, $\tau=0.5$, swept over the control gains
+$(P,D)$. This is the regression benchmark of the package (test suite and
+performance history) and the system of the solver comparison in
+Fig.~\ref{fig:zoo}.
+
+\paragraph{A.2 Delayed oscillator.}
+$\Dfun(\lam)=\lam^2+a\lam+b\,\ee^{-\lam/2}$ over $(a,b)$: the textbook
+retarded case with both divergence and Hopf boundaries.
+
+\paragraph{A.3 Distributed delay.}
+$\Dfun(\lam)=\lam^2+a\lam+b\,(1-\ee^{-\lam\tau})/\lam$, $\tau=1$, i.e., a
+uniform delay kernel $\int_0^\tau x(t-\vartheta)\dd\vartheta$. The kernel
+integral appears in closed form in $\Dfun$; the removable singularity at
+$\lam=0$ is handled by the series fallback in the model code and by the
+origin offset of Section~\ref{sec:phaseode}.
+
+\paragraph{A.4--A.5 Neutral systems.}
+$\Dfun(\lam)=\lam^2+a\lam^2\ee^{-\lam}+1+c\,\ee^{-\lam}$ and its high-gain
+damped variant $\Dfun(\lam)=\lam^2+a\lam^2\ee^{-\lam}+5\lam+c\,\ee^{-\lam}$,
+swept over $(a,c)$ with $|a|<1$. The delayed acceleration term makes the
+equations neutral: the phase integrand oscillates persistently up to
+arbitrarily high frequencies, so the truncation is kept moderate
+($\wmax=200$) -- the resulting tail error is bounded by
+$\arcsin|a|/\pi<1/2$ and never corrupts the rounded count -- and the
+leading-order fit~\eqref{eq:npow} delivers the effective order $n=2$ where
+the naive point estimator diverges.
+
+\paragraph{A.6 PDA control and essential instability.}
+Acceleration feedback is popular in active vibration control, but the
+delayed acceleration term $A\ddot x(t-\tau)$ turns the closed loop into a
+neutral system with characteristic function
+\begin{equation*}
+  \Dfun(\lam)=\lam^2+2\zeta\lam+1+(P+D\lam+A\lam^2)\,\ee^{-\lam\tau},
+\end{equation*}
+whose neutral coefficient is $1+A\ee^{-\lam\tau}$. For $|A|>1$ the
+essential spectrum moves to $\Real\lam=\ln|A|/\tau>0$: infinitely many
+roots become unstable and $\Zint\to\infty$. With a finite $\wmax$ the
+computed count saturates at a large value ($\sim\wmax\tau/(2\pi)$), so the
+method cannot -- and need not -- report the exact count there; crucially,
+the \emph{classification} into stable and unstable domains remains correct,
+and the chart in Fig.~\ref{fig:gallerya} displays both the regular
+Hopf-type lobes and the analytic essential boundaries $|A|=1$, which the
+MDBM trace locates without special treatment. The count is capped in the
+plot for readability. This case study substantiates the claim of
+Section~\ref{sec:conclusion} that essential loss of stability is detected
+robustly even though the count itself diverges.
+
+\paragraph{A.7 Multi-mode turning lobes.}
+The regenerative turning model with a two-mode flexible structure,
+$\Dfun(\lam)=1+w\,(1-\ee^{-2\pi\lam/\Omega})\sum_{k=1}^{2}
+g_k/(\lam^2+2\zeta_k\omega_k\lam+\omega_k^2)$, over spindle speed $\Omega$
+and chip width $w$~\cite{tobias1958theory,altintas1995analytical,stepan2001modelling}.
+Two features deserve emphasis. First, $\Dfun$ is \emph{rational} -- its
+structural poles lie in the open left half-plane, so the argument-principle
+count is unaffected, and $\Dfun\to1$ at high frequency gives an effective
+order $n\approx0$; no polynomial form is ever constructed. Second, the
+chart makes the introductory argument visible: towards low spindle speeds
+the lobes accumulate, and a D-curve-based method would trace an unbounded
+family of curves of which almost none bounds the stable region, whereas the
+boundary objective~\eqref{eq:objective} follows only the true stability
+limit~\cite{bachrathy2013improved}.
+
+\paragraph{A.8 Transcendental beam.}
+Longitudinal vibration of an elastic bar with delayed boundary force
+feedback leads -- \emph{without any spatial discretization} -- to the exact
+transcendental characteristic function
+$\Dfun(\lam)=\cosh\!\bigl(\sqrt{\lam^2+c\lam}\,L\bigr)+K_p\,\ee^{-\lam\tau}$
+(dimensionless form with unit length $L=1$ and internal damping $c=0.4$), cf.\ the exact stability
+analysis of Zhang and St\'ep\'an~\cite{zhang2016exact} and the finite-DOF
+hierarchy of Kidd and St\'ep\'an~\cite{kidd2014delayed}. The damping is
+deliberately generous: for a lightly damped bar the higher modes remain
+almost undamped and the stable bands degenerate into an ever finer comb --
+zero-measure in the limit, which is exactly the phenomenon
+analysed in~\cite{zhang2016exact} and which no finite grid can render
+honestly. Since the method
+only evaluates $\Dfun$ at complex points, the continuum model is handled
+verbatim; the chart over $(K_p,\tau)$ in Fig.~\ref{fig:galleryb} shows the
+alternating stable bands typical of such systems. This case study doubles
+as a comparison target for its finite element counterpart below.
+
+\paragraph{A.9 Finite element beam (29 DOF).}
+The same bar discretized by 29 linear finite elements:
+$\Dfun(\lam)=\det(\lam^2\mat M+\lam\mat C+\mat K + K_p\,h^{-1}
+\ee^{-\lam\tau}\,\vect e_{29}\vect e_1^{\!\top})$ ($h$ being the element
+length), a $29\times29$ determinant
+with a rank-one delayed term. The chart reproduces the transcendental
+result within the resolved frequency range, at the cost of a determinant
+evaluation per frequency -- a direct measure of what the exact continuum
+formulation saves. (For repeated evaluations the rank-one structure admits
+determinant-lemma accelerations; not exploited here.)
+
+\paragraph{A.10 Large dense determinant.}
+A synthetic stress test: $\Dfun(\lam)=\det(\lam^2\mat M+\lam\mat C+\mat K+
+g\,\ee^{-\lam\tau}\mat K)$ with dense random symmetric positive definite
+$50\times50$ matrices, $\mat C=0.25\,\mat K$, swept over a delayed stiffness
+gain $g$ and the delay $\tau$. The evaluation cost is dominated by the LU
+factorization per frequency; the adaptive sweep keeps the number of
+evaluations low, so even this case yields charts in tens of seconds. This
+example also exercises the overflow guards of
+Sections~\ref{sec:phaseode}--\ref{sec:tracking}: $|\Dfun|$ reaches
+$10^{250}$ and beyond, so the phase integrand is evaluated in scale-invariant
+form and the leading-order probe~\eqref{eq:npow} automatically retreats to a
+representable $s_\ast$.
+
+\paragraph{A.11 Fractional-order oscillator.}
+$\Dfun(\lam)=\lam^{1.8}+0.5\,\lam^{0.8}+k\,\ee^{-\lam\tau}$ over
+$(k,\tau)$, with the principal branch of the fractional powers. The
+half-line count applies with the non-integer effective order estimated
+by~\eqref{eq:npow}; the origin offset of Section~\ref{sec:phaseode}
+regularizes the branch point at $\lam=0$.
+
+\begin{figure}[tb]
+  \centering
+  \maybefig{fig_fractional_controller}{\linewidth}
+  \caption{Reproduction of a fractional-order controller design chart from
+  the literature (Gao, Zhai and Liu~\cite{gao2017robust}, Example~1):
+  stabilizing regions of the fractional PI controller
+  $C(s)=k_p+k_i/s^{\mu}$ for the fractional delayed plant
+  $G(s)=5\ee^{-0.4s}/(10 s^{0.5}+1)$, for $\mu=0.4$ (left) and
+  $\mu=1.5$ (right). Curves: boundaries for prescribed stability
+  degrees traced by the shifted-line criterion; white markers: the test
+  points tabulated in~\cite{gao2017robust}.}\label{fig:fraccontroller}
+\end{figure}
+
+\paragraph{A.12 Fractional controller chart from the literature.}
+As an external validation of the fractional capability,
+Fig.~\ref{fig:fraccontroller} reproduces the stabilizing-region chart of
+Gao, Zhai and Liu~\cite{gao2017robust} (Example~1), computed there by
+D-decomposition; see also the related design
+charts~\cite{hamamci2007algorithm,hohenbichler2008comments,ruszewski2008stability,cheng2006stabilization}.
+The closed-loop characteristic function
+$\Dfun(s)=s^{\mu}(10s^{0.5}+1)+5\ee^{-0.4s}(k_p s^{\mu}+k_i)$ is a
+one-line model definition for the present method; the traced boundaries and
+the classification of the published test points agree with the reference,
+including the shrinking regions of prescribed stability degree obtained
+with shifted integration lines.

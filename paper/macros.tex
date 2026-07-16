@@ -1,0 +1,28 @@
+% ---------------------------------------------------------------------------
+% Notation macros (keep ALL notation here so it stays consistent everywhere)
+% ---------------------------------------------------------------------------
+\newcommand{\lam}{\lambda}
+\newcommand{\ii}{\mathrm{i}}
+\newcommand{\ee}{\mathrm{e}}
+\newcommand{\dd}{\mathrm{d}}
+\newcommand{\Dfun}{\mathcal{D}}
+\newcommand{\Zraw}{\tilde{Z}}
+\newcommand{\Zint}{Z}
+\newcommand{\sest}{\hat{\sigma}}
+\newcommand{\west}{\hat{\omega}}
+\newcommand{\wmax}{\omega_{\mathrm{max}}}
+\newcommand{\Real}{\operatorname{Re}}
+\newcommand{\Imag}{\operatorname{Im}}
+\newcommand{\vect}[1]{\boldsymbol{#1}}
+\newcommand{\mat}[1]{\mathbf{#1}}
+\newcommand{\code}[1]{\texttt{#1}}
+\newcommand{\pkg}[1]{\texttt{#1}}
+
+% ---------------------------------------------------------------------------
+% Guarded includes: the document compiles even before all figures/tables exist
+% ---------------------------------------------------------------------------
+\newcommand{\maybefig}[2]{%
+  \IfFileExists{figures/#1.pdf}{\includegraphics[width=#2]{figures/#1.pdf}}{%
+    \IfFileExists{figures/#1.png}{\includegraphics[width=#2]{figures/#1.png}}{%
+      \fbox{\parbox{#2}{\centering\vspace{2em} PENDING FIGURE: \texttt{\detokenize{#1}}\vspace{2em}}}}}}
+\newcommand{\maybeinput}[1]{\IfFileExists{#1}{\input{#1}}{\fbox{PENDING TABLE: \texttt{\detokenize{#1}}}}}

@@ -17,6 +17,22 @@ paper/*.out
 paper/*.toc
 paper/*.synctex.gz
 paper/*.spl
+paper/*.bbl
+paper/*.blg
+paper/*.fls
+paper/*.fdb_latexmk
+paper/*.lof
+paper/*.lot
+
+# Paper pipeline: large cached grids are regenerable, do not commit
+paper/data/cache/
+# low-resolution previews written next to the real figures for quick inspection
+paper/figures/preview/
+
+# Paper pipeline: keep generated figures and the pinned manifest despite global ignores
+!paper/figures/*.png
+!paper/figures/*.pdf
+!paper/scripts/Manifest.toml
 
 *.png
 *.svg

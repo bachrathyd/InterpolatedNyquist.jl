@@ -1,0 +1,96 @@
+\section{Conclusions and outlook}\label{sec:conclusion}
+
+The Nyquist/argument-principle criterion for linear autonomous time-delay
+systems was reformulated as a scalar ordinary differential equation for the
+phase of the characteristic function and marched by a high-order adaptive
+integrator with an exact, automatically differentiated integrand. This
+reformulation tames the practically unbounded frequency range and the
+near-singular integrand through the mature step-size control of modern ODE
+software, and it makes the accuracy self-validating through the integer
+residual of the computed winding number, a dimensionless error measure that
+scales with the requested tolerance -- empirically as
+$\varepsilon\approx100\,\mathrm{tol}$ -- so that the accuracy of the count
+can be prescribed rather than discovered. It should be said plainly that the
+phase ODE carries no stiffness: its right-hand side is independent of the
+state, so the formulation is a quadrature in disguise, and adaptive
+quadrature is fully competitive for the count alone. What the ordered march
+uniquely provides -- and what every chart in this paper is built from -- is
+the characteristic root obtained along the way. The location of the
+characteristic root closest to the integration line is obtained during the
+same sweep at negligible cost and is refined to high accuracy -- essentially to machine precision near the
+stability boundary -- by Newton or cubic Taylor
+corrections built on the same automatic derivatives.
+
+The root estimate transforms the integer-valued root-counting map into an
+interpolable chart: one coloring simultaneously shows the number of unstable
+roots and the spectral gap of the stable domain; the estimated root distance
+serves as a scalar objective for the multi-dimensional bisection method,
+which traces the true stability boundary (rather than all root-crossing
+D-curves) at high equivalent resolution; the most robust parameter point
+follows from the largest inscribed circle; and shifted integration lines
+yield guaranteed decay-rate ($\gamma$-stability) contours. The
+characteristic function itself is extracted algorithmically from a
+simulation-ready right-hand side -- including nonlinear models (linearized
+automatically) and singular mass matrices -- so the complete
+workflow requires nothing beyond the model and the parameter ranges. The
+case studies demonstrate the identical code path on retarded, neutral,
+distributed-delay, differential--algebraic, transcendental,
+high-dimensional and fractional-order systems, at chart-generation speeds
+that allow interactive exploration and optimization.
+
+The limitations delineate the outlook. First, the method is restricted to
+autonomous (time-invariant) linear systems: for time-periodic coefficients
+the characteristic function would have to be replaced by a Hill-type
+infinite determinant, whose robust truncation is an open issue, and
+time-domain discretization methods such as
+semi-discretization~\cite{insperger2011semidiscretization,bachrathy2026multiplication}
+remain the more practical choice there. Second, away from the stability
+boundary the rightmost-root estimate is of first order unless refined, so
+the method complements rather than replaces full spectral solvers when the
+deep spectrum is needed. Third -- and this is intrinsic to the argument
+principle rather than to any implementation of it -- a peak that no sample
+lands on costs exactly $\pm\pi$ and shifts the count by one while leaving it
+an integer, so the residual cannot see it; sufficiently close to a boundary
+the marching solver does step over such peaks. The cross-check between the
+count and the independently tracked root detects this at no cost, and the
+affected classification is confined to the crossing of the last unstable
+root, but a formally guaranteed count would require a different device --
+interval arithmetic, or an a-priori bound on the peak locations. Third, for neutral systems beyond the essential
+instability threshold the root count diverges with the truncation frequency;
+the classification into stable and unstable domains nevertheless remains
+correct, as demonstrated in~\ref{app:gallery}. Finally, the fractional-order
+results are preliminary in the sense that the argument-principle counting on
+the principal branch was validated here numerically -- including the
+reproduction of a published fractional-controller design chart -- but a
+rigorous treatment of branch-cut effects, in particular for shifted
+integration lines, is left for future work. Extending the automatic
+extraction to neutral right-hand sides and coupling the interactive charts
+to formal optimization loops are further natural continuations.
+
+\section*{Software and reproducibility}
+The method is implemented in the open-source Julia package
+\pkg{InterpolatedNyquist.jl} (MIT license,
+\url{https://github.com/bachrathyd/InterpolatedNyquist.jl}), built on
+\pkg{OrdinaryDiffEq.jl}~\cite{rackauckas2017differentialequations},
+\pkg{ForwardDiff.jl}~\cite{revels2016forward},
+\pkg{QuadGK.jl}~\cite{johnson2013quadgk} and
+\pkg{MDBM.jl}~\cite{bachrathy2025mdbm}. All figures and tables of this
+paper can be regenerated by the scripts in the \code{paper/} directory of the
+repository; the benchmark hardware and software versions are embedded
+automatically in the manuscript.
+
+\section*{Funding}
+% NOTE: styled after the funding statement of the author's Multiplication-Free
+% Semi-Discretization paper (J. Vib. Control, 2026), which is behind a paywall
+% and could not be retrieved verbatim -- please replace with the exact house
+% wording before submission.
+The author disclosed receipt of the following financial support for the
+research, authorship and publication of this article: this work was
+supported by the National Research, Development and Innovation Fund of
+Hungary under project no.~152125 (ENSURE: Efficient Numerical Solver for
+Universal Real-Time Evaluation of Stability and Periodic Motion).
+
+\section*{Declaration of competing interest}
+The author declares that there is no known competing financial interest or
+personal relationship that could have appeared to influence the work
+reported in this paper.

@@ -1,0 +1,116 @@
+\section{Linear autonomous delay systems and the argument principle}\label{sec:theory}
+
+\subsection{System classes and the characteristic function}\label{sec:classes}
+
+Consider the linear autonomous delay system in first-order descriptor form
+\begin{equation}\label{eq:ddae}
+  \mat E\,\dot{\vect x}(t) = \mat A_0\,\vect x(t)
+  + \sum_{j=1}^{m}\Bigl(\mat A_j\,\vect x(t-\tau_j) + \mat B_j\,\dot{\vect x}(t-\tau_j)\Bigr)
+  + \int_{0}^{\vartheta_{\mathrm{max}}} \mat W(\vartheta)\,\vect x(t-\vartheta)\,\dd\vartheta ,
+\end{equation}
+with state $\vect x(t)\in\mathbb R^{N}$, constant matrices
+$\mat E,\mat A_j,\mat B_j\in\mathbb R^{N\times N}$, discrete delays
+$\tau_j>0$ and a distributed-delay kernel $\mat W$. The exponential ansatz
+$\vect x(t)=\vect\xi\,\ee^{\lam t}$ leads to the characteristic matrix and
+the characteristic function
+\begin{equation}\label{eq:charfun}
+  \mat M(\lam) = \lam\mat E - \mat A_0
+   - \sum_{j=1}^{m}\bigl(\mat A_j + \lam\mat B_j\bigr)\ee^{-\lam\tau_j}
+   - \int_{0}^{\vartheta_{\mathrm{max}}}\mat W(\vartheta)\,\ee^{-\lam\vartheta}\dd\vartheta,
+  \qquad
+  \Dfun(\lam) = \det\mat M(\lam).
+\end{equation}
+Equation~\eqref{eq:ddae} covers all the system classes treated in this paper:
+\emph{retarded} DDEs ($\mat E=\mat I$, $\mat B_j=\mat 0$), \emph{neutral}
+DDEs ($\mat B_j\neq\mat 0$), delay \emph{differential--algebraic} equations
+(DDAEs, singular $\mat E$, e.g., due to kinematic constraints or algebraic
+force balances), and \emph{distributed} delays. Beyond~\eqref{eq:ddae}, the
+method below requires only an analytic function $\Dfun(\lam)$ that can be
+evaluated at complex arguments; hence transcendental characteristic functions
+of continua (e.g., $\cosh$-type expressions of elastic
+beams~\cite{zhang2016exact}) and fractional-order quasi-polynomials
+containing terms $\lam^{\alpha}$, $\alpha\notin\mathbb N$,
+are admissible as well.
+
+The equilibrium of~\eqref{eq:ddae} is asymptotically stable if all roots of
+$\Dfun(\lam)=0$ satisfy $\Real\lam<0$. More generally, a guaranteed decay
+rate (spectral gap) $|\sigma|$ -- often called $\gamma$-stability -- requires
+all roots to lie left of the shifted line $\Real\lam=\sigma<0$. We denote by
+$\Zint(\vect p)$ the number of roots with $\Real\lam>\sigma$ for the design
+parameters $\vect p$; the stability chart is the map
+$\vect p\mapsto\Zint(\vect p)$, and the stable (or $\gamma$-stable) domain
+is the region $\Zint=0$.
+
+For large $|\lam|$ the characteristic function grows like
+$\Dfun(\lam)\sim c\,\lam^{n}$, where the leading order $n$ equals $N$ for
+retarded systems in state-space form but is smaller for DDAEs (the algebraic
+rows remove dynamic content) and is only an \emph{effective, possibly
+non-integer} order for neutral ($\Dfun\sim\lam^{n}(1+\sum_j b_j
+\ee^{-\lam\tau_j})$) and fractional systems. The counting formula below needs
+$n$, and Section~\ref{sec:phaseode} shows that it can be estimated
+numerically without any structural knowledge.
+
+\subsection{Counting unstable roots on a half-line}\label{sec:counting}
+
+Let the integration line $\lam=\sigma+\ii\omega$ be free of characteristic
+roots, and let $\Dfun$ be analytic with finitely many roots to the right of the
+line. Applying the argument principle to the D-shaped contour composed of the
+line and the arc at infinity, and exploiting the conjugate symmetry
+$\Dfun(\overline\lam)=\overline{\Dfun(\lam)}$ of real-coefficient systems,
+the number of roots to the right of the line is obtained from frequencies
+$\omega\ge 0$ only~\cite{stepan1989retarded,hassard1997counting}:
+\begin{equation}\label{eq:count}
+  \Zint \;=\; \frac{n}{2} \;-\; \frac{1}{\pi}\,\Delta\theta,
+  \qquad
+  \Delta\theta = \int_{0}^{\infty}\theta'(\omega)\,\dd\omega,
+  \qquad
+  \theta(\omega) = \arg \Dfun(\sigma+\ii\omega),
+\end{equation}
+where $\theta$ is continuous in $\omega$ and $n/2$ accounts for the phase
+gathered on the arc at infinity, where $\Dfun\sim c\lam^{n}$. This is the
+half-line (Mikhailov-type) form of the Nyquist criterion. Writing
+$\Dfun'(\omega)\equiv\partial_\omega\Dfun(\sigma+\ii\omega)$ for the
+derivative along the line, the phase slope is
+\begin{equation}\label{eq:integrand}
+  \theta'(\omega)
+  = \Imag\frac{\Dfun'(\omega)}{\Dfun(\sigma+\ii\omega)}
+  = \frac{\Real\Dfun\cdot\partial_\omega\Imag\Dfun
+        - \Imag\Dfun\cdot\partial_\omega\Real\Dfun}{|\Dfun|^{2}} .
+\end{equation}
+For $\sigma=0$, $\Zint$ counts the unstable roots; for $\sigma<0$ it counts
+the roots violating the prescribed spectral gap, so the same formula draws
+$\gamma$-stability charts.
+
+\subsection{Why the naive evaluation is impractical}\label{sec:naive}
+
+Formula~\eqref{eq:count} looks like a textbook quadrature problem, but three
+properties make its direct use for stability charts inefficient.
+First, $\Zint(\vect p)$ is integer-valued: it is constant inside every cell
+of the chart and jumps at the boundaries, so the map cannot be interpolated,
+and any grid-based chart must be fine enough to resolve every cell of
+interest. Second, the numerical evaluation is hardest exactly where it
+matters most. If a root $\lam_r=\sigma_r+\ii\omega_r$ lies close to the
+integration line, the integrand~\eqref{eq:integrand} develops a
+near-Lorentzian peak at $\omega\approx\omega_r$,
+\begin{equation}\label{eq:peak}
+  \theta'(\omega) \approx \frac{-(\sigma_r-\sigma)}
+  {(\sigma_r-\sigma)^{2} + (\omega-\omega_r)^{2}} + \text{smooth part},
+\end{equation}
+whose half-width $|\sigma_r-\sigma|$ tends to zero as the parameter point
+approaches the stability boundary, while its integral contribution stays
+$\pm\pi$; \emph{any} method that samples the integrand pointwise and happens
+to place all its samples outside such a peak miscounts $\Zint$ by exactly
+one, and -- since the result stays an integer -- does so without any
+warning. Third, the integration range is infinite: the phase
+slope decays only algebraically, with delay-induced oscillatory ripples, so a
+fixed truncation $\wmax$ must balance truncation error against the cost of
+resolving a ripple over a huge interval.
+
+Section~\ref{sec:method} addresses the first and third difficulties with the
+step-size control of an adaptive integrator, and turns the second into an
+asset by extracting the location of the offending root from the very peak
+that makes the integration hard. The peak-skipping hazard, by contrast,
+cannot be legislated away by any choice of integrator; what can be done --
+and what Section~\ref{sec:integerness} does -- is to detect it, using the
+fact that the root estimate and the phase count come from independent
+mechanisms and must agree.

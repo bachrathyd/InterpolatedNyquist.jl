@@ -1,0 +1,164 @@
+\section{Introduction}\label{sec:intro}
+
+Time delays are inherent in a wide range of engineering systems: regenerative
+machine-tool vibrations~\cite{tobias1958theory,tlusty1963stability,altintas1995analytical,munoa2016chatter},
+digitally controlled and teleoperated machines, active vibration suppression,
+wheel shimmy, and traffic or population dynamics all lead to delay differential
+equations (DDEs)~\cite{stepan1989retarded,hale1993introduction,michiels2014stability}.
+Since the characteristic function $\Dfun(\lam)$ of even the simplest linear
+autonomous DDE is transcendental, it possesses infinitely many characteristic
+roots, and the stability of an equilibrium can rarely be decided in closed
+form. Engineering practice therefore relies on \emph{stability charts}:
+maps over a plane of design parameters that show where the equilibrium is
+asymptotically stable~\cite{insperger2011semidiscretization,sipahi2011stability}.
+The practical value of such a chart depends on two properties of the
+underlying numerical method: how fast a single parameter point can be
+classified, and how much extra information (dominant root location, spectral
+gap, robustness margin) the classification yields.
+
+A large family of methods operates in the time domain by discretizing either
+the solution operator or the infinitesimal generator of the delay system.
+The semi-discretization method of Insperger and
+St\'ep\'an~\cite{insperger2002semi,insperger2004updated,insperger2008higher,insperger2011semidiscretization},
+the full-discretization method~\cite{ding2010full}, Chebyshev
+collocation~\cite{butcher2004stability}, pseudospectral
+differencing~\cite{breda2005pseudospectral,breda2015stability}, and the
+spectral element method~\cite{khasawneh2011spectral} all construct a finite
+transition matrix whose eigenvalues approximate the characteristic
+multipliers or exponents; spectral methods to certify all roots in a
+prescribed right half-plane are also available~\cite{wu2012reliably}.
+Mature software packages implement these ideas: DDE-BIFTOOL~\cite{engelborghs2002numerical,sieber2016ddebiftool},
+TRACE-DDE~\cite{breda2009tracedde}, Knut~\cite{szalai2006continuation,szalai2013knut},
+and \pkg{SemiDiscretizationMethod.jl}~\cite{bachrathy2026semidisc}, which also contains
+the recent multiplication-free variant with linear time
+complexity~\cite{bachrathy2026multiplication}. The great strength of this
+family is generality: time-periodic coefficients (e.g., milling) are handled
+by the same machinery through Floquet theory. For \emph{autonomous} systems,
+however, this generality is paid for at every single parameter point: a large
+discretization matrix is built and its dominant eigenvalues are computed,
+although only the sign of the rightmost characteristic exponent -- one bit of
+information -- decides stability. Moreover, delayed systems of neutral type
+(where the essential spectrum destroys the convergence of many
+discretizations~\cite{hale2002strong,michiels2005eigenvalue}), systems with
+algebraic constraints, i.e., delay differential--algebraic equations
+(DDAEs)~\cite{campbell1980singular,ha2016analysis}, distributed
+delays~\cite{cushing1977integrodifferential}, and fractional-order
+systems~\cite{petras2011fractional,fioravanti2012numerical,cermak2019delay}
+each require dedicated, nontrivial extensions in the time domain.
+
+The frequency domain offers a complementary route, since all the listed
+system classes share the same abstract object: an analytic characteristic
+function $\Dfun(\lam)$ whose roots in the right half-plane must be counted.
+Classical tools include the D-subdivision method~\cite{neimark1949decomposition},
+the analytical stability criteria of St\'ep\'an~\cite{stepan1989retarded},
+the Nyquist and Mikhailov criteria~\cite{nyquist1932regeneration,mikhailov1938method},
+the direct method of Walton and Marshall~\cite{walton1987direct}, the
+Rekasius substitution~\cite{rekasius1980stability}, and the cluster treatment
+of characteristic roots~\cite{olgac2002exact}; the Lambert-$W$
+formalism~\cite{yi2010timedelay} and the matrix method of
+Louisell~\cite{louisell2001matrix} target the dominant roots directly, while
+the quasi-polynomial root finder QPmR~\cite{vyhlidal2009mapping,vyhlidal2014qpmr}
+computes all roots in a prescribed rectangle from the values of
+$\Dfun(\lam)$ on a grid. A recent survey of argument-principle-based
+counting techniques is given in~\cite{niculescu2023counting}.
+
+Two frequency-domain strategies are particularly relevant here. The first
+solves the two real equations $\Real\Dfun(\ii\omega)=\Imag\Dfun(\ii\omega)=0$
+in the parameter space extended by the frequency $\omega$, which
+yields the D-curves, i.e., the parameter combinations where a root crosses
+the imaginary axis. The multi-dimensional bisection method
+(MDBM)~\cite{bachrathy2012bisection,bachrathy2025mdbm} traces these
+one-dimensional solution manifolds very efficiently. The D-curves, however,
+are \emph{not} the stability boundaries: they merely mark root crossings, and
+the number of unstable roots on either side remains unknown. If the system is
+well understood, the stable side can be picked by inspection or by a few test
+computations, but automating this decision is surprisingly hard: the curves
+must be assembled into closed cells by triangulation, numerical noise
+generates many spurious slivers that must be filtered, and the bookkeeping
+often costs more than the curve tracing itself. The turning stability-lobe
+diagram illustrates a second, more fundamental inefficiency: towards low
+spindle speeds the lobe structure becomes infinitely dense, and almost all
+D-curves lie deep inside the unstable domain
+(cf.~\ref{app:gallery})~\cite{stepan2001modelling,insperger2003stability,bachrathy2013improved},
+so the method spends most of its effort on curves that never bound the
+stable region.
+
+The second strategy counts the unstable roots directly by the argument
+principle, i.e., by the winding number of $\Dfun(\ii\omega)$ -- the
+generalized Nyquist, or Mikhailov, criterion~\cite{stepan1989retarded,kolmanovskii1999introduction}.
+Root counting by contour integrals of $\Dfun'/\Dfun$ has a long history for
+general analytic functions~\cite{delves1967numerical,kravanja2000computing,kravanja2000zeal};
+for delay systems, Hassard~\cite{hassard1997counting} derived a
+semi-analytical counting formula, Z\'{\i}tek and Vyhl\'{\i}dal formulated
+argument-increment criteria for neutral systems~\cite{zitek2008argument,vyhlidal2009modification},
+and, closest to the present work, Xu and Wang~\cite{xu2014exact} and Xu,
+St\'ep\'an and Wang~\cite{xu2016delay} evaluated the argument-principle
+``testing integral'' numerically, observing that a rough quadrature suffices
+because the result must be an integer. The appeal of root counting is that
+the answer $\Zint(\vect p)$ is exactly the quantity a stability chart needs.
+Its curse is twofold. First, $\Zint(\vect p)$ is a piecewise-constant integer
+field: it jumps abruptly across the stability boundaries, so it cannot be
+interpolated, and brute-force charts need fine parameter grids. Second, the
+numerical evaluation is hardest \emph{exactly at the stability boundary} --
+the only region one actually cares about -- because as a root approaches the
+integration line the integrand of the winding integral develops a
+near-singular peak whose width shrinks to zero, and fixed grids or rough
+quadratures either miss the peak or need excessive refinement; the infinite
+frequency range poses an additional truncation problem.
+
+This paper revisits the integration-based Nyquist criterion and turns it into
+a fast and robust tool with \emph{interpolable} output. The contributions are the
+following. (i)~The winding integral is reformulated as a scalar ordinary
+differential equation for the phase, marched by a high-order adaptive
+integrator~\cite{verner2010numerically,tsitouras2011runge,rackauckas2017differentialequations}
+whose step-size control resolves the near-singular peaks and crosses the
+practically unbounded frequency range, with the integrand evaluated exactly
+by forward-mode automatic differentiation~\cite{revels2016forward}.
+(ii)~The location of the
+characteristic root closest to the integration line -- normally the rightmost
+root -- is estimated \emph{during the same sweep} at negligible extra cost, and
+can be refined to machine precision by a few Newton corrections for a few
+percent of the cost; tracking several local minima yields multiple roots at
+once. This ordered march, and not accuracy or speed, is what distinguishes
+the phase ODE from plain quadrature: a recursively subdividing quadrature
+visits the frequencies out of order and cannot recognize the minima at all.
+(iii)~The root
+estimate makes the chart interpolable: a combined coloring shows the integer
+number of unstable roots outside and the smooth spectral gap inside the
+stable domain, which is a strikingly effective visual diagnostic.
+(iv)~The integrality of the computed winding number provides a built-in,
+dimensionless error estimate that scales with the requested solver tolerance
+and lets the accuracy of the count be prescribed in advance; where it is
+structurally blind -- a skipped peak costs exactly $\pm\pi$ and leaves the
+result an integer -- the independently obtained root supplies the missing
+check. (v)~The estimated root distance serves
+as a scalar objective for MDBM, which then traces the \emph{true} stability
+boundary (not the D-curves) at very high equivalent resolution, and the most
+robust parameter point is found as the center of the largest circle inscribed
+in the stable domain. (vi)~The characteristic function is extracted
+algorithmically from a simulation-ready right-hand side -- including singular
+mass matrices (DDAEs) -- so the user never has to derive
+$\Dfun(\lam)$ by hand. (vii)~The method applies verbatim to retarded,
+neutral, distributed-delay, transcendental, high-dimensional and
+(preliminarily) fractional-order systems, and is released as the open-source
+Julia~\cite{bezanson2017julia} package \pkg{InterpolatedNyquist.jl}.
+Compared with the rough-quadrature testing integral
+of~\cite{xu2014exact,xu2016delay}, the present formulation adds adaptive
+error control tied to the integer-residual estimate, the rightmost-root
+by-product that enables interpolation and boundary tracing, and a far wider
+class of demonstrated applications; compared with contour-moment methods such
+as ZEAL~\cite{kravanja2000zeal}, it needs no bounded search region and is
+tailored to the half-line stability sweep.
+
+The paper is organized as follows. Section~\ref{sec:theory} summarizes the
+system classes and the argument-principle counting formula.
+Section~\ref{sec:method} presents the phase ODE, the rightmost-root tracking,
+the higher-order refinement, and the self-validating error estimate.
+Section~\ref{sec:charts} assembles these ingredients into fast stability
+charts. Section~\ref{sec:extraction} describes the automatic extraction of
+$\Dfun(\lam)$ from a time-domain model. Section~\ref{sec:showcase} walks
+through the complete workflow on a constrained two-degree-of-freedom system
+with delayed control, Section~\ref{sec:performance} quantifies accuracy, CPU
+time and memory, including a comparison with the semi-discretization method,
+and Section~\ref{sec:conclusion} concludes. \ref{app:gallery} collects twelve
+further case studies from all supported system classes.

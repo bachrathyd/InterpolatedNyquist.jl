@@ -6,12 +6,24 @@ using ForwardDiff
 using StaticArrays
 
 """
-    get_D_from_model(bc_model, λ::Complex, p, ::Val{N}; u_eq = zeros(SVector{N, Float64}), verbosity::Int = 0) where {N}
+    get_D_from_model(bc_model, λ::Complex, p, ::Val{N}; mass_matrix = I, u_eq = zeros(SVector{N, Float64}), verbosity::Int = 0) where {N}
 
-Extracts the characteristic equation value D(λ) from a black-box DDE model.
-Uses ForwardDiff to extract the Jacobian matrix and calculates its determinant.
+Extracts the characteristic equation value D(λ) from a black-box DDE model
+`bc_model(u, h, p, t)` (DifferentialEquations.jl DDE signature) describing
+`E * du/dt = f(u, u(t-τ...), p, t)`.
+Uses ForwardDiff to extract the Jacobian matrix and calculates the determinant
+`D(λ) = det(λ*E - J(λ))`, where `J(λ)` collects the instantaneous and delayed
+Jacobians (delayed terms contribute `exp(-λτ)` factors automatically through
+the mock exponential history).
+
+`mass_matrix` is the matrix `E` (default: `I`). It is supplied separately,
+exactly as in DifferentialEquations.jl (`ODEFunction`/`DDEFunction` field
+`mass_matrix`), since it is not part of the right-hand side. A **singular**
+mass matrix (differential-algebraic system, DAE) is fully supported: rows of
+zeros in `E` turn the corresponding rows of the characteristic matrix into the
+algebraic constraint equations. For zero allocations pass an `SMatrix{N,N}`.
 """
-function get_D_from_model(bc_model, λ::Complex, p, ::Val{N}; u_eq = zeros(SVector{N, Float64}), verbosity::Int = 0) where {N}
+function get_D_from_model(bc_model, λ::Complex, p, ::Val{N}; mass_matrix = LinearAlgebra.I, u_eq = zeros(SVector{N, Float64}), verbosity::Int = 0) where {N}
     
     # T_val adapts to external ForwardDiff layers (if λ is dual, T_val will be too)
     T_val = typeof(real(λ))
@@ -42,8 +54,8 @@ function get_D_from_model(bc_model, λ::Complex, p, ::Val{N}; u_eq = zeros(SVect
     # Evaluate model
     du = bc_model(u_current, h_mock, p, zero(T_val))
     
-    # Characteristic matrix equation: λ*A - (du - du_eq) = 0
-    res = λ .* A_duals .- du
+    # Characteristic matrix equation: λ*E*A - (du - du_eq) = 0 (E = mass matrix)
+    res = λ .* (mass_matrix * A_duals) .- du
     
     # --- 2. JACOBIAN EXTRACTION (0-allocation SMatrix) ---
     get_p(x, j) = ForwardDiff.partials(x, j)

@@ -8,10 +8,22 @@
 ## Features
 - **Standardized Parameter Handling:** Consistent with `DifferentialEquations.jl` (accepts unified parameter collection `p`).
 - **Autodiff-Enhanced:** Uses exact phase derivatives via `ForwardDiff.jl`.
-- **Stiff Integration:** Employs robust ODE solvers (like `Rosenbrock23`) to track rapid phase changes without skipping encirclements.
-- **Higher-Order Root Refinement:** Provides sub-grid precision for characteristic roots using Linear, **3rd-order Polynomial (default)**, or Newton-Raphson approximation.
+- **Ordered Adaptive March:** The winding integral is solved as a phase ODE with a high-order adaptive pair (`Vern9` by default). The step control resolves the near-singular peaks; the *ordered* traversal is what makes root tracking possible (recursive quadrature visits frequencies out of order and cannot detect the |D| minima).
+- **Rightmost-Root Tracking:** The characteristic root closest to the (shiftable) imaginary axis is estimated during the same sweep, with `Val{N}` multi-root tracking.
+- **Root Refinement (~free):** Sub-grid precision via **Newton (default, 4 steps)**, Polynomial (Taylor, degree 2/3), or Linear. Refinement adds only a few percent to the per-point cost.
 - **Hybrid Strategy:** Fast global sweeps for background mapping, high-precision MDBM for boundary tracing.
-- **Error Estimation:** Self-validating numerical integrity based on the winding number's integer requirement.
+- **Error Estimation:** Self-validating integer residual `ε = |Z_raw − round(Z_raw)|`, empirically `ε ≈ 100 × tol`, so the accuracy of `Z` can be prescribed via the tolerance.
+- **Model Extraction:** `get_D_from_model` builds `D(λ) = det(λE − J(λ))` directly from a DifferentialEquations.jl-style right-hand side, **including singular mass matrices `E` (delay differential-algebraic systems)** via the `mass_matrix` keyword.
+- **Robust Leading-Order Estimation:** `get_n_power_max` probes along the **real axis**, where delay terms decay like `e^{-sτ}` — the arc at infinity lives in the right half-plane, so this measures exactly what the counting formula needs. Accurate to ~1e-9, and it works for neutral/fractional systems and large determinants where an imaginary-axis fit fails.
+
+### Choosing a back-end
+| want | use |
+|---|---|
+| `Z` only | `calculate_unstable_roots_quadgk` — competitive, and more dependable very close to a boundary |
+| `Z` **and** the rightmost root | `calculate_unstable_roots_direct` (default) — only the ordered march can track the root |
+| interactive/real-time scans | `calculate_unstable_roots_fixed_step` — fastest, accuracy set by `steps` |
+
+Near a stability boundary the integrand peak narrows in proportion to `|Re λ|`; no pointwise method can guarantee it is sampled. The integer residual cannot detect a skipped peak (it costs exactly ±π), but `sign(σ_est)` disagreeing with `Z == 0` does — this cross-check is free and is the recommended safeguard.
 
 ## Usage Example
 
@@ -61,7 +73,7 @@ For the 4th-order system above:
 ## Citing
 If you use `InterpolatedNyquist.jl` in your research, please cite the following paper (not submitted yet ;-) ):
 
-> Daniel Bachrathy, et al. "High-Performance Nyquist Stability Analysis of Delayed Dynamical Systems using MDBM and Autodiff-Enhanced Stiff Integration." ?Journal of Sound and Vibration, 2026?.
+> Daniel Bachrathy. "Interpolable Nyquist criterion: fast stability charts and rightmost-root estimation for linear time-delay systems via adaptive stiff integration." ?Journal of Sound and Vibration, 2026?. (Manuscript and all reproduction scripts in the `paper/` directory.)
 
 See `CITATION.bib` for the BibTeX entry.
 

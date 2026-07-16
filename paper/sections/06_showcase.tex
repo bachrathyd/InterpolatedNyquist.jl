@@ -1,0 +1,253 @@
+\section{Showcase: a constrained two-degree-of-freedom system with delayed PD control}\label{sec:showcase}
+
+All elements of the method are now demonstrated on a single mechanical
+example that is simple enough to verify by hand yet exercises every
+nontrivial feature at once: multiple degrees of freedom, a feedback delay,
+and an algebraic constraint, i.e., a delay differential--algebraic system
+with a singular mass matrix.
+
+\subsection{Model and automatic extraction}\label{sec:showcase-model}
+
+\begin{figure}[tb]
+  \centering
+  \maybefig{fig_showcase_hybrid}{0.72\linewidth}
+  \caption{Stability chart of the constrained two-degree-of-freedom system
+  with delayed PD control. Colored background: combined
+  field~\eqref{eq:coloring} of the brute-force sweep (smooth spectral gap
+  $\sest$ inside the stable domain, integer number of unstable roots
+  outside). Black curve: stability boundary traced by MDBM with the scalar
+  objective~\eqref{eq:objective}. Red ellipse and star: largest inscribed
+  ellipse and the most robust parameter point. The markers S and U denote
+  the stable and unstable points analyzed in
+  Fig.~\ref{fig:walkthrough}.}\label{fig:showcase}
+\end{figure}
+
+The main structure of mass $m_1$ is statically unstable
+(inverted-pendulum-like, modeled by the negative net suspension stiffness
+$k_1<0$ and damping $c_1$); it carries an absorber unit of mass $m_2$
+attached through a spring and damper $(k_2, c_2)$, and an instrumentation
+block of mass $m_3$ is \emph{rigidly bolted} to the absorber mass. Instead of
+eliminating the rigid connection by hand, the model keeps it as an algebraic
+constraint with the internal force $F_{\mathrm c}$ -- exactly the form in
+which a simulation model of a larger assembly would be written. A digital
+controller measures the motion of the main mass and applies the delayed PD
+force $u(t) = -P\,x_1(t-\tau) - D\,\dot x_1(t-\tau)$ to it. With the state
+vector $\vect z = (x_1,x_2,x_3,v_1,v_2,v_3,F_{\mathrm c})$, the descriptor
+form~\eqref{eq:ddae} reads
+\begin{equation}\label{eq:showcase}
+  \underbrace{\operatorname{diag}(1,1,1,m_1,m_2,m_3,0)}_{\textstyle\mat E}\,
+  \dot{\vect z}(t) =
+  \begin{pmatrix}
+    v_1\\[1pt] v_2\\[1pt] v_3\\[1pt]
+    -k_1 x_1 - c_1 v_1 + k_2(x_2-x_1) + c_2(v_2-v_1) + u(t)\\[1pt]
+    -k_2(x_2-x_1) - c_2(v_2-v_1) + F_{\mathrm c}\\[1pt]
+    -F_{\mathrm c}\\[1pt]
+    x_3 - x_2
+  \end{pmatrix},
+\end{equation}
+with the numerical values $m_1=1$, $m_2=0.3$, $m_3=0.2$, $k_1=-1$, $k_2=1$,
+$c_1=c_2=0.05$ and $\tau=0.5$. The last row of~\eqref{eq:showcase} carries no
+time derivative -- the mass matrix is singular -- and the model is passed to
+the extraction of Section~\ref{sec:extraction} exactly as written, in its
+simulation (right-hand-side) form. For verification, the constraint is also
+eliminated by hand ($x_3=x_2$, merged mass $m_{23}=m_2+m_3$), which yields
+the reduced quasi-polynomial
+\begin{equation}\label{eq:showcasered}
+  \Dfun_{\mathrm{red}}(\lam)=\det\!\begin{pmatrix}
+   m_1\lam^2+(c_1{+}c_2)\lam+k_1{+}k_2+(P{+}D\lam)\ee^{-\lam\tau} &
+   -(c_2\lam+k_2)\\
+   -(c_2\lam+k_2) &
+   m_{23}\lam^2+c_2\lam+k_2
+  \end{pmatrix}.
+\end{equation}
+The ratio of the automatically extracted $7\times7$ determinant to
+$\Dfun_{\mathrm{red}}$ is constant in $\lam$ to machine precision
+(deviation below $10^{-15}$ in the computed charts), which validates the
+mass-matrix extraction path end to end; the estimated leading
+order~\eqref{eq:npow} is $n\approx4.000$, as expected for two mechanical
+degrees of freedom. All results below were computed with the automatically
+extracted characteristic function.
+
+\subsection{The chart and the phase integration at work}\label{sec:showcase-chart}
+
+\begin{figure}[tb]
+  \centering
+  \maybefig{fig_method_walkthrough}{\linewidth}
+  \caption{The method at the stable point S and unstable point U of
+  Fig.~\ref{fig:showcase}. (a)~Normalized locus of
+  $\Dfun(\ii\omega)$: the stable curve avoids the origin, the unstable one
+  encircles it. (b)~Phase slope $\theta'(\omega)$ with the accepted steps of
+  the adaptive solver (dots): steps cluster automatically at the
+  near-singular peaks that indicate close characteristic roots.
+  (c)~Accumulated phase up to $\wmax=10^{4}$ on a logarithmic frequency
+  axis: past the resonances the solver keeps resolving the slowly decaying
+  ($\omega^{-1}$) delay ripple of this velocity-feedback system with
+  moderate, growing steps.}\label{fig:walkthrough}
+\end{figure}
+
+Figure~\ref{fig:showcase} shows the resulting stability chart over the
+control-gain plane $(P,D)$. Since the uncontrolled structure is unstable,
+the stable domain is a bounded island: its left boundary is the static
+(divergence) limit, while the remaining boundaries are Hopf-type curves whose
+crossing frequencies are delivered by $\west$. The combined
+coloring~\eqref{eq:coloring} displays the interior spectral gap -- deep blue
+marks the fastest-decaying configurations -- and the integer plateaus
+$\Zint=1,2,3,4$ outside, all in one map. The black MDBM curve is the
+high-resolution stability boundary traced from the scalar
+objective~\eqref{eq:objective}, and the red star marks the most robust
+gain combination found by the largest inscribed ellipse.
+
+Figure~\ref{fig:walkthrough} dissects the single-point computation at the
+two marked points. At the stable point S the locus of $\Dfun(\ii\omega)$
+avoids the origin and the accumulated phase settles at $\Delta\theta=n\pi/2$,
+giving $\Zraw\approx0$; at the unstable point U the locus encircles the
+origin and $\Zraw\approx2$. Panel~(b) makes the central numerical argument
+of this paper visible: the accepted steps of the adaptive solver concentrate
+at the sharp peaks of $\theta'$ near the lightly damped resonances --
+precisely the features a fixed frequency grid tends to miss. Panel~(c) shows
+the same march continuing over more than two further decades of frequency:
+since the delayed \emph{velocity} feedback of this system produces a phase
+ripple decaying only like $\omega^{-1}$ (Section~\ref{sec:phaseode}), the
+solver keeps taking moderate steps through the tail, and $\wmax=10^{4}$ --
+roughly three decades above the resonances -- is the economical choice used
+for all sweeps of this section; the truncation is fully exposed by the
+integer-residual diagnostic below.
+
+\subsection{Tolerance as a universal accuracy dial}\label{sec:showcase-tolerance}
+
+\begin{figure}[tb]
+  \centering
+  \maybefig{fig_tolerance_charts}{\linewidth}
+  \caption{The showcase chart computed with solver tolerances
+  $10^{-3}$, $10^{-5}$, $10^{-7}$ and $10^{-9}$ (left to right); the
+  wall-clock time of each full sweep is given in the panel titles. The chart
+  is visually converged already at $10^{-3}$: the tolerance buys certainty
+  rather than appearance, cf.\ Fig.~\ref{fig:errorfield} and
+  Table~\ref{tab:tolerance}.}\label{fig:tolerance}
+\end{figure}
+
+\begin{figure}[tb]
+  \centering
+  \maybefig{fig_error_field}{\linewidth}
+  \caption{Self-validating error: fields and histograms of the integer
+  residual $\varepsilon=|\Zraw-\operatorname{round}(\Zraw)|$,
+  cf.~\eqref{eq:eps}, for the four tolerances of
+  Fig.~\ref{fig:tolerance}. Dashed red line: the requested tolerance; dotted
+  black line: the practical rule $\varepsilon\approx100\,\mathrm{tol}$. The
+  residual scales with the tolerance uniformly over the parameter plane,
+  amplified by the accepted-step count of the frequency
+  march.}\label{fig:errorfield}
+\end{figure}
+
+\begin{table}[tb]
+  \centering
+  \caption{Tolerance study on the showcase system
+  (grid as in Fig.~\ref{fig:tolerance}): sweep time, integer residual
+  statistics and the number of grid points where the rounded count would be
+  ambiguous ($\varepsilon\ge1/4$).}\label{tab:tolerance}
+  \maybeinput{tables/tab_tolerance.tex}
+\end{table}
+
+Figure~\ref{fig:tolerance} shows the identical chart computed with
+tolerances $10^{-3}$, $10^{-5}$, $10^{-7}$ and $10^{-9}$, together with the
+measured sweep times, and Fig.~\ref{fig:errorfield} shows the corresponding
+integer-residual fields~\eqref{eq:eps}. Three observations matter for
+practice. First, the charts are visually indistinguishable: the tolerance
+buys \emph{certainty}, not appearance, and not a single grid point is
+misclassified even at the loosest setting (Table~\ref{tab:tolerance}).
+Second -- and this is the most useful outcome for a user -- the integer
+residual tracks the requested tolerance across the whole parameter plane
+with a roughly constant factor, so that
+\begin{equation}\label{eq:rule}
+  \varepsilon \;\approx\; 100 \cdot \mathrm{tol}
+\end{equation}
+holds to within an order of magnitude over six decades
+(Table~\ref{tab:tolerance}, last two columns). The factor is not universal
+-- it is inherited from the number of accepted steps, and a march that
+resolves a slowly decaying ripple accumulates more of them -- but it is
+remarkably stable across the chart and across the systems studied here.
+Equation~\eqref{eq:rule} therefore lets the accuracy of $\Zint$ be
+\emph{prescribed} rather than discovered: a user who wants the count certain
+to $10^{-3}$ asks for $10^{-5}$, which is exactly the package default.
+Third, the CPU-time premium of tightening the tolerance by six decades is
+well below two orders of magnitude, because the extra effort is spent only
+near the integrand peaks.
+
+Two limits deserve mention, since both are visible in
+Fig.~\ref{fig:errorfield} if the settings are pushed. The rule~\eqref{eq:rule}
+holds only while the quadrature is the dominant error: below it lie the
+truncated tail (of order $0.2/\wmax$ for this velocity-feedback system,
+which is why $\wmax=10^{6}$ is used here rather than the $10^{4}$ that
+suffices for the chart itself) and the residual of the estimated leading
+order~\eqref{eq:npow}, of order $10^{-9}$. Whichever of the three is largest
+sets the observed $\varepsilon$ -- and because all three are visible in the
+same number, the diagnostic tells the user which dial to turn next.
+
+\subsection{Rightmost roots and their refinement}\label{sec:showcase-roots}
+
+\begin{figure}[tb]
+  \centering
+  \maybefig{fig_refinement}{\linewidth}
+  \caption{Rightmost-root accuracy. (a)~Zoom on the dominant root at one
+  parameter point: zero-level curves of $\Real\Dfun$ (blue) and
+  $\Imag\Dfun$ (orange), whose intersection is the root; cross: raw tracked
+  estimate $(\sest,\west)$; red dot: the refined root; diamond: reference.
+  (b--e)~Error maps $\log_{10}|\lam-\lam_{\mathrm{ref}}|$ of the refinement
+  variants over the chart plane. Titles quote the cost \emph{per parameter
+  point of the complete solve}: the ``Linear'' panel gives the phase
+  integration alone, the others the percentage this refinement adds on top of
+  it.}\label{fig:refinement}
+\end{figure}
+
+\begin{table}[tb]
+  \centering
+  \caption{Accuracy and cost of the root-refinement variants over the
+  chart-plane sweep of Fig.~\ref{fig:refinement} (reference: 15 Newton
+  iterations). Times are per parameter point for the complete solve
+  (integration plus refinement); the overhead column is measured against the
+  unrefined solve.}\label{tab:refinement}
+  \maybeinput{tables/tab_refinement.tex}
+\end{table}
+
+Figure~\ref{fig:refinement} quantifies the rightmost-root estimates. The
+raw tracked value $(\sest,\west)$ -- one Newton step evaluated at the
+integrand minimum -- is near-exact on the stability boundary, accurate to
+a few percent in its vicinity, and degrades farther away, exactly as
+predicted in Section~\ref{sec:tracking}. What the timings settle is that the
+choice of refinement is essentially free: measured per parameter point
+against the complete solve, every variant adds only a few percent, because
+the refinement costs a handful of extra evaluations of $\Dfun$ against the
+thousands the frequency march already spent. Four Newton iterations are in
+fact \emph{cheaper} than a cubic Taylor solve -- the latter needs finite
+differences and a companion-matrix eigenvalue problem -- and are
+simultaneously the most accurate, reaching machine precision over almost the
+whole plane (Table~\ref{tab:refinement}). Since it is both better and
+cheaper, Newton-4 is the package default; the Taylor variants remain
+available and are the more conservative choice when a seed is poor, because
+they select the nearest root of a local polynomial rather than following the
+Newton flow. For stability charts the hierarchy is in any case exactly
+right: on the boundary, where the root position defines the chart, the
+estimates are near-exact; deep inside the domains, where only the sign
+matters, even the raw estimate suffices. Tracking $N_r>1$ minima returns
+several dominant roots at once, which is what the multi-root recipe of
+Section~\ref{sec:performance-sd} exploits.
+
+\subsection{Decay-rate design: $\sigma$-contours}\label{sec:showcase-sigma}
+
+\begin{figure}[tb]
+  \centering
+  \maybefig{fig_sigma_contours}{0.72\linewidth}
+  \caption{Decay-rate map of the showcase system: colored background --
+  estimated spectral gap $\sest$ from the coarse sweep (stable domain only);
+  curves -- guaranteed $\gamma$-stability boundaries traced by MDBM for a
+  family of shifted lines $\Real\lam=\sigma$. The two independent
+  computations delineate the same landscape.}\label{fig:sigmacontours}
+\end{figure}
+
+Finally, Fig.~\ref{fig:sigmacontours} demonstrates the $\gamma$-stability
+capability: the traced $\sigma$-contours (Section~\ref{sec:sigmacontours})
+enclose progressively smaller regions with guaranteed spectral gaps, and
+they are consistent with the interpolated $\sest$ background computed from
+the coarse sweep alone. For control design this map answers directly which
+gain combinations guarantee a prescribed settling rate -- at the cost of one
+extra boundary tracing per contour.

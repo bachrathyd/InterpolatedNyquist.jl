@@ -1,0 +1,201 @@
+\section{Performance analysis}\label{sec:performance}
+
+\subsection{Convergence and efficiency of the integrators}\label{sec:performance-convergence}
+
+\begin{figure}[tb]
+  \centering
+  \maybefig{fig_convergence}{\linewidth}
+  \caption{Integration back-ends at a near-boundary unstable point of the
+  showcase system, where the exact count $\Zint=2$ is known, so the integer
+  residual $\varepsilon$ is an \emph{absolute} error measure requiring no
+  reference. (a)~Accuracy versus requested tolerance; the dotted line marks
+  the practical rule $\varepsilon\approx100\,\mathrm{tol}$. (b)~Cost versus
+  tolerance. (c)~Efficiency front. Error is on the vertical axis in both (a)
+  and (c).}\label{fig:convergence}
+\end{figure}
+
+\begin{table}[tb]
+  \centering
+  \caption{Integer residual (left block) and single-point CPU time (right
+  block) of the back-ends at selected tolerances; system and point as in
+  Fig.~\ref{fig:convergence}.}\label{tab:convergence}
+  \maybeinput{tables/tab_convergence.tex}
+\end{table}
+
+Figure~\ref{fig:convergence} and Table~\ref{tab:convergence} quantify the
+choice of back-end, and three points deserve emphasis. First, all adaptive
+back-ends track the requested tolerance over the studied range, with the
+integer residual settling at roughly two orders of magnitude above it -- the
+rule of thumb $\varepsilon\approx100\,\mathrm{tol}$ quoted in
+Section~\ref{sec:integerness}. Second, the order of the pair matters far
+more than its family. The classical fifth-order pair is perfectly adequate
+at the default $10^{-5}$, but at $10^{-3}$ it under-resolves the
+$\omega^{-1}$ ripple of this velocity-feedback system so badly that
+$\Zraw$ is off by $0.8$ -- within a hair of losing the count -- whereas the
+ninth-order default is three orders of magnitude more accurate there and,
+at tolerances below $10^{-6}$, also cheaper. The linearly implicit
+Rosenbrock pair is uniformly dominated, as expected once one recognizes that
+the problem has no stiffness for it to exploit
+(Section~\ref{sec:phaseode}). Third, at the practically relevant setting
+$10^{-5}$ the back-ends are within a small factor of one another in both
+accuracy and cost: \emph{the choice of integrator is simply not critical
+there}, and the default is chosen for graceful degradation rather than for
+speed.
+
+\begin{table}[tb]
+  \centering
+  \caption{Approaching a Hopf boundary of the showcase system at distance
+  $\Delta P$ in the gain. The peak half-width equals $|\sest|$; the marching
+  solver silently loses one root once the peak falls below its step
+  resolution, while the integer residual stays small
+  ($\Zraw$ shifts by exactly one).}\label{tab:boundarystress}
+  \maybeinput{tables/tab_boundary_stress.tex}
+\end{table}
+
+The one situation in which the back-ends genuinely differ is the immediate
+vicinity of a stability boundary, and the outcome is the opposite of what
+the folklore about adaptive solvers suggests
+(Table~\ref{tab:boundarystress}). As the crossing root approaches the
+integration line, the integrand peak narrows in proportion to $|\sest|$; at
+$\Delta P=10^{-8}$ it is $6.6\cdot10^{-10}$ wide and $1.5\cdot10^{9}$ tall,
+while $10^{-3}$ away from it the integrand is back to its smooth
+background. The marching solver then steps clean over the peak, loses
+exactly $\pm\pi$, reports one root too few -- and returns a success flag and
+a perfectly healthy integer residual. Gauss--Kronrod survives the same test,
+though not by cleverness: the persistent delay ripple forces it to subdivide
+finely across the whole range anyway, and that global refinement happens to
+resolve the spike. Neither method carries a guarantee, since both sample
+pointwise. What does carry information is the tracked root: at
+$\Delta P=10^{-8}$ it still reports $\sest=+6.6\cdot10^{-10}$, correctly
+placing a root to the right of the axis, so the sign test of
+Section~\ref{sec:integerness} exposes the inconsistency for free. This is
+the practical recommendation: use quadrature when only $\Zint$ is wanted,
+use the ordered march when the root is wanted too -- and let the two outputs
+of the march check each other.
+
+\subsection{Chart-level cost, memory and cold start}\label{sec:performance-cost}
+
+\begin{table}[tb]
+  \centering
+  \caption{Warm chart-level costs (median of repeated runs,
+  \NumThreads{}~threads): full brute-force sweeps and MDBM boundary tracing
+  for three systems of increasing evaluation cost, with allocated
+  memory.}\label{tab:gridtimings}
+  \maybeinput{tables/tab_grid_timings.tex}
+\end{table}
+
+Table~\ref{tab:gridtimings} reports the cost of a \emph{complete}
+$100\times100$ chart -- ten thousand parameter points -- on a
+\CPUmodel{} (\NumThreads{} threads, \RAMgb\,GB RAM, Julia~\JuliaVersion,
+package revision \PkgCommit), with the per-point cost listed alongside so
+that other resolutions can be scaled directly. For scalar characteristic
+functions a full chart takes a few tens of milliseconds, and the entire
+hybrid workflow (colored sweep plus MDBM boundary) finishes well inside one
+second -- genuinely interactive. For the showcase DDAE every evaluation runs
+the automatic extraction of Section~\ref{sec:extraction}, i.e.\ a $7\times7$
+dual-number determinant, and the chart takes on the order of a minute at
+this resolution; the convenience of never deriving $\Dfun$ by hand thus
+costs roughly an order of magnitude against a hand-coded characteristic
+function, which the same table quantifies. Memory stays modest throughout
+because the phase ODE carries a single scalar state and the sweep stores
+only the five result fields; no large matrices are formed at any point.
+Cold start is a one-time cost dominated by package loading: in a fresh
+Julia process, loading takes about $5.5$\,s and the first thousand-point
+sweep $0.1$--$0.3$\,s thanks to the precompilation workload shipped with the
+package, after which every further chart runs at the warm speeds of
+Table~\ref{tab:gridtimings}.
+
+\begin{table}[tb]
+  \centering
+  \caption{What the MDBM boundary trace buys: from an initial mesh with the
+  listed refinement levels, the traced boundary has the equivalent resolution
+  of a uniform grid of the given size, at the listed number of function
+  evaluations. The saving factor is the ratio of the two point
+  counts.}\label{tab:mdbm}
+  \maybeinput{tables/tab_mdbm.tex}
+\end{table}
+
+Table~\ref{tab:mdbm} makes the boundary-tracing argument of
+Section~\ref{sec:mdbm} concrete. Four refinement levels from a
+$20\times20$ mesh yield a boundary resolved as finely as a
+$320\times320$ uniform grid would resolve it, while evaluating only the
+cells that actually bracket the boundary -- a saving of two orders of
+magnitude in function evaluations, which is precisely why the high-resolution
+boundary is affordable on top of a deliberately coarse colored background. These numbers substantiate the practical claim
+of the paper: the stability chart of a nontrivial delayed system refreshes
+fast enough to be explored \emph{interactively}, which changes how such
+charts are used in design -- parameter studies and optimization loops can
+call the entire chart pipeline as an inner function.
+
+\subsection{Comparison with semi-discretization}\label{sec:performance-sd}
+
+\begin{table}[tb]
+  \centering
+  \caption{Comparison with semi-discretization
+  (\pkg{SemiDiscretizationMethod.jl}, orders 1 and 2, $n$ steps per delay) on
+  the reduced showcase system: error of the dominant characteristic exponent
+  and CPU time per parameter point. The reference is the dominant root
+  refined to machine precision; the two independent formulations agree to
+  seven digits.}\label{tab:semidisc}
+  \maybeinput{tables/tab_semidisc.tex}
+\end{table}
+
+Semi-discretization~\cite{insperger2011semidiscretization} -- here in its
+efficient library implementation with the multiplication-free
+variant~\cite{bachrathy2026semidisc,bachrathy2026multiplication} --
+approximates the dominant characteristic exponent through the spectral
+radius of a finite transition matrix, converging polynomially in the number
+of discretization steps per delay. Table~\ref{tab:semidisc} compares it with
+the present method on the reduced showcase system at a stable, a
+near-boundary and an unstable point. The dominant root of the present method
+is obtained by the multi-root recipe of Section~\ref{sec:tracking}: ten
+tracked minima, all refined, maximal real part. That two entirely
+independent formulations agree to seven digits is the most valuable outcome
+of the comparison -- it validates both.
+
+Beyond that agreement the two methods are not commensurable, and it would be
+misleading to plot them on shared error axes: their accuracy is governed by
+different dials. This is the substantive difference. Semi-discretization
+requires the user to choose the number of steps per delay \emph{by hand};
+the discretization is not adaptive, and an insufficient resolution returns a
+confidently wrong exponent with no warning and no internal indication that
+anything is amiss. The present method sets its own frequency steps from the
+behaviour of the system, exposes the accuracy of the root through the
+requested tolerance (Section~\ref{sec:integerness}), and ships two
+independent consistency checks: the integer residual, which certifies the
+quadrature, and the sign agreement between $\sest$ and $\Zint$, which
+certifies the count. A user who wants a more accurate root turns one dial
+and can verify the result; a user of the discretization approach must
+re-run at several resolutions and compare. The comparison is also
+intentionally asymmetric in what the methods deliver: semi-discretization
+returns the full dominant multiplier cluster and extends unchanged to
+time-periodic systems, where the argument-principle formulation does not
+apply (Section~\ref{sec:conclusion}); the present method returns exactly
+what an \emph{autonomous} stability chart needs -- the root count, the
+boundary, and the dominant root on demand -- at interactive speed.
+
+\subsection{A broader solver comparison}\label{sec:performance-zoo}
+
+\begin{figure}[tb]
+  \centering
+  \maybefig{fig_solver_zoo}{0.7\linewidth}
+  \caption{Error--cost Pareto fronts of six integration back-ends on a
+  $40\times40$ sweep of the fourth-order benchmark oscillator
+  (\ref{app:gallery}): fixed-step trapezoid (step-count sweep), adaptive
+  Gauss--Kronrod, and four ODE solvers (tolerance
+  sweeps).}\label{fig:zoo}
+\end{figure}
+
+Figure~\ref{fig:zoo} extends the comparison to a wider selection of ODE
+solvers on the fourth-order benchmark system. The qualitative picture is
+robust: (i)~the fixed-step trapezoid is unbeatable for crude, high-speed
+scans but its accuracy stagnates unless the step count grows
+with the requested accuracy; (ii)~all adaptive methods follow their tolerance; (iii)~the
+lightweight explicit pairs (BS3, Tsit5) are the fastest of the ODE solvers
+at moderate accuracy,
+while the stiff and auto-switching solvers pay a small overhead that buys
+dependable peak capture; the auto-switching default inherits the better of
+both regimes. The spread between the methods is far smaller than the gap
+that separates all of them from methods that rebuild discretization
+matrices at every parameter point, which is the practical message of this
+section.

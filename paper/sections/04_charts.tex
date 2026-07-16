@@ -1,0 +1,108 @@
+\section{Fast stability charts}\label{sec:charts}
+
+\subsection{Brute-force sweep with interpolable coloring}\label{sec:coloring}
+
+The single-point solve of Section~\ref{sec:method} is embarrassingly
+parallel over the parameter plane; a multithreaded sweep over a grid
+$\vect p_{ij}$ returns the fields $\Zint$, $\Zraw$, $\min|\Dfun|$, $\sest$
+and $\west$.
+The integer field $\Zint$ alone is a poor plotting quantity -- flat plateaus
+separated by jumps -- but the estimated root location repairs precisely this
+deficiency. The combined field
+\begin{equation}\label{eq:coloring}
+  C(\vect p) = \Zint(\vect p) + \bigl[\Zint(\vect p)=0\bigr]\cdot\sest(\vect p)
+\end{equation}
+-- where $[\cdot]$ denotes the Iverson bracket -- is a remarkably efficient
+coloring trick for visual inspection: inside the
+stable domain ($\Zint=0$, $\sest<0$) it varies \emph{smoothly} and displays
+the spectral gap, i.e., how far the dominant root lies from the imaginary
+axis, while outside it shows the integer number of unstable roots as
+discrete color levels. One glance at a single map thus reveals where the
+system is stable, how robustly stable it is there, and how many roots must
+be stabilized elsewhere. Because $C$ is smooth over the stable domain,
+interpolation between grid points is meaningful exactly where it is useful,
+so a coarse and cheap grid suffices for the colored background; only the
+integer levels of the unstable side are plotted as flat colors.
+
+\subsection{High-resolution boundary tracing with MDBM}\label{sec:mdbm}
+
+The stability boundary itself deserves better than pixel resolution. The
+multi-dimensional bisection method (MDBM)~\cite{bachrathy2012bisection,bachrathy2025mdbm}
+locates the zero set of a scalar function over a coarse initial mesh and
+refines only the bracketing cells, halving the mesh size in every iteration.
+Here \emph{only the estimated root distance is used} as the scalar objective:
+\begin{equation}\label{eq:objective}
+  g(\vect p) = \operatorname{sign}\!\bigl(\bigl[\Zint(\vect p)=0\bigr]-\tfrac12\bigr)\,
+               \bigl|\sest(\vect p)-\sigma\bigr|,
+\end{equation}
+which is positive inside the stable ($\gamma$-stable) domain, negative
+outside, crosses zero exactly on the stability boundary, and -- unlike
+$\Zint$ itself -- varies almost linearly across it, because near the
+boundary $\sest$ is an accurate estimate of the dominant root's real part
+(Section~\ref{sec:tracking}). MDBM can therefore interpolate the zero
+crossing within each bracketing cell to sub-cell accuracy. Note the contrast
+with applying MDBM to the pair
+$\Real\Dfun=\Imag\Dfun=0$ in the parameter--frequency space: that approach
+traces \emph{all} root-crossing D-curves, most of which lie deep in the
+unstable region (Section~\ref{sec:intro}), while the
+objective~\eqref{eq:objective} follows only the \emph{true} stability limit.
+By the very nature of the bisection refinement, the computational effort
+concentrates exclusively on the boundary: $k$ refinement levels raise the
+equivalent resolution of an $n_0\times n_0$ initial mesh to
+$2^{k}n_0\times 2^{k}n_0$, while the number of function evaluations grows
+only in proportion to the boundary length. On the fourth-order benchmark of
+Section~\ref{sec:performance}, four refinement levels from a $30\times30$
+mesh trace the boundary at a $480\times480$-equivalent resolution in
+$0.3$\,s (Table~\ref{tab:gridtimings}) -- more than an order of magnitude
+below the cost of a brute-force grid of that density.
+
+\subsection{The most robust parameter point}\label{sec:robust}
+
+With a high-resolution boundary and a smooth interior metric available, the
+natural design question -- \emph{which parameter point is the most robustly
+stable?} -- reduces to a geometric one: the center of the largest circle
+inscribed in the stable domain maximizes the distance to the stability
+boundary in parameter space. The package computes it from the MDBM boundary
+point cloud (or from the binary stable mask of the brute-force grid) by a
+coarse-to-fine search followed by an omnidirectional pattern refinement with
+adaptive step control. Anisotropic parameter scaling turns the circle into
+an ellipse, which avoids degenerate results in elongated stable regions and
+lets the user weight the expected perturbations of the individual
+parameters. The exact radius is rarely of engineering interest; the
+\emph{location} of the optimum is, and that location is insensitive to the
+residual discretization of the boundary. If a spectral-gap-optimal (rather
+than parameter-robust) point is preferred, the interpolable interior field
+$\sest(\vect p)$ of~\eqref{eq:coloring} can be minimized instead -- both
+options are cheap post-processing steps on data already computed.
+
+\subsection{$\sigma$-contours: decay-rate maps}\label{sec:sigmacontours}
+
+Repeating the boundary tracing of Section~\ref{sec:mdbm} for a family of
+shifted lines $\sigma\in\{0,\sigma_1,\sigma_2,\dots\}$ produces the level
+curves of the guaranteed decay rate, i.e., a $\gamma$-stability map: each
+contour bounds the parameter region whose rightmost root lies left of
+$\Real\lam=\sigma$. The interior coloring by $\sest$ and the traced
+$\sigma$-contours are two views of the same robustness landscape -- the
+former is a fast estimate on a coarse grid, the latter a high-resolution
+guaranteed boundary -- and plotting them together provides a strong visual
+cross-validation of both (Section~\ref{sec:showcase}).
+
+\subsection{Recommended workflow}\label{sec:workflow}
+
+The complete chart-generation recipe used throughout the paper is:
+\begin{enumerate}
+  \item \emph{Coarse colored sweep.} Multithreaded evaluation
+    of~\eqref{eq:phaseode} on a coarse grid; plot the combined
+    field~\eqref{eq:coloring}. Cost: a fraction of a second to a few seconds.
+  \item \emph{Boundary tracing.} MDBM on the scalar
+    objective~\eqref{eq:objective}, typically $4$ refinement levels from a
+    $20\times20$--$30\times30$ initial mesh. Cost: comparable to or below
+    the sweep.
+  \item \emph{Robust point.} Largest inscribed circle/ellipse from the MDBM
+    point cloud. Cost: milliseconds.
+  \item \emph{Optional.} $\sigma$-contour family; root refinement at
+    selected points; higher tolerance for publication-quality boundaries.
+\end{enumerate}
+Every step reuses the same single-point solver, so the entire chart refreshes
+fast enough for interactive parameter exploration
+(Section~\ref{sec:performance}).

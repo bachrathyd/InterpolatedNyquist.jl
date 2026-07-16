@@ -63,7 +63,8 @@ for (idx, σ_loc) in enumerate(σ_levels)
     function mdbm_wrapper_sigma(p, d)::Float64
         zi, zr, md, es, wc = calculate_unstable_roots_direct(D_chareq, (p, d), σ_loc, verbosity=0)
         sign_val = (max(zi, 0) == 0) ? 1.0 : -1.0
-        return sign_val * abs(es)
+        # es is the absolute real part of the closest root -> distance to the σ-line
+        return sign_val * abs(es - σ_loc)
     end
 
     boundary_mdbm = MDBM_Problem(mdbm_wrapper_sigma, [LinRange(-2.0, 4.0, 20), LinRange(-2.0, 5.0, 20)])

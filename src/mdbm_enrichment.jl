@@ -109,7 +109,7 @@ function argument_principle_with_MDBM(D_func, mdbm, omega_coars; σ=0.0)
 
         # c. Calculate n_power_max for this parameter set
         # Use a large frequency to estimate polynomial order
-        n_power_max = get_n_power_max(D_func, p_val, σ; ω_large=1e6)
+        n_power_max = get_n_power_max(D_func, p_val, σ)
 
         # d. Combine MDBM, extra, and symmetric points
         om_combined = vcat(om_mdbm, omega_coars)
@@ -223,7 +223,12 @@ function sensitivity_mapping_with_MDBM(D_func, axlist; σ=0.0, ω_max=1e6, Niter
         p = length(p_all) > 1 ? Tuple(p_all) : p_all[1]
         zi, zr, md, es, wc = calculate_unstable_roots_direct(D_func, p, σ; ω_max=ω_max)
         sign_val = (zi == 0) ? 1.0 : -1.0
-        return sign_val * abs(es)
+        # es is the absolute real part of the closest root; its distance to the
+        # integration line λ = σ + im*ω is |es - σ|. If the root estimate is
+        # undefined (e.g. D is constant because a gain parameter is zero, so
+        # D' ≡ 0), return a large signed value: far from the boundary.
+        g = sign_val * abs(es - σ)
+        return isfinite(g) ? g : sign_val * 1.0e3
     end
 
     @info "High-Fidelity Boundary Tracing (MDBM + Stiff ODE)"

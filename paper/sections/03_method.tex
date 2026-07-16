@@ -1,0 +1,255 @@
+\section{Ordered adaptive integration with rightmost-root tracking}\label{sec:method}
+
+\subsection{The winding integral as an ordinary differential equation}\label{sec:phaseode}
+
+The key step is disarmingly simple: instead of applying quadrature
+to~\eqref{eq:count}, the accumulated phase is treated as the state of the
+scalar initial value problem
+\begin{equation}\label{eq:phaseode}
+  y'(\omega) = \theta'(\omega)
+             = \Imag\frac{\Dfun'(\omega)}{\Dfun(\sigma+\ii\omega)},
+  \qquad y(0)=0,
+  \qquad
+  \Zraw = \frac{n}{2}-\frac{y(\wmax)}{\pi},
+  \qquad
+  \Zint = \operatorname{round}(\Zraw),
+\end{equation}
+which is handed to a modern adaptive integrator with local error control.
+It should be stated plainly what this formulation is and is not. The
+right-hand side of~\eqref{eq:phaseode} does not depend on the state $y$, so
+the Jacobian $\partial_y y'$ vanishes identically: \eqref{eq:phaseode} is a
+quadrature problem in disguise, it is never stiff in the classical sense,
+and an automatically stiffness-switching integrator provably never switches
+on it. What the integrator contributes is therefore not stiffness handling
+but \emph{adaptive step-size control on an ordered march}: steps contract
+around the near-singular peaks~\eqref{eq:peak}, where the phase turns by
+$\pm\pi$ over a frequency interval of width $|\sigma_r-\sigma|$, and expand
+again over the smooth stretches. Because the integrand is analytic, a
+high-order explicit Runge--Kutta pair is the appropriate choice; the default
+is \code{Vern9}~\cite{verner2010numerically}, which at loose tolerances is
+three orders of magnitude more accurate than the fifth-order
+alternative~\cite{tsitouras2011runge} and at tight tolerances is also
+faster (Section~\ref{sec:performance-convergence}). The ordered march is
+what makes the root tracking of Section~\ref{sec:tracking} possible, and
+that -- not stiffness -- is the reason the phase ODE is preferred here over
+plain quadrature.
+
+The integrand is evaluated \emph{exactly}: the characteristic function is called
+once per frequency with a dual-number argument
+$\lam = \sigma + \ii(\omega+\epsilon)$, $\epsilon^2=0$, so
+forward-mode automatic differentiation~\cite{revels2016forward} delivers
+$\Dfun$ and $\Dfun'=\partial_\omega\Dfun$ simultaneously, without finite
+differencing and without any user-supplied derivative. A tiny offset
+$\omega\mapsto\max(\omega,10^{-9})$ regularizes branch points of fractional
+terms at the origin.
+
+Two practical parameters remain. The truncation frequency $\wmax$ can be
+chosen generously: past the highest structural resonance the phase slope
+decays algebraically, the adaptive step size grows accordingly, and a
+\emph{too small} $\wmax$ is immediately visible in the result, because the
+truncated tail shifts $\Zraw$ away from an integer
+(Section~\ref{sec:integerness}). The cost of the tail is governed by the
+decay of the delay-induced phase ripple: if the delayed terms sit at least
+two orders below the leading power of $\Dfun$ -- as for delayed
+\emph{position} feedback on mechanical systems -- the ripple decays at least
+like $\omega^{-2}$, and the march from $\omega=10^{2}$ to $\wmax=10^{6}$ or
+even $10^{10}$ costs only a handful of accepted steps. If a delayed term
+sits only one order below the leading power (delayed \emph{velocity}
+feedback), the ripple decays merely like $\omega^{-1}$, the solver keeps
+resolving it (Fig.~\ref{fig:walkthrough}c), and every resolved step
+contributes its share of local error; then $\wmax$ is best placed two to three
+decades above the highest resonance (which also keeps the sampling window
+of the order fit~\eqref{eq:npow} in the asymptotic regime), and the integer-residual indicator of
+Section~\ref{sec:integerness} exposes both a truncated tail and an
+excessively long march at a glance.
+
+The leading order $n$ in~\eqref{eq:phaseode} is estimated numerically, and
+the natural place to do so is not the imaginary axis at all. The term $n/2$
+accounts for the phase gathered on the arc at infinity, and that arc lies in
+the \emph{right half-plane}, where every delayed factor $\ee^{-\lam\tau_j}$
+decays exponentially. Probing along the positive real axis therefore
+measures precisely the quantity the counting formula needs, with the delay
+terms already extinguished:
+\begin{equation}\label{eq:npow}
+  n \;\approx\; \operatorname*{LS\text{-}slope}_{\;s_k\in[s_\ast/10,\;s_\ast]}
+  \Bigl(\ln s_k \,\mapsto\, \ln\bigl|\Dfun(s_k)\bigr|\Bigr),
+  \qquad s_\ast \gg 1 ,
+\end{equation}
+the least-squares slope of the log--log magnitude over a handful of
+log-spaced real samples. On the real axis $|\Dfun(s)|\to|c|\,s^{n}$ with a
+smooth algebraic correction, so the estimate converges as $O(1/s_\ast)$ and
+reaches $\sim10^{-9}$ at $s_\ast=10^{8}$ for the systems of this paper --
+including the effective integer order of neutral equations and the
+non-integer order of fractional ones.
+
+The contrast with an imaginary-axis fit is instructive, because there
+$|\ee^{-\ii\omega\tau}|=1$: the delay terms superimpose a persistent ripple
+on $\ln|\Dfun(\ii\omega)|$ that never decays, a log-spaced fit aliases
+rather than averages it, and a single-point evaluation of
+$\omega\,\Real(\Dfun'/\Dfun)$ carries an error of $O(b\tau/c)$ for
+arbitrarily large $\omega$ when a delayed term sits one order below the
+leading power ($b$ the delayed-term coefficient, $c$ the leading one) --
+and diverges outright for neutral systems. Moving the probe to the real axis
+removes the difficulty rather than fighting it. The estimator needs no
+structural knowledge of the model, costs a handful of extra evaluations, and
+in parameter sweeps is computed once when $n$ is parameter-independent. Its
+one limitation is representability: $|\Dfun(s)|\sim s^{n}$ overflows for
+large $n$, so $s_\ast$ is reduced automatically until $|\Dfun|$ is finite,
+which for very high-order determinants caps the achievable accuracy; the
+leading order may then be supplied explicitly.
+
+The requested relative and absolute solver tolerances control the local
+error of the accumulated phase, measured in radians. Since the exact
+winding number is an integer multiple of $\pi$ in the phase, the error of
+$\Zraw$ inherits the tolerance directly as a \emph{dimensionless} quantity:
+the same default ($10^{-5}$) is appropriate for a machining model and for a
+dense $50\times50$ matrix determinant alike, with no problem-dependent
+scaling (Section~\ref{sec:integerness}).
+
+\subsection{Rightmost-root estimation as a by-product}\label{sec:tracking}
+
+The peaks of the integrand are not only a numerical nuisance -- they carry
+the information where the dominant characteristic roots are. Along the
+integration line, $|\Dfun(\sigma+\ii\omega)|^{2}$ dips to a sharp local
+minimum at $\omega\approx\omega_r$ for every nearby root
+$\lam_r=\sigma_r+\ii\omega_r$, and the smallest minimum belongs to the root
+closest to the line, which for $\sigma=0$ is typically the rightmost root
+that decides stability. The solver therefore tracks
+$\min_\omega|\Dfun|^{2}$ during the march at negligible cost: at every
+integrand evaluation the already computed quantities $\Dfun$ and $\Dfun'$
+yield the real part of one Newton step towards the root,
+\begin{equation}\label{eq:sigmaest}
+  \sest \;=\; \sigma + \Real\!\left(-\frac{\Dfun}{\dd\Dfun/\dd\lam}\right)
+        \;=\; \sigma - \frac{\Real\Dfun\cdot\partial_\omega\Imag\Dfun
+              - \Imag\Dfun\cdot\partial_\omega\Real\Dfun}{|\Dfun'|^{2}},
+\end{equation}
+using $\dd\Dfun/\dd\lam=-\ii\,\Dfun'$, and the frequency of the minimum is
+stored as $\west$. The pair $(\sest,\west)$ is a first-order estimate of the
+dominant root location returned together with $\Zint$; its accuracy is
+highest exactly at the stability boundary, where the root lies on the line
+and the Newton step becomes exact up to the solver tolerance. Away from the
+boundary the estimate degrades gracefully, but there only its sign and
+magnitude matter -- as a smooth measure of the distance to instability.
+
+Several roots can be tracked simultaneously. A compile-time variant of the
+solver detects every local minimum of $|\Dfun|^{2}$ through the sign change
+of its $\omega$-derivative, $2(\Real\Dfun\,\partial_\omega\Real\Dfun +
+\Imag\Dfun\,\partial_\omega\Imag\Dfun)$, and maintains the $N_r$ best
+candidates in a sorted, allocation-free buffer; a boundary test at
+$\omega=0$ captures real dominant roots, since $|\Dfun|^{2}$ is even in
+$\omega$. Tracking one root is the default and adds a few percent to the sweep
+time; tracking
+zero roots gives maximal sweep speed. One caveat deserves emphasis: the
+\emph{deepest} minimum of $|\Dfun|$ belongs to the rightmost root near the
+stability boundary, but deeper inside the stable or unstable domains a
+different root branch may produce a deeper dip. When the true dominant root
+is required away from the boundary, several minima should be tracked
+($N_r\approx5$--$10$), all of them refined, and the dominant root taken as
+the one with the maximal real part -- this recipe is validated against an
+independent eigenvalue method in Section~\ref{sec:performance-sd}. For the
+stability chart itself the caveat is immaterial, since near the boundary the
+crossing root always produces the global minimum.
+
+\subsection{Higher-order root refinement}\label{sec:refinement}
+
+The tracked estimate $(\sest,\west)$ is refined by local corrections built
+from the same automatic derivatives. Writing the Taylor expansion at
+$\hat\lam=\sest+\ii\west$,
+\begin{equation}\label{eq:taylor}
+  \Dfun(\hat\lam+\Delta) \approx \Dfun + \Dfun_\lam\,\Delta
+   + \tfrac12 \Dfun_{\lam\lam}\,\Delta^{2}
+   + \tfrac16 \Dfun_{\lam\lam\lam}\,\Delta^{3} = 0,
+\end{equation}
+the package offers (i) \emph{Newton--Raphson} iterations
+$\Delta=-\Dfun/\Dfun_\lam$; (ii) a single \emph{quadratic} (Poly-2) or
+(iii) \emph{cubic} (Poly-3, default) Taylor solve, where the root of the
+local cubic closest to $\hat\lam$ is selected via the eigenvalues of its
+companion matrix. The first derivative is exact (automatic
+differentiation); the higher derivatives are obtained by central differences
+of the exact first derivative, which avoids the compilation cost of nested
+dual numbers while keeping truncation errors far below the achievable
+accuracy. An optional mode freezes $\west$ and corrects only the real part,
+which is convenient when the frequency is pinned by measurement. The
+accuracy and cost of the variants are quantified in
+Section~\ref{sec:showcase-roots}; the practical summary is that Poly-3
+gains several orders of magnitude over the raw estimate at a cost that is
+invisible next to the phase integration, and a few Newton steps converge to
+machine precision near the boundary. If several estimates are tracked, the
+same refinement applied to each returns a set of dominant roots, comparable
+to the output of dedicated root finders such as
+QPmR~\cite{vyhlidal2009mapping} -- with the difference that here the root
+solve is a cheap post-processing step of the stability count.
+
+\subsection{Self-validating error estimate}\label{sec:integerness}
+
+The exact winding number is an integer, so
+\begin{equation}\label{eq:eps}
+  \varepsilon = \bigl|\Zraw - \operatorname{round}(\Zraw)\bigr|
+\end{equation}
+is a rigorous, freely available indicator of the accumulated numerical
+error: it contains the local integration errors, the tail truncated at
+$\wmax$, and the residual of the estimated order~\eqref{eq:npow}. Since the
+phase is integrated in radians, $\varepsilon$ is \emph{dimensionless} and
+scales essentially linearly with the requested tolerance -- amplified by
+the accepted-step count, since the per-step error tolerance accumulates
+along the march -- hence the tolerance acts as a universal accuracy dial
+that transfers between systems without re-tuning. In the numerical
+experiments of Section~\ref{sec:showcase-tolerance}, $\varepsilon$ stays
+at least an order of magnitude below the rounding threshold $1/2$ even at
+the loosest setting: $10^{-4}$ produces reliable charts at maximal speed
+and $10^{-8}$ yields reference-quality values at a moderate CPU-time
+premium (Fig.~\ref{fig:tolerance}); the package default $10^{-5}$ is a
+robust compromise between the two.
+
+One caveat is inherited from the argument principle itself and deserves to
+be stated sharply, because it bounds what $\varepsilon$ can certify. A march
+that steps \emph{over} a peak loses exactly $\pm\pi$ of phase, so $\Zraw$
+shifts by exactly one and remains just as close to an integer as before:
+$\varepsilon$ measures the \emph{quadrature} quality and is structurally
+blind to a skipped peak. Nor is this hypothetical. Approaching a stability
+boundary the peak half-width $|\sigma_r-\sigma|$ collapses -- at a distance
+of $10^{-8}$ in the gain the peak of the showcase system is $6.6\cdot
+10^{-10}$ wide and $1.5\cdot10^{9}$ tall, while a step of $10^{-3}$ passes
+within $2\%$ of the smooth background -- and the marching solver then strides
+past it and reports success. No pointwise method is immune: quadrature
+rules that happen to place all their nodes outside such a spike are equally
+blind, and only survive here because the delay ripple forces them to
+subdivide finely everywhere anyway
+(Section~\ref{sec:performance-convergence}).
+
+What rescues the situation is the second output of the same sweep. The
+tracked root of Section~\ref{sec:tracking} is obtained from the minima of
+$|\Dfun|^{2}$, a mechanism entirely independent of the accumulated phase,
+and it remains accurate exactly where the peak is narrow -- that is, exactly
+where the count is fragile. The two therefore cross-validate each other: a
+skipped peak shows up as an \emph{inconsistency} between $\operatorname{sign}
+(\sest-\sigma)$ and the predicate $\Zint=0$, which is free to evaluate and
+is the practical safeguard we recommend. Note also that skipping one peak
+only ever changes $\Zint$ by one, so the stable/unstable classification that
+a chart displays is affected only where the last unstable root crosses --
+precisely the case the sign test catches.
+
+\subsection{Alternative integrators within the same framework}\label{sec:alternatives}
+
+The phase integrand~\eqref{eq:integrand} can also be fed to classical
+adaptive quadrature; the package provides a Gauss--Kronrod back-end
+(\pkg{QuadGK.jl}~\cite{johnson2013quadgk}) with the identical interface.
+For the root count alone it is fully competitive, and close to a stability
+boundary it is the more dependable of the two
+(Section~\ref{sec:performance-convergence}); we recommend it whenever only
+$\Zint$ is wanted. The decisive difference concerns the rightmost root.
+Adaptive quadrature subdivides its interval recursively and therefore visits
+the frequencies in an essentially arbitrary order: there is no sweep along
+which a local minimum of $|\Dfun|^{2}$ could be recognized, and the
+bookkeeping that the ODE march gets for free would require a separate
+minimization. It is this ordered traversal -- not accuracy, not speed, and
+certainly not stiffness -- that earns the phase ODE its place as the
+default, because every chart in this paper is built from the tracked root:
+the interpolable coloring~\eqref{eq:coloring}, the boundary
+objective~\eqref{eq:objective}, the refinement seeds, and the consistency
+check of Section~\ref{sec:integerness} all consume $\sest$, not $\Zint$
+alone. A third back-end evaluates the integral
+by a fixed-step trapezoidal rule; it lacks adaptivity but has essentially
+zero overhead, which makes it attractive for real-time, interactive
+parameter studies where occasional off-by-one counts near the boundaries
+are acceptable (Section~\ref{sec:performance}).

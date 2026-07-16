@@ -71,19 +71,36 @@ boundary_mdbm, p_uniq, Ncirc, mesh_points, mesh_faces, mesh_colors, edge2plot_xy
     argument_principle_solver_with_MDBM(D_4th, axlist, ω_coars)
 ```
 
-## 6. Higher-Order Root Refinement
-For maximum precision near boundaries or inside stable regions, roots can be refined using polynomial or Newton-Raphson approximations.
+## 6. Root Refinement
+The tracked root estimate is refined by default; refinement costs only a few
+percent of the phase integration, so there is no reason to switch it off.
 
 ```julia
-# Use the robust 3rd-order polynomial refinement (default)
-zi, zr, md, es, wc = calculate_unstable_roots_direct(D_4th, (1.0, 0.5), 
+# Newton-Raphson, 4 steps -- the DEFAULT (cheapest and most accurate)
+zi, zr, md, es, wc = calculate_unstable_roots_direct(D_4th, (1.0, 0.5))
+
+# Taylor (Poly-3): more conservative when the seed is poor -- it picks the
+# nearest root of a local cubic instead of following the Newton flow
+zi, zr, md, es, wc = calculate_unstable_roots_direct(D_4th, (1.0, 0.5),
     refinement_method=:Polynomial, refinement_degree=3)
 
-# Or use Newton-Raphson for machine precision
-zi, zr, md, es, wc = calculate_unstable_roots_direct(D_4th, (1.0, 0.5), 
-    refinement_method=:Newton, refinement_steps=5)
+# :Linear returns the unrefined tracked estimate
+zi, zr, md, es, wc = calculate_unstable_roots_direct(D_4th, (1.0, 0.5),
+    refinement_method=:Linear)
 
 # Post-processing individual root estimates
 initial_root = es + 1im * wc
-refined_root = refine_roots(D_4th, (1.0, 0.5), initial_root; method=:Newton, steps=3)
+refined_root = refine_roots(D_4th, (1.0, 0.5), initial_root; method=:Newton, steps=4)
 ```
+
+!!! note "The dominant root away from the boundary"
+    The *deepest* |D| minimum belongs to the rightmost root near the stability
+    boundary, but a different branch may dip deeper elsewhere. When the true
+    dominant root is needed across a whole chart, track several minima, refine
+    all of them and take the maximal real part:
+
+    ```julia
+    zi, zr, md, es, wc = calculate_unstable_roots_direct(D_4th, (1.0, 0.5);
+        n_roots_to_track=10)
+    sigma_dominant = maximum(filter(isfinite, es))
+    ```

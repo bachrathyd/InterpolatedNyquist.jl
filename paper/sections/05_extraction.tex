@@ -1,0 +1,73 @@
+\section{Automatic extraction of the characteristic function from a simulation model}\label{sec:extraction}
+
+In engineering practice, a system studied for stability almost
+always exists as a \emph{simulation model} first: a right-hand side
+function written for a general-purpose integrator such as
+\pkg{DifferentialEquations.jl}~\cite{rackauckas2017differentialequations}.
+Deriving the characteristic function~\eqref{eq:charfun} from it by hand is
+tedious and error-prone, particularly for many degrees of freedom, several
+delays, or algebraic constraints. The package therefore extracts
+$\Dfun(\lam)$ \emph{algorithmically} from the very same right-hand side
+$\vect f(\vect u,\vect h,\vect p,t)$ used for time-domain simulation, where
+$\vect h(\vect p, t-\tau)$ is the standard history-function interface for
+the delayed states.
+
+The mechanism requires a single evaluation of $\vect f$ per requested
+$\lam$. The state is seeded with dual-number perturbations,
+$\vect u = \vect u_{\mathrm{eq}} + \vect a$, where the components of
+$\vect a$ carry independent infinitesimal directions, and the history
+argument is replaced by the \emph{mock exponential history}
+\begin{equation}\label{eq:mockhistory}
+  \vect h(\vect p, t) = \vect u_{\mathrm{eq}} + \vect a\,\ee^{\lam t}.
+\end{equation}
+Whatever delayed value $\vect h(\vect p, t-\tau_j)$ the model requests
+contributes the factor $\ee^{-\lam\tau_j}$ automatically, so discrete,
+multiple, and (approximated) distributed delays are all captured without
+declaring them. Evaluating $\vect f$ at $t=0$ and collecting the dual
+partial derivatives of the residual
+\begin{equation}\label{eq:extraction}
+  \vect r = \lam\,\mat E\,\vect a - \vect f\bigl(\vect u_{\mathrm{eq}}
+      + \vect a,\ \vect h,\ \vect p,\ 0\bigr)
+  \qquad\Longrightarrow\qquad
+  \mat M(\lam) = \frac{\partial\vect r}{\partial\vect a},\quad
+  \Dfun(\lam)=\det\mat M(\lam),
+\end{equation}
+yields the exact characteristic matrix of the \emph{linearized} dynamics
+around $\vect u_{\mathrm{eq}}$: the dual seeding performs the linearization,
+so the right-hand side may be fully \emph{nonlinear} -- no separate
+linearization step is required (the equilibrium itself could also be located
+from the same right-hand side, which is outside the scope of this paper; a
+residual check warns if the supplied $\vect u_{\mathrm{eq}}$ is not an
+equilibrium). The mass matrix $\mat E$ is supplied separately -- it is not
+part of the right-hand side, exactly as in the
+\code{ODEFunction}/\code{DDEFunction} convention of
+\pkg{DifferentialEquations.jl} -- and it may be \emph{singular}: rows of
+zeros in $\mat E$ turn the corresponding rows of $\mat M(\lam)$ into the
+algebraic constraint equations, so delay differential--algebraic systems are
+handled by the identical code path. The determinant is evaluated with
+statically sized arrays, so a full extraction costs one right-hand-side call
+plus an $N\times N$ determinant, and the dual seeding composes transparently
+with the outer dual numbers of the phase ODE~\eqref{eq:phaseode}.
+
+The complete user workflow is thus reduced to providing the simulation
+right-hand side, the mass matrix if it differs from the identity, and the
+parameter ranges of the chart:
+\begin{verbatim}
+function rhs(u, h, p, t)              # simulation model (DDE interface)
+    P, D = p
+    x1_del = h(p, t - 0.5; idxs=1)    # delayed position
+    v1_del = h(p, t - 0.5; idxs=4)    # delayed velocity
+    ...                               # equations of motion + constraints
+end
+
+D(lam, p)  = get_D_from_model(rhs, lam, p, Val(7); mass_matrix = E)
+Z, Zraw, minD, sigma_est, omega_est =
+    calculate_unstable_roots_direct(D, (2.0, 1.0))
+\end{verbatim}
+The leading order $n$ required by the counting
+formula~\eqref{eq:count} is estimated automatically
+by~\eqref{eq:npow} -- including the effective orders of neutral
+characteristic functions and the non-integer orders of fractional ones --
+so no additional structural input is needed. In
+Section~\ref{sec:showcase} the extraction is verified against a hand-derived
+characteristic function: the two agree to machine precision.

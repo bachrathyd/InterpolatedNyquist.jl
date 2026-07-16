@@ -1,0 +1,846 @@
+%% ==========================================================================
+%% refs.bib -- Interpolable Nyquist criterion (Journal of Sound and Vibration)
+%% All entries web-verified (Crossref/publisher) unless flagged % UNVERIFIED.
+%% ==========================================================================
+
+%% === GROUP A: Classic DDE theory / books ==================================
+
+@book{hale1993introduction,
+  author    = {Hale, Jack K. and Verduyn Lunel, Sjoerd M.},
+  title     = {Introduction to Functional Differential Equations},
+  series    = {Applied Mathematical Sciences},
+  volume    = {99},
+  publisher = {Springer},
+  address   = {New York},
+  year      = {1993},
+  doi       = {10.1007/978-1-4612-4342-7}
+}
+
+@book{stepan1989retarded,
+  author    = {{St\'ep\'an}, G\'abor},
+  title     = {Retarded Dynamical Systems: Stability and Characteristic Functions},
+  series    = {Pitman Research Notes in Mathematics Series},
+  volume    = {210},
+  publisher = {Longman Scientific \& Technical},
+  address   = {Harlow},
+  note      = {Co-published with John Wiley \& Sons, New York},
+  isbn      = {0-582-03932-0},
+  year      = {1989}
+}
+
+@book{michiels2014stability,
+  author    = {Michiels, Wim and Niculescu, Silviu-Iulian},
+  title     = {Stability, Control, and Computation for Time-Delay Systems: An Eigenvalue-Based Approach},
+  edition   = {2nd},
+  series    = {Advances in Design and Control},
+  publisher = {SIAM},
+  address   = {Philadelphia, PA},
+  year      = {2014},
+  doi       = {10.1137/1.9781611973631}
+}
+
+@book{bellman1963differential,
+  author    = {Bellman, Richard and Cooke, Kenneth L.},
+  title     = {Differential-Difference Equations},
+  series    = {Mathematics in Science and Engineering},
+  volume    = {6},
+  publisher = {Academic Press},
+  address   = {New York},
+  year      = {1963}
+}
+
+@book{kolmanovskii1999introduction,
+  author    = {Kolmanovskii, Vladimir B. and Myshkis, Anatolii},
+  title     = {Introduction to the Theory and Applications of Functional Differential Equations},
+  series    = {Mathematics and Its Applications},
+  volume    = {463},
+  publisher = {Kluwer Academic Publishers},
+  address   = {Dordrecht},
+  year      = {1999},
+  doi       = {10.1007/978-94-017-1965-0}
+}
+
+@book{insperger2011semidiscretization,
+  author    = {Insperger, Tam\'as and {St\'ep\'an}, G\'abor},
+  title     = {Semi-Discretization for Time-Delay Systems: Stability and Engineering Applications},
+  series    = {Applied Mathematical Sciences},
+  volume    = {178},
+  publisher = {Springer},
+  address   = {New York},
+  year      = {2011},
+  doi       = {10.1007/978-1-4614-0335-7}
+}
+
+%% === GROUP B: Time-domain / discretization stability methods ==============
+
+@article{insperger2002semi,
+  author  = {Insperger, Tam{\'a}s and {St\'ep\'an}, G{\'a}bor},
+  title   = {Semi-discretization method for delayed systems},
+  journal = {International Journal for Numerical Methods in Engineering},
+  volume  = {55},
+  number  = {5},
+  pages   = {503--518},
+  year    = {2002},
+  doi     = {10.1002/nme.505}
+}
+
+@article{insperger2004updated,
+  author  = {Insperger, Tam{\'a}s and {St\'ep\'an}, G{\'a}bor},
+  title   = {Updated semi-discretization method for periodic delay-differential equations with discrete delay},
+  journal = {International Journal for Numerical Methods in Engineering},
+  volume  = {61},
+  number  = {1},
+  pages   = {117--141},
+  year    = {2004},
+  doi     = {10.1002/nme.1061}
+}
+
+@article{insperger2008higher,
+  author  = {Insperger, Tam{\'a}s and {St\'ep\'an}, G{\'a}bor and Turi, J{\'a}nos},
+  title   = {On the higher-order semi-discretizations for periodic delayed systems},
+  journal = {Journal of Sound and Vibration},
+  volume  = {313},
+  number  = {1--2},
+  pages   = {334--341},
+  year    = {2008},
+  doi     = {10.1016/j.jsv.2007.11.040}
+}
+
+@article{ding2010full,
+  author  = {Ding, Ye and Zhu, LiMin and Zhang, XiaoJian and Ding, Han},
+  title   = {A full-discretization method for prediction of milling stability},
+  journal = {International Journal of Machine Tools and Manufacture},
+  volume  = {50},
+  number  = {5},
+  pages   = {502--509},
+  year    = {2010},
+  doi     = {10.1016/j.ijmachtools.2010.01.003}
+}
+
+@article{butcher2004stability,
+  author  = {Butcher, Eric A. and Ma, Haitao and Bueler, Ed and Averina, Victoria and {Szab\'o}, Zsolt},
+  title   = {Stability of linear time-periodic delay-differential equations via {Chebyshev} polynomials},
+  journal = {International Journal for Numerical Methods in Engineering},
+  volume  = {59},
+  number  = {7},
+  pages   = {895--922},
+  year    = {2004},
+  doi     = {10.1002/nme.894}
+}
+
+@article{breda2005pseudospectral,
+  author  = {Breda, Dimitri and Maset, Stefano and Vermiglio, Rossana},
+  title   = {Pseudospectral differencing methods for characteristic roots of delay differential equations},
+  journal = {SIAM Journal on Scientific Computing},
+  volume  = {27},
+  number  = {2},
+  pages   = {482--495},
+  year    = {2005},
+  doi     = {10.1137/030601600}
+}
+
+@book{breda2015stability,
+  author    = {Breda, Dimitri and Maset, Stefano and Vermiglio, Rossana},
+  title     = {Stability of Linear Delay Differential Equations: A Numerical Approach with {MATLAB}},
+  series    = {SpringerBriefs in Control, Automation and Robotics},
+  publisher = {Springer},
+  address   = {New York, NY},
+  year      = {2015},
+  doi       = {10.1007/978-1-4939-2107-2}
+}
+
+@incollection{breda2009tracedde,
+  author    = {Breda, Dimitri and Maset, Stefano and Vermiglio, Rossana},
+  title     = {{TRACE-DDE}: a Tool for Robust Analysis and Characteristic Equations for Delay Differential Equations},
+  booktitle = {Topics in Time Delay Systems: Analysis, Algorithms and Control},
+  editor    = {Loiseau, Jean Jacques and Michiels, Wim and Niculescu, Silviu-Iulian and Sipahi, Rifat},
+  series    = {Lecture Notes in Control and Information Sciences},
+  volume    = {388},
+  publisher = {Springer},
+  address   = {Berlin, Heidelberg},
+  pages     = {145--155},
+  year      = {2009},
+  doi       = {10.1007/978-3-642-02897-7_13}
+}
+
+@article{khasawneh2011spectral,
+  author  = {Khasawneh, Firas A. and Mann, Brian P.},
+  title   = {A spectral element approach for the stability of delay systems},
+  journal = {International Journal for Numerical Methods in Engineering},
+  volume  = {87},
+  number  = {6},
+  pages   = {566--592},
+  year    = {2011},
+  doi     = {10.1002/nme.3122}
+}
+
+@article{wu2012reliably,
+  author  = {Wu, Zhen and Michiels, Wim},
+  title   = {Reliably computing all characteristic roots of delay differential equations in a given right half plane using a spectral method},
+  journal = {Journal of Computational and Applied Mathematics},
+  volume  = {236},
+  number  = {9},
+  pages   = {2499--2514},
+  year    = {2012},
+  doi     = {10.1016/j.cam.2011.12.009}
+}
+
+@article{engelborghs2002numerical,
+  author  = {Engelborghs, Koen and Luzyanina, Tatyana and Roose, Dirk},
+  title   = {Numerical bifurcation analysis of delay differential equations using {DDE-BIFTOOL}},
+  journal = {ACM Transactions on Mathematical Software},
+  volume  = {28},
+  number  = {1},
+  pages   = {1--21},
+  year    = {2002},
+  doi     = {10.1145/513001.513002}
+}
+
+@misc{sieber2016ddebiftool,
+  author        = {Sieber, Jan and Engelborghs, Koen and Luzyanina, Tatyana and Samaey, Giovanni and Roose, Dirk},
+  title         = {{DDE-BIFTOOL} Manual --- Bifurcation analysis of delay differential equations},
+  year          = {2016},
+  eprint        = {1406.7144},
+  archivePrefix = {arXiv},
+  primaryClass  = {math.DS},
+  url           = {https://arxiv.org/abs/1406.7144},
+  note          = {arXiv:1406.7144v4}
+}
+
+@article{szalai2006continuation,
+  author  = {Szalai, R{\'o}bert and {St\'ep\'an}, G{\'a}bor and Hogan, S. John},
+  title   = {Continuation of bifurcations in periodic delay-differential equations using characteristic matrices},
+  journal = {SIAM Journal on Scientific Computing},
+  volume  = {28},
+  number  = {4},
+  pages   = {1301--1317},
+  year    = {2006},
+  doi     = {10.1137/040618709}
+}
+
+@misc{szalai2013knut,
+  author = {Szalai, R{\'o}bert},
+  title  = {{Knut}: a continuation and bifurcation software for delay-differential equations},
+  year   = {2013},
+  url    = {https://rs1909.github.io/knut/},
+  note   = {Source code at \url{https://github.com/rs1909/knut}, accessed 2026-07-16}
+}
+
+@misc{bachrathy2026semidisc,
+  author  = {Bachrathy, D{\'a}niel and Sykora, Henrik T.},
+  title   = {{SemiDiscretizationMethod.jl}: A {Julia} package to investigate the behaviour of linear delay differential equations},
+  year    = {2026},
+  url     = {https://github.com/bachrathyd/SemiDiscretizationMethod.jl},
+  note    = {Version 0.4.1, accessed 2026-07-16}
+}
+
+@article{bachrathy2026multiplication,
+  author  = {Bachrathy, D{\'a}niel},
+  title   = {Linear time complexity analysis of time-periodic delayed systems with multiplication free semi-discretization method},
+  journal = {Journal of Vibration and Control},
+  year    = {2026},
+  doi     = {10.1177/10775463261453846},
+  note    = {Published online 22 May 2026}
+}
+
+%% === GROUP C: Frequency-domain methods ====================================
+
+@article{nyquist1932regeneration,
+  author  = {Nyquist, Harry},
+  title   = {Regeneration theory},
+  journal = {Bell System Technical Journal},
+  volume  = {11},
+  number  = {1},
+  pages   = {126--147},
+  year    = {1932},
+  doi     = {10.1002/j.1538-7305.1932.tb02344.x}
+}
+
+% UNVERIFIED: primary source not accessible online; most secondary sources cite
+% no. 3, pp. 27--81, 1938; a minority cite vol. 12, no. 6.
+@article{mikhailov1938method,
+  author  = {Mikhailov, A. V.},
+  title   = {Metod garmonicheskogo analiza v teorii regulirovaniya ({M}ethod of harmonic analysis in control theory)},
+  journal = {Avtomatika i Telemekhanika},
+  number  = {3},
+  pages   = {27--81},
+  year    = {1938},
+  note    = {In Russian}
+}
+
+% UNVERIFIED: original issue number of PMM vol. 13; year 1949 and pages confirmed
+% by multiple secondary sources, as is the English translation.
+@article{neimark1949decomposition,
+  author  = {Neimark, Ju. I.},
+  title   = {{D}-decomposition of the space of quasi-polynomials (on the stability of linearized distributive systems)},
+  journal = {Prikladnaya Matematika i Mekhanika},
+  volume  = {13},
+  pages   = {349--380},
+  year    = {1949},
+  note    = {In Russian. English translation: American Mathematical Society Translations, Series 2, vol. 102, pp. 95--131, 1973}
+}
+
+@article{olgac2002exact,
+  author  = {Olgac, Nejat and Sipahi, Rifat},
+  title   = {An exact method for the stability analysis of time-delayed linear time-invariant ({LTI}) systems},
+  journal = {IEEE Transactions on Automatic Control},
+  volume  = {47},
+  number  = {5},
+  pages   = {793--797},
+  year    = {2002},
+  doi     = {10.1109/TAC.2002.1000275}
+}
+
+@article{sipahi2011stability,
+  author  = {Sipahi, Rifat and Niculescu, Silviu-Iulian and Abdallah, Chaouki T. and Michiels, Wim and Gu, Keqin},
+  title   = {Stability and stabilization of systems with time delay: {L}imitations and opportunities},
+  journal = {IEEE Control Systems Magazine},
+  volume  = {31},
+  number  = {1},
+  pages   = {38--65},
+  year    = {2011},
+  doi     = {10.1109/MCS.2010.939135}
+}
+
+@article{vyhlidal2009mapping,
+  author  = {{Vyhl\'{\i}dal}, Tom\'a\v{s} and {Z\'{\i}tek}, Pavel},
+  title   = {Mapping based algorithm for large-scale computation of quasi-polynomial zeros},
+  journal = {IEEE Transactions on Automatic Control},
+  volume  = {54},
+  number  = {1},
+  pages   = {171--177},
+  year    = {2009},
+  doi     = {10.1109/TAC.2008.2008345}
+}
+
+@incollection{vyhlidal2014qpmr,
+  author    = {{Vyhl\'{\i}dal}, Tom\'a\v{s} and {Z\'{\i}tek}, Pavel},
+  title     = {{QPmR} -- {Quasi-Polynomial Root-Finder}: Algorithm update and examples},
+  booktitle = {Delay Systems: From Theory to Numerics and Applications},
+  editor    = {{Vyhl\'{\i}dal}, Tom\'a\v{s} and Lafay, Jean-Fran\c{c}ois and Sipahi, Rifat},
+  series    = {Advances in Delays and Dynamics},
+  volume    = {1},
+  publisher = {Springer},
+  address   = {Cham},
+  pages     = {299--312},
+  year      = {2014},
+  doi       = {10.1007/978-3-319-01695-5_22}
+}
+
+@article{walton1987direct,
+  author  = {Walton, K. and Marshall, J. E.},
+  title   = {Direct method for {TDS} stability analysis},
+  journal = {IEE Proceedings D -- Control Theory and Applications},
+  volume  = {134},
+  number  = {2},
+  pages   = {101--107},
+  year    = {1987},
+  doi     = {10.1049/ip-d.1987.0018}
+}
+
+@book{yi2010timedelay,
+  author    = {Yi, Sun and Nelson, Patrick W. and Ulsoy, A. Galip},
+  title     = {Time-Delay Systems: Analysis and Control Using the {Lambert W} Function},
+  publisher = {World Scientific},
+  address   = {Singapore},
+  year      = {2010},
+  doi       = {10.1142/7759}
+}
+
+% UNVERIFIED: 1980 JACC proceedings are not indexed online; citation details from
+% consistent secondary sources.
+@inproceedings{rekasius1980stability,
+  author    = {Rekasius, Z. V.},
+  title     = {A stability test for systems with delays},
+  booktitle = {Proceedings of the Joint Automatic Control Conference},
+  address   = {San Francisco, CA},
+  note      = {Paper No. TP9-A},
+  year      = {1980}
+}
+
+%% === GROUP D: Argument principle / zero counting ==========================
+
+@article{delves1967numerical,
+  author  = {Delves, L. M. and Lyness, J. N.},
+  title   = {A numerical method for locating the zeros of an analytic function},
+  journal = {Mathematics of Computation},
+  volume  = {21},
+  number  = {100},
+  pages   = {543--560},
+  year    = {1967},
+  doi     = {10.1090/S0025-5718-1967-0228165-4}
+}
+
+@book{kravanja2000computing,
+  author    = {Kravanja, Peter and Van Barel, Marc},
+  title     = {Computing the Zeros of Analytic Functions},
+  series    = {Lecture Notes in Mathematics},
+  volume    = {1727},
+  publisher = {Springer},
+  address   = {Berlin, Heidelberg},
+  year      = {2000},
+  isbn      = {978-3-540-67162-6},
+  doi       = {10.1007/BFb0103927}
+}
+
+@article{kravanja2000zeal,
+  author  = {Kravanja, P. and Van Barel, M. and Ragos, O. and Vrahatis, M. N. and Zafiropoulos, F. A.},
+  title   = {{ZEAL}: A mathematical software package for computing zeros of analytic functions},
+  journal = {Computer Physics Communications},
+  volume  = {124},
+  number  = {2--3},
+  pages   = {212--232},
+  year    = {2000},
+  doi     = {10.1016/S0010-4655(99)00429-4}
+}
+
+@article{hassard1997counting,
+  author  = {Hassard, B. D.},
+  title   = {Counting roots of the characteristic equation for linear delay-differential systems},
+  journal = {Journal of Differential Equations},
+  volume  = {136},
+  number  = {2},
+  pages   = {222--235},
+  year    = {1997},
+  doi     = {10.1006/jdeq.1996.3127}
+}
+
+@article{xu2016delay,
+  author  = {Xu, Qi and St{\'e}p{\'a}n, G{\'a}bor and Wang, Zaihua},
+  title   = {Delay-dependent stability analysis by using delay-independent integral evaluation},
+  journal = {Automatica},
+  volume  = {70},
+  pages   = {153--157},
+  year    = {2016},
+  doi     = {10.1016/j.automatica.2016.03.028}
+}
+
+@article{xu2014exact,
+  author  = {Xu, Qi and Wang, Zaihua},
+  title   = {Exact stability test of neutral delay differential equations via a rough estimation of the testing integral},
+  journal = {International Journal of Dynamics and Control},
+  volume  = {2},
+  number  = {2},
+  pages   = {154--163},
+  year    = {2014},
+  doi     = {10.1007/s40435-013-0044-7}
+}
+
+@inproceedings{zitek2008argument,
+  author    = {Z{\'i}tek, P. and Vyhl{\'i}dal, T.},
+  title     = {Argument-increment based stability criterion for neutral time delay systems},
+  booktitle = {Proceedings of the 16th Mediterranean Conference on Control and Automation},
+  pages     = {824--829},
+  year      = {2008},
+  doi       = {10.1109/MED.2008.4602199}
+}
+
+@article{louisell2001matrix,
+  author  = {Louisell, James},
+  title   = {A matrix method for determining the imaginary axis eigenvalues of a delay system},
+  journal = {IEEE Transactions on Automatic Control},
+  volume  = {46},
+  number  = {12},
+  pages   = {2008--2012},
+  year    = {2001},
+  doi     = {10.1109/9.975510}
+}
+
+@incollection{niculescu2023counting,
+  author    = {Niculescu, Silviu-Iulian and Boussaada, Islam},
+  title     = {Counting Characteristic Roots of Linear Delay Differential Equations. {Part II}: From Argument Principle to Rightmost Root Assignment Methods},
+  booktitle = {Controlling Delayed Dynamics: Advances in Theory, Methods and Applications},
+  series    = {CISM International Centre for Mechanical Sciences},
+  publisher = {Springer},
+  pages     = {157--193},
+  year      = {2023},
+  doi       = {10.1007/978-3-031-01129-0_6}
+}
+
+@article{vyhlidal2009modification,
+  author  = {Vyhl{\'\i}dal, Tom{\'a}{\v{s}} and Z{\'\i}tek, Pavel},
+  title   = {Modification of {M}ikhaylov criterion for neutral time-delay systems},
+  journal = {IEEE Transactions on Automatic Control},
+  volume  = {54},
+  number  = {10},
+  pages   = {2430--2435},
+  year    = {2009},
+  doi     = {10.1109/TAC.2009.2029301}
+}
+
+%% === GROUP E: Neutral / DAE / distributed / fractional delay ==============
+
+@article{michiels2005eigenvalue,
+  author  = {Michiels, Wim and Vyhl{\'\i}dal, Tom{\'a}{\v{s}}},
+  title   = {An eigenvalue based approach for the stabilization of linear time-delay systems of neutral type},
+  journal = {Automatica},
+  volume  = {41},
+  number  = {6},
+  pages   = {991--998},
+  year    = {2005},
+  doi     = {10.1016/j.automatica.2004.11.032}
+}
+
+@article{hale2002strong,
+  author  = {Hale, Jack K. and Verduyn Lunel, Sjoerd M.},
+  title   = {Strong stabilization of neutral functional differential equations},
+  journal = {IMA Journal of Mathematical Control and Information},
+  volume  = {19},
+  number  = {1--2},
+  pages   = {5--23},
+  year    = {2002},
+  doi     = {10.1093/imamci/19.1_and_2.5}
+}
+
+@article{ha2016analysis,
+  author  = {Ha, Phi and Mehrmann, Volker},
+  title   = {Analysis and numerical solution of linear delay differential-algebraic equations},
+  journal = {BIT Numerical Mathematics},
+  volume  = {56},
+  number  = {2},
+  pages   = {633--657},
+  year    = {2016},
+  doi     = {10.1007/s10543-015-0577-6}
+}
+
+% UNVERIFIED: publisher city (San Francisco vs. London) varies across records.
+@book{campbell1980singular,
+  author    = {Campbell, Stephen L.},
+  title     = {Singular Systems of Differential Equations},
+  series    = {Research Notes in Mathematics},
+  volume    = {40},
+  publisher = {Pitman},
+  address   = {San Francisco},
+  year      = {1980},
+  isbn      = {978-0-273-08438-9}
+}
+
+@book{cushing1977integrodifferential,
+  author    = {Cushing, Jim M.},
+  title     = {Integrodifferential Equations and Delay Models in Population Dynamics},
+  series    = {Lecture Notes in Biomathematics},
+  volume    = {20},
+  publisher = {Springer},
+  address   = {Berlin, Heidelberg},
+  year      = {1977},
+  isbn      = {978-3-540-08449-5},
+  doi       = {10.1007/978-3-642-93073-7}
+}
+
+@article{fioravanti2012numerical,
+  author  = {Fioravanti, Andr{\'e} Ricardo and Bonnet, Catherine and {\"O}zbay, Hitay and Niculescu, Silviu-Iulian},
+  title   = {A numerical method for stability windows and unstable root-locus calculation for linear fractional time-delay systems},
+  journal = {Automatica},
+  volume  = {48},
+  number  = {11},
+  pages   = {2824--2830},
+  year    = {2012},
+  doi     = {10.1016/j.automatica.2012.04.009}
+}
+
+@article{hamamci2007algorithm,
+  author  = {Hamamci, Serdar Ethem},
+  title   = {An algorithm for stabilization of fractional-order time delay systems using fractional-order {PID} controllers},
+  journal = {IEEE Transactions on Automatic Control},
+  volume  = {52},
+  number  = {10},
+  pages   = {1964--1969},
+  year    = {2007},
+  doi     = {10.1109/TAC.2007.906243}
+}
+
+@article{cermak2019delay,
+  author  = {{\v{C}}erm{\'a}k, Jan and Kisela, Tom{\'a}{\v{s}}},
+  title   = {Delay-dependent stability switches in fractional differential equations},
+  journal = {Communications in Nonlinear Science and Numerical Simulation},
+  volume  = {79},
+  pages   = {104888},
+  year    = {2019},
+  doi     = {10.1016/j.cnsns.2019.104888}
+}
+
+@article{zhang2016exact,
+  author  = {Zhang, Li and St{\'e}p{\'a}n, G{\'a}bor},
+  title   = {Exact stability chart of an elastic beam subjected to delayed feedback},
+  journal = {Journal of Sound and Vibration},
+  volume  = {367},
+  pages   = {219--232},
+  year    = {2016},
+  doi     = {10.1016/j.jsv.2016.01.002}
+}
+
+@article{kidd2014delayed,
+  author  = {Kidd, Milan and St{\'e}p{\'a}n, G{\'a}bor},
+  title   = {Delayed control of an elastic beam},
+  journal = {International Journal of Dynamics and Control},
+  volume  = {2},
+  number  = {1},
+  pages   = {68--76},
+  year    = {2014},
+  doi     = {10.1007/s40435-014-0079-4}
+}
+
+% UNVERIFIED: no DOI (2008 Bulletin PAS issues carry no DOIs); pages verified
+% from the openly hosted PDF.
+@article{ruszewski2008stability,
+  author  = {Ruszewski, Andrzej},
+  title   = {Stability regions of closed loop system with time delay inertial plant of fractional order and fractional order {PI} controller},
+  journal = {Bulletin of the Polish Academy of Sciences: Technical Sciences},
+  volume  = {56},
+  number  = {4},
+  pages   = {329--332},
+  year    = {2008}
+}
+
+@article{gao2017robust,
+  author  = {Gao, Zhe and Zhai, Li-Rong and Liu, Yan-Dong},
+  title   = {Robust stabilizing regions of fractional-order {PI}$^{\lambda}$ controllers for fractional-order systems with time-delays},
+  journal = {International Journal of Automation and Computing},
+  volume  = {14},
+  number  = {3},
+  pages   = {340--349},
+  year    = {2017},
+  doi     = {10.1007/s11633-015-0941-7}
+}
+
+@article{cheng2006stabilization,
+  author  = {Cheng, Yi-Cheng and Hwang, Chyi},
+  title   = {Stabilization of unstable first-order time-delay systems using fractional-order {PD} controllers},
+  journal = {Journal of the Chinese Institute of Engineers},
+  volume  = {29},
+  number  = {2},
+  pages   = {241--249},
+  year    = {2006},
+  doi     = {10.1080/02533839.2006.9671121}
+}
+
+@article{hohenbichler2008comments,
+  author  = {Hohenbichler, Norbert},
+  title   = {Comments on ``{An} Algorithm for Stabilization of Fractional-Order Time Delay Systems Using Fractional-Order {PID} Controllers''},
+  journal = {IEEE Transactions on Automatic Control},
+  volume  = {53},
+  number  = {11},
+  pages   = {2712},
+  year    = {2008},
+  doi     = {10.1109/TAC.2008.2007535}
+}
+
+@book{petras2011fractional,
+  author    = {Petr{\'a}{\v{s}}, Ivo},
+  title     = {Fractional-Order Nonlinear Systems: Modeling, Analysis and Simulation},
+  series    = {Nonlinear Physical Science},
+  publisher = {Springer},
+  address   = {Berlin, Heidelberg},
+  year      = {2011},
+  isbn      = {978-3-642-18100-9},
+  doi       = {10.1007/978-3-642-18101-6}
+}
+
+%% === GROUP F: Machining / chatter application =============================
+
+% UNVERIFIED: not indexed in Crossref; details from secondary citations.
+@article{tobias1958theory,
+  author  = {Tobias, S. A. and Fishwick, W.},
+  title   = {Theory of Regenerative Machine Tool Chatter},
+  journal = {The Engineer},
+  volume  = {205},
+  pages   = {199--203, 238--239},
+  year    = {1958},
+  note    = {London}
+}
+
+% UNVERIFIED: not indexed in Crossref; details from secondary citations.
+@inproceedings{tlusty1963stability,
+  author    = {Tlusty, J. and Polacek, M.},
+  title     = {The Stability of Machine Tools Against Self-Excited Vibrations in Machining},
+  booktitle = {International Research in Production Engineering},
+  publisher = {ASME},
+  pages     = {465--474},
+  year      = {1963}
+}
+
+@article{altintas1995analytical,
+  author  = {Altintas, Y. and Budak, E.},
+  title   = {Analytical Prediction of Stability Lobes in Milling},
+  journal = {CIRP Annals - Manufacturing Technology},
+  volume  = {44},
+  number  = {1},
+  pages   = {357--362},
+  year    = {1995},
+  doi     = {10.1016/S0007-8506(07)62342-7}
+}
+
+@article{insperger2003stability,
+  author  = {Insperger, Tam{\'a}s and Mann, Brian P. and {St\'ep\'an}, G{\'a}bor and Bayly, Philip V.},
+  title   = {Stability of Up-Milling and Down-Milling, Part 1: Alternative Analytical Methods},
+  journal = {International Journal of Machine Tools and Manufacture},
+  volume  = {43},
+  number  = {1},
+  pages   = {25--34},
+  year    = {2003},
+  doi     = {10.1016/S0890-6955(02)00159-1}
+}
+
+@article{munoa2016chatter,
+  author  = {{Munoa}, J. and Beudaert, X. and Dombovari, Z. and Altintas, Y. and Budak, E. and Brecher, C. and {St\'ep\'an}, G.},
+  title   = {Chatter Suppression Techniques in Metal Cutting},
+  journal = {CIRP Annals - Manufacturing Technology},
+  volume  = {65},
+  number  = {2},
+  pages   = {785--808},
+  year    = {2016},
+  doi     = {10.1016/j.cirp.2016.06.004}
+}
+
+@article{stepan2001modelling,
+  author  = {{St\'ep\'an}, G{\'a}bor},
+  title   = {Modelling Nonlinear Regenerative Effects in Metal Cutting},
+  journal = {Philosophical Transactions of the Royal Society of London. Series A: Mathematical, Physical and Engineering Sciences},
+  volume  = {359},
+  number  = {1781},
+  pages   = {739--757},
+  year    = {2001},
+  doi     = {10.1098/rsta.2000.0753}
+}
+
+@article{bachrathy2013improved,
+  author  = {{Bachrathy}, D{\'a}niel and {St\'ep\'an}, G{\'a}bor},
+  title   = {Improved Prediction of Stability Lobes with Extended Multi Frequency Solution},
+  journal = {CIRP Annals - Manufacturing Technology},
+  volume  = {62},
+  number  = {1},
+  pages   = {411--414},
+  year    = {2013},
+  doi     = {10.1016/j.cirp.2013.03.085}
+}
+
+%% === GROUP G: Software / numerics ==========================================
+
+@article{bezanson2017julia,
+  author  = {Bezanson, Jeff and Edelman, Alan and Karpinski, Stefan and Shah, Viral B.},
+  title   = {{Julia}: A Fresh Approach to Numerical Computing},
+  journal = {SIAM Review},
+  volume  = {59},
+  number  = {1},
+  pages   = {65--98},
+  year    = {2017},
+  doi     = {10.1137/141000671}
+}
+
+@article{rackauckas2017differentialequations,
+  author  = {Rackauckas, Christopher and Nie, Qing},
+  title   = {{DifferentialEquations.jl} -- A Performant and Feature-Rich Ecosystem for Solving Differential Equations in {Julia}},
+  journal = {Journal of Open Research Software},
+  volume  = {5},
+  number  = {1},
+  pages   = {15},
+  year    = {2017},
+  doi     = {10.5334/jors.151}
+}
+
+@misc{revels2016forward,
+  author        = {Revels, Jarrett and Lubin, Miles and Papamarkou, Theodore},
+  title         = {Forward-Mode Automatic Differentiation in {Julia}},
+  year          = {2016},
+  eprint        = {1607.07892},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.MS},
+  url           = {https://arxiv.org/abs/1607.07892}
+}
+
+% UNVERIFIED: Verner's efficient 9(8) pairs -- the "Vern9" method; the
+% companion tables are distributed from the author's page
+% (https://www.sfu.ca/~jverner/). Confirm volume/pages before submission.
+@article{verner2010numerically,
+  author  = {Verner, J. H.},
+  title   = {Numerically optimal {Runge--Kutta} pairs with interpolants},
+  journal = {Numerical Algorithms},
+  volume  = {53},
+  number  = {2--3},
+  pages   = {383--396},
+  year    = {2010},
+  doi     = {10.1007/s11075-009-9290-3}
+}
+
+@article{tsitouras2011runge,
+  author  = {Tsitouras, Ch.},
+  title   = {{R}unge--{K}utta Pairs of Order 5(4) Satisfying Only the First Column Simplifying Assumption},
+  journal = {Computers \& Mathematics with Applications},
+  volume  = {62},
+  number  = {2},
+  pages   = {770--775},
+  year    = {2011},
+  doi     = {10.1016/j.camwa.2011.06.002}
+}
+
+@article{rosenbrock1963some,
+  author  = {Rosenbrock, H. H.},
+  title   = {Some General Implicit Processes for the Numerical Solution of Differential Equations},
+  journal = {The Computer Journal},
+  volume  = {5},
+  number  = {4},
+  pages   = {329--330},
+  year    = {1963},
+  doi     = {10.1093/comjnl/5.4.329}
+}
+
+@article{shampine1997matlab,
+  author  = {Shampine, Lawrence F. and Reichelt, Mark W.},
+  title   = {The {MATLAB} {ODE} Suite},
+  journal = {SIAM Journal on Scientific Computing},
+  volume  = {18},
+  number  = {1},
+  pages   = {1--22},
+  year    = {1997},
+  doi     = {10.1137/S1064827594276424}
+}
+
+@book{hairer1996solving,
+  author    = {Hairer, Ernst and Wanner, Gerhard},
+  title     = {Solving Ordinary Differential Equations {II}: Stiff and Differential-Algebraic Problems},
+  edition   = {Second},
+  series    = {Springer Series in Computational Mathematics},
+  volume    = {14},
+  publisher = {Springer},
+  address   = {Berlin, Heidelberg},
+  year      = {1996},
+  doi       = {10.1007/978-3-642-05221-7}
+}
+
+@misc{johnson2013quadgk,
+  author = {Johnson, Steven G.},
+  title  = {{QuadGK.jl}: {G}auss--{K}ronrod Integration in {Julia}},
+  year   = {2013},
+  url    = {https://github.com/JuliaMath/QuadGK.jl},
+  note   = {Version 2.11.3}
+}
+
+@article{bachrathy2012bisection,
+  author  = {{Bachrathy}, D{\'a}niel and {St\'ep\'an}, G{\'a}bor},
+  title   = {Bisection Method in Higher Dimensions and the Efficiency Number},
+  journal = {Periodica Polytechnica Mechanical Engineering},
+  volume  = {56},
+  number  = {2},
+  pages   = {81--86},
+  year    = {2012},
+  doi     = {10.3311/pp.me.2012-2.01}
+}
+
+@misc{bachrathy2025mdbm,
+  author = {{Bachrathy}, D{\'a}niel},
+  title  = {{MDBM.jl}: Multi-Dimensional Bisection Method},
+  year   = {2025},
+  url    = {https://github.com/bachrathyd/MDBM.jl},
+  note   = {Version 0.1.7}
+}
+
+@article{vandenheuvel2024delaunay,
+  author  = {VandenHeuvel, Daniel J.},
+  title   = {{DelaunayTriangulation.jl}: A {Julia} Package for {D}elaunay Triangulations and {V}oronoi Tessellations in the Plane},
+  journal = {Journal of Open Source Software},
+  volume  = {9},
+  number  = {101},
+  pages   = {7174},
+  year    = {2024},
+  doi     = {10.21105/joss.07174}
+}

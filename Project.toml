@@ -1,9 +1,9 @@
 name = "InterpolatedNyquist"
 uuid = "1b0c7da8-4eb4-4bd5-bd5a-0bb1b0f4bca1"
 license = "MIT"
-version = "0.1.1"
+version = "0.2.0"
 authors = ["Daniel Bachrathy <bachrathy@mm.bme.hu>"]
-description = "High-performance stability analysis of delayed dynamical systems using MDBM and autodiff-enhanced stiff integration."
+description = "High-performance stability analysis of delayed dynamical systems using MDBM and autodiff-enhanced adaptive integration."
 
 [deps]
 DSP = "717857b8-e6f2-59f4-9121-6e50c889abd2"
