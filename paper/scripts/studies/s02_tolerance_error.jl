@@ -16,7 +16,7 @@ Dv = LinRange(SHOWCASE_DRANGE..., nD)
 # bought back. (Note: the COUNT is never refined -- the Newton polish of
 # Section 3.3 only touches the root estimate sigma_est, so the residual and
 # wrong-Z columns measure the integrator alone.)
-TOLS = [1e-2, 1e-4, 1e-6, 1e-8]
+TOLS = [1e-2, 1e-4, 1e-6]
 
 # omega_max = 1e4: the standard chart window used everywhere in the paper.
 #
@@ -40,9 +40,21 @@ const WMAX_TOL = 1e4
 const D_TOL = D_showcase_reduced
 
 # cache v4: v3 used the 1e-3..1e-9 ladder
-tol_grids = with_cache("s02_grids_v6_$(nP)x$(nD)") do
+# The stable region is coloured by sigma_est of the DOMINANT root, and that
+# field must be smooth. Isolated pixels used to jump to a smaller sigma where
+# the dominant root was evicted from the tracking buffer by deeper non-dominant
+# minima. That is now fixed in the tracker itself (it keeps the N RIGHTMOST
+# roots, not the N deepest |D| dips), so the DEFAULT buffer is already enough --
+# no per-chart nroots tuning. Measured (stable domain, pixels whose sigma jumps
+# >0.01 from the neighbour median): with the rightmost-keep policy the default
+# 5-root buffer gives 32-36 rough pixels, matching a 15-root buffer, and those
+# ~34 are REAL sigma jumps (fast branch crossings; nroots = 50 agrees at every
+# one), not artifacts. Turning refinement OFF makes it far worse (300+), so the
+# Newton polish is not the cause -- it drives sigma to machine precision.
+tol_grids = with_cache("s02_grids_v9_$(nP)x$(nD)") do
     map(TOLS) do tol
-        g = sweep_grid_dominant(D_TOL, Pv, Dv; nroots = 5, ω_max = WMAX_TOL, reltol = tol, abstol = tol)
+        g = sweep_grid_dominant(D_TOL, Pv, Dv; ω_max = WMAX_TOL,
+            reltol = tol, abstol = tol)
         @info "tolerance grid done" tol t = g.t
         g
     end
@@ -50,7 +62,7 @@ end
 
 errs = [abs.(g.Z_raw .- round.(g.Z_raw)) for g in tol_grids]
 
-# The tightest-tolerance grid (1e-8) serves as the count reference: the
+# The tightest-tolerance grid (1e-6) serves as the count reference: the
 # "wrong Z" column then reports ACTUAL misclassifications of each looser
 # chart, not merely points whose rounding is uncertain.
 Z_ref_grid = tol_grids[end].Z

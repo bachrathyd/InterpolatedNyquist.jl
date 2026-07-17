@@ -280,6 +280,30 @@ import MDBM
         @test !isfinite(md_o)
     end
 
+    @testset "Dominant root survives a small tracking buffer (rightmost eviction)" begin
+        # The multi-root tracker keeps the N RIGHTMOST roots, not the N deepest
+        # |D| dips: the dominant root can dip shallower than a deep non-dominant
+        # one, and a depth-ranked buffer would evict it once full. So a SMALL
+        # buffer must return the same dominant sigma as a large one.
+        function D_chareq(λ::T, p) where T
+            P, D = p; c1 = T(0.03); τ = T(0.5); ζ = T(0.02)
+            return c1*λ^4 + λ^2 + T(2)*ζ*λ + one(T) + P*exp(-τ*λ) + D*λ*exp(-τ*λ)
+        end
+        params = vec([(P, D) for P in LinRange(-1.0, 3.0, 12),
+                              D in LinRange(-1.0, 3.0, 12)])
+        dom(v) = maximum(filter(isfinite, v); init = -Inf)
+        small = calculate_unstable_roots_p_vec(D_chareq, params; ω_max = 1e4,
+            reltol = 1e-7, abstol = 1e-7, n_roots_to_track = 3)
+        big = calculate_unstable_roots_p_vec(D_chareq, params; ω_max = 1e4,
+            reltol = 1e-7, abstol = 1e-7, n_roots_to_track = 25)
+        sig_small = [dom(v) for v in small[4]]
+        sig_big = [dom(v) for v in big[4]]
+        # the dominant sigma must agree: a small buffer does not lose the
+        # rightmost root to deeper competitors
+        stable = small[1] .== 0
+        @test maximum(abs.(sig_small[stable] .- sig_big[stable])) < 1e-6
+    end
+
     @testset "User-supplied leading order (n_power_max) in the sweeps" begin
         # A neutral system: |D| = |λ²(1 + a e^{-λ}) + ...| never settles onto a
         # power law on the imaginary axis, but n = 2 by inspection.
