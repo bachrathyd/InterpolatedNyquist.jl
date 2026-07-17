@@ -105,7 +105,12 @@ const BILINEAR_CMAP = cgrad([COL_STABLE_FAR, COL_STABLE_ZERO,
                             [0.0, 0.4999, 0.5001, 1.0])
 
 """
-    bilinear_metric(Z_mat, sigma_mat) -> (T, sigma_min, Z_max)
+    bilinear_metric(Z_mat, sigma_mat; σ_ref=nothing, Z_ref=nothing) -> (T, sigma_min, Z_max)
+
+Pass `σ_ref` / `Z_ref` to force the two limits instead of taking them from this
+grid. Needed whenever several panels must be COMPARABLE (e.g. the same chart at
+four tolerances): per-panel normalization would give each its own scale and
+hide the very differences the figure is about.
 
 Signed bilinear chart field `T ∈ [-1, 1]` with the stability boundary at 0
 (see the comment above). Plot with `colormap = BILINEAR_CMAP` and
@@ -116,7 +121,8 @@ the colour bar must be labelled with -- each panel is normalized to its OWN
 Points with the invalid marker (`Z < 0`, i.e. a root exactly on the line, so
 the count is undefined) become `NaN` and are left unpainted.
 """
-function bilinear_metric(Z_mat, sigma_mat; σ_quantile = 0.02)
+function bilinear_metric(Z_mat, sigma_mat; σ_quantile = 0.02,
+                         σ_ref = nothing, Z_ref = nothing)
     stable_σ = [sigma_mat[i] for i in eachindex(Z_mat)
                 if Z_mat[i] == 0 && isfinite(sigma_mat[i])]
     # ROBUST lower limit, not the outright minimum. A handful of deeply stable
@@ -126,10 +132,10 @@ function bilinear_metric(Z_mat, sigma_mat; σ_quantile = 0.02)
     # The reference implementation solves this with an arctan; on a linear
     # scale the equivalent is to clip the tail, so the deepest few percent
     # saturate at green and the rest of the domain gets the full gradient.
-    σ_min = isempty(stable_σ) ? -1.0 :
-            min(quantile(stable_σ, σ_quantile), -eps())
+    σ_min = σ_ref !== nothing ? σ_ref :
+            (isempty(stable_σ) ? -1.0 : min(quantile(stable_σ, σ_quantile), -eps()))
     unstable_Z = [Z_mat[i] for i in eachindex(Z_mat) if Z_mat[i] > 0]
-    Z_max = isempty(unstable_Z) ? 1 : maximum(unstable_Z)
+    Z_max = Z_ref !== nothing ? Z_ref : (isempty(unstable_Z) ? 1 : maximum(unstable_Z))
     T = map(eachindex(Z_mat)) do i
         z = Z_mat[i]
         if z < 0                      # invalid marker: count undefined here

@@ -27,18 +27,30 @@ CASES_G = [
 
 fig = Figure(size = (W_FULL, W_FULL * 0.42))
 rows_csv = Tuple[]
+
+# Each case gets its OWN colour scale and its OWN colour bar. The two systems
+# differ by an order of magnitude in spectral gap (mu = 0.4 reaches sigma ~ -1.7,
+# mu = 1.5 only ~ -0.3), so a shared scale would leave the second panel
+# uniformly blue -- while a shared BAR over per-panel scales would mislabel one
+# of them. Two bars is the only arrangement that is both readable and honest.
+NXY = FAST[] ? (40, 30) : (80, 60)
 for (ic, case) in enumerate(CASES_G)
     D = make_D_gao(case.lam)
-    nx, ny = FAST[] ? (40, 30) : (80, 60)
-    kpv = LinRange(case.kpr..., nx)
-    kiv = LinRange(case.kir..., ny)
-    grid = with_cache("s10_gao_lam$(case.lam)_$(nx)x$(ny)") do
-        sweep_grid(D, kpv, kiv; ω_max = 1e4)
+    kpv = LinRange(case.kpr..., NXY[1]); kiv = LinRange(case.kir..., NXY[2])
+    grid = with_cache("s10_gao_lam$(case.lam)_$(NXY[1])x$(NXY[2])") do
+        sweep_grid_dominant(D, kpv, kiv; nroots = 5, ω_max = 1e4)
     end
-    ax = MAxis(fig[1, ic], xlabel = "k_p", ylabel = ic == 1 ? "k_i" : "",
+    col = 2ic - 1
+    ax = MAxis(fig[1, col], xlabel = "k_p", ylabel = ic == 1 ? "k_i" : "",
         title = "μ = $(case.lam)")
-    stability_panel!(ax, kpv, kiv, combined_metric(grid.Z, grid.sigma))
-    cmap = cgrad([:black, :red])
+    Cb, σ_min, Z_max = bilinear_metric(grid.Z, grid.sigma)
+    hm = heatmap!(ax, kpv, kiv, Cb; colormap = BILINEAR_CMAP, colorrange = (-1, 1),
+        rasterize = 8)
+    tpos, tlab = bilinear_ticks(σ_min, Z_max; n = 2)
+    Colorbar(fig[1, col + 1], hm, ticks = (tpos, tlab),
+        label = ic == length(CASES_G) ? "σ̂ (stable)  |  Z (unstable)" : "")
+    # sigma-degree contours in hues the map does not use
+    cmap = cgrad([:white, :magenta])
     for (k, sd) in enumerate(case.sig_degs)
         bnd = with_cache("s10_gao_lam$(case.lam)_mdbm_sd$(sd)") do
             mdbm_boundary(D, case.kpr, case.kir; ngrid = 25,

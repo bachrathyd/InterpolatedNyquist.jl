@@ -40,9 +40,9 @@ const WMAX_TOL = 1e4
 const D_TOL = D_showcase_reduced
 
 # cache v4: v3 used the 1e-3..1e-9 ladder
-tol_grids = with_cache("s02_grids_v5_$(nP)x$(nD)") do
+tol_grids = with_cache("s02_grids_v6_$(nP)x$(nD)") do
     map(TOLS) do tol
-        g = sweep_grid(D_TOL, Pv, Dv; ω_max = WMAX_TOL, reltol = tol, abstol = tol)
+        g = sweep_grid_dominant(D_TOL, Pv, Dv; nroots = 5, ω_max = WMAX_TOL, reltol = tol, abstol = tol)
         @info "tolerance grid done" tol t = g.t
         g
     end
@@ -150,18 +150,28 @@ write_csv("boundary_shift",
 # ---------------------------------------------------------------------------
 # Figure 1: the four charts with CPU times
 # ---------------------------------------------------------------------------
-crange = extrema(combined_metric(tol_grids[end].Z, tol_grids[end].sigma))
+# All four panels MUST share one colour scale -- they are the same chart at
+# four tolerances, and the figure's claim is that they are indistinguishable.
+# Normalizing each to its own extremes would rescale every panel differently
+# and manufacture differences (or hide them). The limits come from the
+# reference (tightest) grid and are forced onto the rest.
+_, σ_ref, Z_ref = bilinear_metric(tol_grids[end].Z, tol_grids[end].sigma)
 fig = Figure(size = (W_FULL, W_FULL * 0.26))
 hm = nothing
 for (i, tol) in enumerate(TOLS)
     g = tol_grids[i]
     ax = MAxis(fig[1, i], xlabel = "P", ylabel = i == 1 ? "D" : "",
         title = "tol = 1e$(round(Int, log10(tol)))   ($(tex_time_plain(g.t)))")
-    global hm = stability_panel!(ax, Pv, Dv, combined_metric(g.Z, g.sigma);
-        edges = bnd.edges, crange = crange)
+    Cb, _, _ = bilinear_metric(g.Z, g.sigma; σ_ref = σ_ref, Z_ref = Z_ref)
+    global hm = heatmap!(ax, Pv, Dv, Cb; colormap = BILINEAR_CMAP,
+        colorrange = (-1, 1), rasterize = 8)
+    lines!(ax, bnd.edges[1], bnd.edges[2]; color = BOUNDARY_COLOR,
+        linewidth = BOUNDARY_LW)
     i > 1 && hideydecorations!(ax; ticks = false)
 end
-Colorbar(fig[1, length(TOLS) + 1], hm, label = "Z (unstable)  /  σ̂ (stable)")
+tpos, tlab = bilinear_ticks(σ_ref, Z_ref)
+Colorbar(fig[1, length(TOLS) + 1], hm, label = "σ̂ (stable)  |  Z (unstable)",
+    ticks = (tpos, tlab))
 save_fig(fig, "fig_tolerance_charts")
 
 # ---------------------------------------------------------------------------
