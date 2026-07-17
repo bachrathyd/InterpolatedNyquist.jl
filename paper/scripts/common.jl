@@ -80,13 +80,16 @@ combined_metric(Z_mat, sigma_mat) = Z_mat .+ (Z_mat .== 0) .* sigma_mat
 # Instead, map each side to its OWN normalized coordinate with a common zero at
 # the stability boundary:
 #
-#     t = -|sigma| / |sigma_min|          in [-1, 0)   where Z == 0  (stable)
-#     t = (Z - 1) / (Z_max - 1), shifted   in (0, +1]   where Z >= 1  (unstable)
+#     t = -|sigma| / |sigma_min|   in [-1, 0)   where Z == 0  (stable)
+#     t = +Z / Z_max              in (0, +1]   where Z >= 1  (unstable)
 #
-# Note the unstable branch is normalized over [1, Z_max], not [0, Z_max]: the
-# smallest count that exists is 1, and mapping it to Z/Z_max would put it a
-# quarter of the way to black on a chart with Z_max = 4 -- so the "barely
-# unstable" region would already be painted dark.
+# Both halves are simply "value divided by that half's extreme". The zero of
+# each axis is a real, labelled tick at the centre of the bar -- the boundary
+# where sigma = 0 meets Z = 0 -- which is what makes the scale describable in
+# one sentence. The colour AT zero on the unstable side is full red; the first
+# actual count, Z = 1, therefore already carries some darkening, which is fine:
+# what the eye needs is the ORDERING of the counts, and the boundary itself is
+# marked by the blue-to-red break, not by a shade of red.
 #
 # so both halves use the full width of their own colour ramp regardless of how
 # different their magnitudes are. The scale is linear on each side (no arctan
@@ -150,13 +153,9 @@ function bilinear_metric(Z_mat, sigma_mat; σ_quantile = 0.02,
     return reshape(T, size(Z_mat)), σ_min, Z_max
 end
 
-# Z = 1 -> just above 0 (red), Z = Z_max -> 1 (black). The small offset keeps
-# Z = 1 strictly on the unstable side of the break in the colour map.
-const _T_FLOOR = 0.03
-function _z_to_t(z, Z_max)
-    Z_max <= 1 && return 1.0
-    return _T_FLOOR + (1 - _T_FLOOR) * clamp((z - 1) / (Z_max - 1), 0.0, 1.0)
-end
+# Z / Z_max: 0 sits exactly at the centre of the bar (and is a visible tick),
+# Z_max at the top. Deliberately the simplest possible rule.
+_z_to_t(z, Z_max) = clamp(z / max(Z_max, 1), 0.0, 1.0)
 
 """
     bilinear_ticks(σ_min, Z_max; n=3) -> (positions, labels)
@@ -172,8 +171,7 @@ function bilinear_ticks(σ_min, Z_max; n = 3)
         s = @sprintf("%.2g", t * abs(σ_min))
         push!(pos, t); push!(lab, k == n ? "≤" * s : s)
     end
-    # No tick at 0: Z = 1 sits at t = 0.03 and the two labels would overprint.
-    # The blue-to-red break in the colour map marks the boundary unambiguously.
+    push!(pos, 0.0); push!(lab, "0")             # the boundary, at the centre
     # unstable half: tick the ACTUAL integer counts, at the t they map to --
     # they are what the colours mean, and there are rarely more than a handful
     zs = Z_max <= 6 ? (1:Z_max) : round.(Int, range(1, Z_max; length = 5))
@@ -190,20 +188,29 @@ Put an annotation in the lower-left corner of a chart on a semi-transparent
 white plate, so that it stays readable over any colour -- in particular over
 the black of a badly unstable region, where white-on-dark text disappears.
 """
-function annotate_panel!(ax, xr, yr, text_str; fontsize = 6)
+function annotate_panel!(ax, xr, yr, text_str; fontsize = 6,
+                         panel_pt = (W_FULL / 3, W_FULL * 0.60 / 2))
     w, h = xr[2] - xr[1], yr[2] - yr[1]
     lines_ = split(text_str, '\n')
     nlines = length(lines_)
     ncols = maximum(length, lines_)
-    # Plate sized from the text metrics, deliberately GENEROUS: black text that
-    # runs past the edge of the plate lands on the black of a badly unstable
-    # region and vanishes, which is the exact failure this plate exists to fix.
-    pw = min(0.95, 0.0235 * ncols + 0.03) * w
-    ph = (0.055 * nlines + 0.025) * h
-    x0, y0 = xr[1] + 0.02w, yr[1] + 0.02h
-    poly!(ax, Rect2f(x0, y0, pw, ph); color = (:white, 0.80),
+    # The plate must be given in DATA coordinates while the text is sized in
+    # POINTS, so its extent cannot be measured from the text plot (Makie only
+    # knows it at render time; boundingbox returns the anchor with zero width).
+    # Convert instead: estimate the text box in points from the font metrics and
+    # divide by the panel's size in points. `panel_pt` is the drawable area of
+    # ONE panel -- the caller must pass it if the layout is not the gallery's
+    # 3x2 grid. Erring large is deliberate: text that runs past the plate lands
+    # on the black of a badly unstable region and vanishes, which is the exact
+    # failure the plate exists to prevent.
+    char_pt = 0.62 * fontsize                     # mean advance width
+    line_pt = 1.35 * fontsize                     # line height
+    pw = min(0.95, (ncols * char_pt) / (0.74 * panel_pt[1]) + 0.05) * w
+    ph = min(0.60, (nlines * line_pt) / (0.72 * panel_pt[2]) + 0.04) * h
+    x0, y0 = xr[1] + 0.025w, yr[1] + 0.025h
+    poly!(ax, Rect2f(x0, y0, pw, ph); color = (:white, 0.82),
         strokecolor = (:black, 0.35), strokewidth = 0.3)
-    text!(ax, x0 + 0.015w, y0 + 0.015h; text = text_str, align = (:left, :bottom),
+    text!(ax, x0 + 0.02w, y0 + 0.02h; text = text_str, align = (:left, :bottom),
         fontsize = fontsize, color = :black)
     return nothing
 end
