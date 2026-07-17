@@ -227,6 +227,37 @@ setting to certify the counts. What must not be done is to report a count
 from a loose sweep without the cross-check~\eqref{eq:crosscheck}, because
 that is the one number whose error the residual will not reveal.
 
+A flagged pixel need not be recomputed with a different backend: the march
+can repair itself (\code{peak\_repair=true} in the package). The skipped
+peak is easy to \emph{locate} even when it is far too narrow to
+\emph{integrate}: its center is a minimum of $|\Dfun(\sigma+\ii\omega)|^2$,
+and $|\Dfun|^2$ dips toward that minimum over an $O(1)$ frequency range no
+matter how narrow the peak itself is. A root-finding callback therefore
+stops the integrator at every such minimum; the phase increment of the step
+that crossed it is recomputed by quadrature whose subdivision is forced
+into the located peak by a geometric ladder of breakpoints (an adaptive
+quadrature left to its own error estimate is blind to a peak narrower than
+the spacing of its first rule -- the very blindness that skips peaks in the
+first place); and the march restarts exactly at the minimum, so that step
+control resolves the right half of the peak on its own. Measured across the
+Hopf point of this chart at default settings
+(\code{data/peak\_repair.csv}): the plain march loses one count from
+$\Delta P = \RepairPlainFailDP$ inward on both sides of the boundary, and
+the Gauss--Kronrod backend -- which must \emph{discover} the peak -- loses
+it silently at $\Delta P = \RepairDeepDP$, whereas the repaired march,
+which \emph{knows} where the peak is, still counts correctly there. The
+price is $\approx\RepairCostFactor\times$ the plain march (comparable to
+the quadrature backend at $\RepairGKFactor\times$), dominated by the
+per-step callback checks rather than by the repair quadrature itself, which
+is why the repair is off by default and the economical pattern is the one
+already implied: sweep plainly, flag with~\eqref{eq:crosscheck}, and
+re-evaluate only the flagged pixels with the repair armed. The mechanism
+has a floor of its own: within about $10^{3}$ floating-point ulps of the
+boundary the condition crossing can no longer be stepped past in double
+precision, and the callback disarms itself for the remainder of that march
+-- a parameter point that close to the boundary is numerically \emph{on}
+it.
+
 Two limits deserve mention, since both are visible in
 Fig.~\ref{fig:errorfield} if the settings are pushed. The rule~\eqref{eq:rule}
 holds only while the quadrature is the dominant error: below it lie the

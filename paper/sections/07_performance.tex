@@ -74,7 +74,13 @@ a perfectly healthy integer residual. Gauss--Kronrod survives the same test,
 though not by cleverness: the persistent delay ripple forces it to subdivide
 finely across the whole range anyway, and that global refinement happens to
 resolve the spike. Neither method carries a guarantee, since both sample
-pointwise.
+pointwise -- and pressed one step further, both indeed fail: at $\Delta
+P=10^{-10}$ the peak escapes the ripple-driven refinement as well, and
+Gauss--Kronrod returns a clean residual with the wrong count
+(\code{data/peak\_repair.csv}), while the repaired march of
+Section~\ref{sec:showcase-tolerance} -- which does not \emph{search} for
+the peak but is steered onto it by the $|\Dfun|^{2}$ minimum -- still
+counts correctly there.
 
 The practical consequences are, however, mild, and worth spelling out so the
 phenomenon is neither ignored nor overstated. First, it requires landing

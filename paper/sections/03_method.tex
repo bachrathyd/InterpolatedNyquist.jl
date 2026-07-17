@@ -375,7 +375,11 @@ matters (Section~\ref{sec:showcase-tolerance}). That last qualification is the p
 skipping one peak only ever changes $\Zint$ by one, so the stable/unstable
 classification a chart displays is affected only where the last unstable root
 crosses -- and that is precisely the regime in which $\sest$ is small and the
-test is sharp.
+test is sharp. The same mechanism that flags a skipped peak can also mend
+it: the minimum of $|\Dfun|^{2}$ \emph{locates} the peak precisely however
+narrow it is, and Section~\ref{sec:showcase-tolerance} shows how an
+optional callback uses that location to repair the count within the march
+itself.
 
 \subsection{Alternative integrators within the same framework}\label{sec:alternatives}
 

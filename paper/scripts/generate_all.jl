@@ -29,6 +29,7 @@ const STUDIES = [
     "s09_sigma_contours",
     "s10_fractional_controller",
     "s11_diagnostics",
+    "s12_peak_repair",
 ]
 
 __results = Dict{String, Any}()

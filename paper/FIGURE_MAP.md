@@ -67,6 +67,7 @@ one chart.
 | `fig_fractional_controller` (Gao et al. reproduction) | `s10_fractional_controller.jl` | `CASES_G` (μ = 0.4 / 1.5), `sig_degs`, `test_points` |
 | `tab_evals` (march vs quadrature evaluations) | `s11_diagnostics.jl` | the systems and `ω_max` values probed |
 | `data/wmax_scaling.csv` | `s11_diagnostics.jl` | the `ω_max` ladder 1e6/1e8/1e10 |
+| `data/peak_repair.csv`, `generated/repair_numbers.tex` (peak-repair callback, §6.3/§7.4) | `s12_peak_repair.jl` | `DP_LADDER` (±1e-2…1e-10 around the D=1.5 Hopf point); self-asserting: errors out if any quoted claim stops holding |
 | `generated/machine.tex` | `scripts/machine_info.jl` | CPU/threads/RAM/versions, auto-detected |
 
 ## The two settings that dominate cost

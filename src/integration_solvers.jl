@@ -348,9 +348,10 @@ ladder, and the march restarts at the peak, where step control resolves the
 right half on its own. Measured on the showcase system at default
 tolerances: the plain march miscounts within `~1e-6` of a Hopf boundary,
 the adaptive-quadrature backend silently miscounts at `~1e-10`, while the
-repaired march stays correct down to `~1e-10` — at ≈ 2.6× the march
-cost (per-step condition checks; the repair quadrature itself is ~0.2% of
-evaluations). Off by default: a generic chart pixel gains nothing. Enable
+repaired march stays correct down to `~1e-10` — at ≈ 2–3× the march cost,
+comparable to the quadrature backend (per-step condition checks dominate;
+the repair quadrature itself is ~0.2% of evaluations). Off by default: a
+generic chart pixel gains nothing. Enable
 it to re-check pixels flagged by [`peak_skip_suspect`](@ref) or when
 evaluating deliberately close to a boundary. Roots within ~1e3 ulps of the
 σ-line would make the callback re-fire in place; a stuck guard then

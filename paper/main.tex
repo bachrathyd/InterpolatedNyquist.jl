@@ -37,6 +37,10 @@
   \newcommand{\ExtractRatio}{[x]}\newcommand{\ExtractHandT}{[t]}%
   \newcommand{\ExtractAutoT}{[t]}\newcommand{\ExtractHandUs}{[t]}%
   \newcommand{\ExtractAutoUs}{[t]}}
+% peak-repair callback measurements (paper/scripts/studies/s12_peak_repair.jl)
+\IfFileExists{generated/repair_numbers.tex}{\input{generated/repair_numbers.tex}}{%
+  \newcommand{\RepairPlainFailDP}{[dp]}\newcommand{\RepairDeepDP}{[dp]}%
+  \newcommand{\RepairCostFactor}{[x]}\newcommand{\RepairGKFactor}{[x]}}
 
 \begin{document}
 
