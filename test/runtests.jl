@@ -353,6 +353,64 @@ import MDBM
         @test !peak_skip_suspect(0, NaN)
     end
 
+    @testset "Peak repair callback (peak_repair = true)" begin
+        # Constrained 2-DOF showcase reduced quasi-polynomial; its Hopf point
+        # at D = 1.5 sits at P = 2.9864002145543491 (bisected on the refined
+        # dominant sigma at 1e-10 tolerances -- deterministic for this D).
+        SMt = (m1=1.0, m2=0.3, m3=0.2, k1=-1.0, k2=1.0, c1=0.05, c2=0.05, tau=0.5)
+        function D_show(λ, p)
+            P, Dg = p
+            m23 = SMt.m2 + SMt.m3
+            a11 = SMt.m1*λ^2 + (SMt.c1+SMt.c2)*λ + (SMt.k1+SMt.k2) +
+                  (P + Dg*λ)*exp(-SMt.tau*λ)
+            a12 = -(SMt.c2*λ + SMt.k2)
+            a22 = m23*λ^2 + SMt.c2*λ + SMt.k2
+            return a11*a22 - a12*a12
+        end
+        Pb = 2.9864002145543491
+
+        # 1e-8 past the Hopf point the peak is ~1e-8 wide: the plain march
+        # steps over it and loses exactly one count, while the repaired march
+        # recovers it. (Both statements are the point of the test; if a future
+        # solver change makes the plain march resolve this peak, move closer.)
+        p_hard = (Pb + 1e-8, 1.5)
+        Z_plain, _, _, _, _ = calculate_unstable_roots_direct(D_show, p_hard)
+        Z_rep, Zraw_rep, _, es_rep, _ = calculate_unstable_roots_direct(D_show, p_hard;
+            peak_repair=true)
+        @test Z_rep == Z_plain + 1                  # the lost ±π is recovered
+        @test abs(Zraw_rep - round(Zraw_rep)) < 1e-2
+        # the repaired march restarts exactly at the minimum, so the refined
+        # root must sit essentially on the axis
+        @test abs(es_rep) < 1e-6
+
+        # stable side of the same Hopf point: plain march overcounts by one,
+        # repair fixes it
+        p_stab = (Pb - 1e-8, 1.5)
+        Z_plain_s, _, _, _, _ = calculate_unstable_roots_direct(D_show, p_stab)
+        Z_rep_s, _, _, _, _ = calculate_unstable_roots_direct(D_show, p_stab;
+            peak_repair=true)
+        @test Z_rep_s == Z_plain_s - 1
+
+        # far from any boundary the repair must be a no-op on the results
+        p_easy = (Pb - 1.5, 1.5)
+        r0 = calculate_unstable_roots_direct(D_show, p_easy)
+        r1 = calculate_unstable_roots_direct(D_show, p_easy; peak_repair=true)
+        @test r0[1] == r1[1]
+        @test isapprox(r0[2], r1[2]; atol=2e-3)
+
+        # multi-root tracking path (Val{N}) accepts the kwarg and stays correct
+        Z_n, _, _, es_v, _ = calculate_unstable_roots_direct(D_show, p_hard;
+            n_roots_to_track=5, peak_repair=true)
+        @test Z_n == Z_rep
+        @test maximum(filter(isfinite, es_v)) > -1e-6   # dominant root ~ on axis
+
+        # vectorized sweep forwards the kwarg (Val{0} fast path included)
+        Zv, _ = calculate_unstable_roots_p_vec(D_show, [p_hard, p_easy];
+            n_roots_to_track=0, peak_repair=true, n_power_max=4)
+        @test Zv[1] == Z_rep
+        @test Zv[2] == r0[1]
+    end
+
     @testset "Mass-matrix / DAE extraction" begin
         # Descriptor system with singular mass matrix E = diag(1, m, 0):
         #   x' = v

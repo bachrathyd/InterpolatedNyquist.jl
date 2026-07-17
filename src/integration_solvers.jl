@@ -222,6 +222,91 @@ the spread of `σ_est` over the chart.
     return ((d < 0) != (Z == 0)) && abs(d) < h
 end
 
+# ---------------------------------------------------------------------------
+# Peak repair (opt-in, `peak_repair = true`): the cure for what
+# `peak_skip_suspect` detects. A rootfinding callback stops the march at each
+# minimum of |D(σ+iω)|² -- the exact center of the phase integrand's
+# near-singular peak when a root lies close to the σ-line -- then the phase
+# increment of the step that crossed the minimum is recomputed with quadrature
+# forced into the located peak, and the march restarts at the peak, where step
+# control resolves its right half on its own.
+# ---------------------------------------------------------------------------
+
+# Quadrature over [a, b] with an integrand peak KNOWN to sit at the right
+# endpoint b. Geometric breakpoints stacked toward b force subdivision into
+# the peak: a plain adaptive call silently accepts whenever the first rule's
+# nodes all miss the peak (node spacing ~5e-3 of the interval), which happens
+# for any peak narrower than that -- the same estimator blindness that lets
+# fixed-tolerance quadrature miscount near a boundary in the first place.
+function _endpoint_ladder_quad(g, a::Float64, b::Float64, rtol, atol)
+    L = b - a
+    pts = Float64[a]
+    k = 1
+    while L * 2.0^-k > max(1e-13 * abs(b), 1e-300) && k < 46
+        push!(pts, b - L * 2.0^-k)
+        k += 1
+    end
+    push!(pts, b)
+    I, _ = quadgk(g, pts...; rtol = rtol, atol = atol)
+    return I
+end
+
+# Tracking-free evaluation of (phase integrand, d|D|²/dω) at ω. The repair
+# quadrature and the callback's condition checks sample ω out of march order,
+# so they must not touch the minimum-tracking state of the Val{1}/Val{N}
+# integrands.
+function _integrand_and_dsq_deriv(D_func::NyquistWrapper{P}, p::P, σ, ω::Float64) where {P}
+    pure_ω = max(ω, 1e-9)
+    dual_ω = ForwardDiff.Dual{StandardTag}(pure_ω, 1.0)
+    res = D_func(σ + 1im * dual_ω, p)
+    rv, iv = real(res), imag(res)
+    re_val, im_val = ForwardDiff.value(rv), ForwardDiff.value(iv)
+    dre, dim = ForwardDiff.partials(rv, 1), ForwardDiff.partials(iv, 1)
+    d_sq = re_val^2 + im_val^2
+    g = if d_sq < 1e-20 || !isfinite(d_sq) || !(isfinite(dre) && isfinite(dim))
+        _safe_darg(re_val, im_val, dre, dim)
+    else
+        (dim * re_val - dre * im_val) / d_sq
+    end
+    return g, 2 * (re_val * dre + im_val * dim)
+end
+
+function _peak_repair_callback(D_func::NyquistWrapper{P}, p::P, σ, rtol, atol) where {P}
+    enabled = Ref(true)
+    hits = Ref(0)
+    last_t = Ref(-Inf)
+    stuck = Ref(0)
+    cond = function (y, ω, integ)
+        # once disabled, a constant sign means no further crossings to find
+        enabled[] || return 1.0
+        return _integrand_and_dsq_deriv(D_func, p, σ, ω)[2]
+    end
+    aff = function (integ)
+        hits[] += 1
+        a, b = integ.tprev, integ.t
+        # A root within ~1e3 ulps of the σ-line makes the callback re-fire in
+        # place (the crossing cannot be stepped past in Float64); such a point
+        # is numerically ON the boundary, so stop repairing and let the march
+        # finish -- a graceful wrong count instead of a maxiters hang.
+        stuck[] = (abs(b - last_t[]) <= 100 * eps(b)) ? stuck[] + 1 : 0
+        last_t[] = b
+        if stuck[] >= 3 || hits[] > 1000
+            enabled[] = false
+            return nothing
+        end
+        if b > a
+            g = w -> _integrand_and_dsq_deriv(D_func, p, σ, w)[1]
+            I = _endpoint_ladder_quad(g, a, b, rtol, atol)
+            integ.u = SA[integ.uprev[1] + I]
+            u_modified!(integ, true)
+        end
+        return nothing
+    end
+    return ContinuousCallback(cond, aff; affect_neg! = nothing,
+        rootfind = OrdinaryDiffEq.SciMLBase.LeftRootFind,
+        save_positions = (false, false))
+end
+
 """
     calculate_unstable_roots_direct(D_func, p, σ=0.0; ...)
 
@@ -249,17 +334,39 @@ with a zero Jacobian and no stiffness whatsoever; a high-order explicit
 Runge-Kutta pair is therefore both the most accurate and (at tight
 tolerances) the fastest choice. Low-order pairs can lose the count entirely
 at loose tolerances.
+
+`peak_repair = true` (default `false`) arms a detect-and-repair safeguard
+against peak skipping, the march's one silent failure mode (a step over a
+near-singular integrand peak loses exactly ±π, shifting the count by one
+while the integer residual stays clean; see [`peak_skip_suspect`](@ref)).
+A rootfinding callback stops the march at every minimum of `|D(σ+iω)|²` —
+the peak's exact center, detectable from far away because `|D|²` dips over
+an O(1) frequency range even when the peak itself is arbitrarily narrow.
+The phase increment of the step that crossed the minimum is then recomputed
+by quadrature forced into the located peak with a geometric breakpoint
+ladder, and the march restarts at the peak, where step control resolves the
+right half on its own. Measured on the showcase system at default
+tolerances: the plain march miscounts within `~1e-6` of a Hopf boundary,
+the adaptive-quadrature backend silently miscounts at `~1e-10`, while the
+repaired march stays correct down to `~1e-10` — at ≈ 2.6× the march
+cost (per-step condition checks; the repair quadrature itself is ~0.2% of
+evaluations). Off by default: a generic chart pixel gains nothing. Enable
+it to re-check pixels flagged by [`peak_skip_suspect`](@ref) or when
+evaluating deliberately close to a boundary. Roots within ~1e3 ulps of the
+σ-line would make the callback re-fire in place; a stuck guard then
+disables further repairs for the rest of that march (a point that close is
+numerically on the boundary).
 """
 function calculate_unstable_roots_direct(@nospecialize(D_func), p::P, σ::S=0.0;
     n_roots_to_track=1,
-    ω_max=1e6, reltol=1e-5, abstol=1e-5, solver=Vern9(), 
-    n_power_max=nothing, verbosity=0, maxiters=Int(1e6),
+    ω_max=1e6, reltol=1e-5, abstol=1e-5, solver=Vern9(),
+    n_power_max=nothing, verbosity=0, maxiters=Int(1e6), peak_repair=false,
     refinement_method=:Newton, refinement_steps=4, refinement_degree=3) where {P, S}
 
     wrapped_D = (D_func isa NyquistWrapper{P}) ? D_func : NyquistWrapper{P}(D_func)
-    return _calculate_unstable_roots_direct_impl(wrapped_D, p, σ, Val(n_roots_to_track); 
-        ω_max=ω_max, reltol=reltol, abstol=abstol, solver=solver, 
-        n_power_max=n_power_max, verbosity=verbosity, maxiters=maxiters,
+    return _calculate_unstable_roots_direct_impl(wrapped_D, p, σ, Val(n_roots_to_track);
+        ω_max=ω_max, reltol=reltol, abstol=abstol, solver=solver,
+        n_power_max=n_power_max, verbosity=verbosity, maxiters=maxiters, peak_repair=peak_repair,
         refinement_method=refinement_method, refinement_steps=refinement_steps, refinement_degree=refinement_degree)
 end
 
@@ -270,9 +377,9 @@ function _calculate_unstable_roots_direct_impl(D_func::NyquistWrapper{P}, p::P, 
 end
 
 # Val{0}: Maximum Speed (No tracking)
-function _calculate_unstable_roots_direct_impl(D_func::NyquistWrapper{P}, p::P, σ::S, ::Val{0}; 
-    ω_max=1e6, reltol=1e-5, abstol=1e-5, solver=Vern9(), 
-    n_power_max=nothing, verbosity=0, maxiters=Int(1e6),
+function _calculate_unstable_roots_direct_impl(D_func::NyquistWrapper{P}, p::P, σ::S, ::Val{0};
+    ω_max=1e6, reltol=1e-5, abstol=1e-5, solver=Vern9(),
+    n_power_max=nothing, verbosity=0, maxiters=Int(1e6), peak_repair=false,
     refinement_method=:Newton, refinement_steps=4, refinement_degree=3) where {P, S}
 
     function phase_ode(y, params, ω)
@@ -294,7 +401,8 @@ function _calculate_unstable_roots_direct_impl(D_func::NyquistWrapper{P}, p::P, 
     end
 
     prob = ODEProblem{false}(phase_ode, SA[0.0], (0.0, Float64(ω_max)))
-    sol = solve(prob, solver, reltol=reltol, abstol=abstol, save_everystep=false, saveat=[ω_max], maxiters=maxiters)
+    cb = peak_repair ? _peak_repair_callback(D_func, p, σ, reltol, abstol) : nothing
+    sol = solve(prob, solver, reltol=reltol, abstol=abstol, save_everystep=false, saveat=[ω_max], maxiters=maxiters, callback=cb)
 
     n_pow = n_power_max === nothing ? _get_n_power_max_impl(D_func, p, σ) : n_power_max
     Z_raw = -(1.0 / π) * sol.u[end][1] + n_pow / 2.0
@@ -303,9 +411,9 @@ function _calculate_unstable_roots_direct_impl(D_func::NyquistWrapper{P}, p::P, 
 end
 
 # Val{1}: Single Root Tracking
-function _calculate_unstable_roots_direct_impl(D_func::NyquistWrapper{P}, p::P, σ::S, ::Val{1}; 
-    ω_max=1e6, reltol=1e-5, abstol=1e-5, solver=Vern9(), 
-    n_power_max=nothing, verbosity=0, maxiters=Int(1e6),
+function _calculate_unstable_roots_direct_impl(D_func::NyquistWrapper{P}, p::P, σ::S, ::Val{1};
+    ω_max=1e6, reltol=1e-5, abstol=1e-5, solver=Vern9(),
+    n_power_max=nothing, verbosity=0, maxiters=Int(1e6), peak_repair=false,
     refinement_method=:Newton, refinement_steps=4, refinement_degree=3) where {P, S}
 
     min_D_sq = Ref(Inf)
@@ -342,7 +450,8 @@ function _calculate_unstable_roots_direct_impl(D_func::NyquistWrapper{P}, p::P, 
     end
 
     prob = ODEProblem{false}(phase_ode, SA[0.0], (0.0, Float64(ω_max)))
-    sol = solve(prob, solver, reltol=reltol, abstol=abstol, save_everystep=false, saveat=[ω_max], maxiters=maxiters)
+    cb = peak_repair ? _peak_repair_callback(D_func, p, σ, reltol, abstol) : nothing
+    sol = solve(prob, solver, reltol=reltol, abstol=abstol, save_everystep=false, saveat=[ω_max], maxiters=maxiters, callback=cb)
 
     n_pow = n_power_max === nothing ? _get_n_power_max_impl(D_func, p, σ) : n_power_max
     Z_raw = -(1.0 / π) * sol.u[end][1] + n_pow / 2.0
@@ -357,9 +466,9 @@ function _calculate_unstable_roots_direct_impl(D_func::NyquistWrapper{P}, p::P, 
 end
 
 # Val{N}: Multi-Root Tracking
-function _calculate_unstable_roots_direct_impl(D_func::NyquistWrapper{P}, p::P, σ::S, ::Val{N}; 
-    ω_max=1e6, reltol=1e-5, abstol=1e-5, solver=Vern9(), 
-    n_power_max=nothing, verbosity=0, maxiters=Int(1e6),
+function _calculate_unstable_roots_direct_impl(D_func::NyquistWrapper{P}, p::P, σ::S, ::Val{N};
+    ω_max=1e6, reltol=1e-5, abstol=1e-5, solver=Vern9(),
+    n_power_max=nothing, verbosity=0, maxiters=Int(1e6), peak_repair=false,
     refinement_method=:Newton, refinement_steps=4, refinement_degree=3) where {P, S, N}
 
     d_sq_vec = MVector{N, Float64}(fill(Inf, N))
@@ -460,7 +569,8 @@ function _calculate_unstable_roots_direct_impl(D_func::NyquistWrapper{P}, p::P, 
     end
 
     prob = ODEProblem{false}(phase_ode, SA[0.0], (0.0, Float64(ω_max)))
-    sol = solve(prob, solver, reltol=reltol, abstol=abstol, save_everystep=false, saveat=[ω_max], maxiters=maxiters)
+    cb = peak_repair ? _peak_repair_callback(D_func, p, σ, reltol, abstol) : nothing
+    sol = solve(prob, solver, reltol=reltol, abstol=abstol, save_everystep=false, saveat=[ω_max], maxiters=maxiters, callback=cb)
 
     n_pow = n_power_max === nothing ? _get_n_power_max_impl(D_func, p, σ) : n_power_max
     Z_raw = -(1.0 / π) * sol.u[end][1] + n_pow / 2.0
@@ -521,7 +631,7 @@ function calculate_unstable_roots_p_vec(@nospecialize(D_func), params_vec::Abstr
     n_roots_to_track=1,
     σ::S=0.0, ω_max=1e6, reltol=1e-5, abstol=1e-5, solver=Vern9(),
     n_power_max=nothing,
-    parameter_independent_nmax=true, verbosity=0, maxiters=Int(1e6),
+    parameter_independent_nmax=true, verbosity=0, maxiters=Int(1e6), peak_repair=false,
     refinement_method=:Newton, refinement_steps=4, refinement_degree=3) where {P, S}
 
     wrapped_D = (D_func isa NyquistWrapper{P}) ? D_func : NyquistWrapper{P}(D_func)
@@ -545,9 +655,9 @@ function calculate_unstable_roots_p_vec(@nospecialize(D_func), params_vec::Abstr
         end
 
         @inbounds Threads.@threads for i in 1:n_params
-            zi, zr, md, es, wc = _calculate_unstable_roots_direct_impl(wrapped_D, params_vec[i], σ, Val(1); 
-                ω_max=ω_max, reltol=reltol, abstol=abstol, solver=solver, 
-                n_power_max=n_pow_fixed, verbosity=verbosity, maxiters=maxiters,
+            zi, zr, md, es, wc = _calculate_unstable_roots_direct_impl(wrapped_D, params_vec[i], σ, Val(1);
+                ω_max=ω_max, reltol=reltol, abstol=abstol, solver=solver,
+                n_power_max=n_pow_fixed, verbosity=verbosity, maxiters=maxiters, peak_repair=peak_repair,
                 refinement_method=refinement_method, refinement_steps=refinement_steps, refinement_degree=refinement_degree)
             Z_ints[i] = zi
             Z_raws[i] = zr
@@ -565,9 +675,9 @@ function calculate_unstable_roots_p_vec(@nospecialize(D_func), params_vec::Abstr
         end
 
         @inbounds Threads.@threads for i in 1:n_params
-            zi, zr = _calculate_unstable_roots_direct_impl(wrapped_D, params_vec[i], σ, Val(0); 
-                ω_max=ω_max, reltol=reltol, abstol=abstol, solver=solver, 
-                n_power_max=n_pow_fixed, verbosity=verbosity, maxiters=maxiters,
+            zi, zr = _calculate_unstable_roots_direct_impl(wrapped_D, params_vec[i], σ, Val(0);
+                ω_max=ω_max, reltol=reltol, abstol=abstol, solver=solver,
+                n_power_max=n_pow_fixed, verbosity=verbosity, maxiters=maxiters, peak_repair=peak_repair,
                 refinement_method=refinement_method, refinement_steps=refinement_steps, refinement_degree=refinement_degree)
             Z_ints[i] = zi
             Z_raws[i] = zr
@@ -589,8 +699,8 @@ function calculate_unstable_roots_p_vec(@nospecialize(D_func), params_vec::Abstr
         V = Val(n_roots_to_track)
         @inbounds Threads.@threads for i in 1:n_params
             zi, zr, md, es, wc = _calculate_unstable_roots_direct_impl(wrapped_D, params_vec[i], σ, V;
-                ω_max=ω_max, reltol=reltol, abstol=abstol, solver=solver, 
-                n_power_max=n_pow_fixed, verbosity=verbosity, maxiters=maxiters,
+                ω_max=ω_max, reltol=reltol, abstol=abstol, solver=solver,
+                n_power_max=n_pow_fixed, verbosity=verbosity, maxiters=maxiters, peak_repair=peak_repair,
                 refinement_method=refinement_method, refinement_steps=refinement_steps, refinement_degree=refinement_degree)
             Z_ints[i] = zi
             Z_raws[i] = zr
