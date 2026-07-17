@@ -50,6 +50,39 @@ non-integer} order for neutral ($\Dfun\sim\lam^{n}(1+\sum_j b_j
 $n$, and Section~\ref{sec:phaseode} shows that it can be estimated
 numerically without any structural knowledge.
 
+\paragraph{Fractional orders and the branch cut.} Fractional powers deserve an
+explicit word here, because they are the one class in which the choice of
+integration line is a question of validity rather than of cost. The principal
+branch of $\lam^{\mu}$ is analytic on the complex plane cut along the negative
+real axis, and $\Dfun$ inherits that cut: for the fractional controller of
+Appendix~\ref{app:gallery} the two sides of the cut differ by
+$|\Dfun(-0.25+\ii0^{+})-\Dfun(-0.25-\ii0^{-})|=\FracJump$, so $\Dfun$ is
+\emph{discontinuous} there, not merely non-smooth.
+
+The cut lies on the \emph{negative} reals, hence entirely outside the closed
+right half-plane, and the imaginary axis itself is untouched: the same
+measurement across the axis returns a jump of $\FracAxisJump$ -- identically
+zero -- at every frequency tested. The choice $\sigma=0$ is therefore
+admissible, and this is not a technicality about one example: it is what makes
+the whole class available to the method. Two provisos come with it. First, the
+branch \emph{point} at $\lam=0$ lies \emph{on} the contour, where
+$\Dfun'\sim\mu\lam^{\mu-1}$ diverges for $\mu<1$; the resulting integrand
+singularity $\sim\omega^{\mu-1}$ is integrable for $\mu>0$, and the standard
+indentation of the contour around the origin contributes nothing in the limit
+\emph{provided} $\Dfun(0)\neq0$. Second, when $\Dfun(0)=0$ the origin is itself
+a characteristic root sitting on the contour and no count is defined -- for the
+fractional PI controller $\Dfun(0)=k_i$, so the line $k_i=0$ crossing that
+chart is exactly such a degeneracy, and the package reports it through the
+invalid marker of Section~\ref{sec:integerness} rather than by inventing a
+number. That the construction then works is checkable rather than assumed: over
+$\FracResidN$ points of the two fractional charts the integer residual has
+median $\FracResidMed$ and never exceeds $\FracResidMax$.
+
+A \emph{shifted} line ($\sigma<0$) is a different matter entirely: it encloses
+the segment $[\sigma,0]$ of the cut, $\Dfun$ is not analytic inside the
+contour, and the argument principle does not apply. Appendix~\ref{app:gallery}
+demonstrates what that costs.
+
 \subsection{Counting unstable roots on a half-line}\label{sec:counting}
 
 Let the integration line $\lam=\sigma+\ii\omega$ be free of characteristic

@@ -48,10 +48,25 @@ CASES_G = [
 # ---------------------------------------------------------------------------
 branch_rows = Tuple[]
 let D = make_D_gao(0.4), p = (2.0, 3.0)
+    # (a) The cut IS there, on the negative reals.
     for ε in (1e-6, 1e-9, 1e-12)
         a = D(-0.25 + ε * im, p); b = D(-0.25 - ε * im, p)
         push!(branch_rows, ("jump_at_-0.25", ε, abs(a - b), NaN, NaN))
         @info "branch cut: D across the negative real axis" ε jump = abs(a - b)
+    end
+    # (b) ... and it is NOT on the imaginary axis, which is why sigma = 0 works.
+    for ω in (1e-3, 1.0, 10.0)
+        a = D(1e-30 + ω * im, p); b = D(-1e-30 + ω * im, p)
+        push!(branch_rows, ("jump_across_imaginary_axis", ω, abs(a - b), NaN, NaN))
+        @info "no cut on the imaginary axis" ω jump = abs(a - b)
+    end
+    # (c) The branch POINT at s = 0 does lie ON the contour: the integrand
+    #     diverges like omega^(mu-1). That is integrable for mu > 0, and the
+    #     indentation around it contributes nothing PROVIDED D(0) != 0 --
+    #     D(0) = ki here, so the ki = 0 line of this very chart is degenerate.
+    for p2 in ((2.0, 3.0), (2.0, 0.0))
+        push!(branch_rows, ("D_at_origin", p2[1], p2[2], abs(D(1e-300 + 0im, p2)), NaN))
+        @info "D at the branch point" kp = p2[1] ki = p2[2] absD0 = abs(D(1e-300 + 0im, p2))
     end
 end
 # (wrapped in a function: a bare top-level loop puts the counters in soft scope)
@@ -76,10 +91,29 @@ end
 n_viol, n_tot = count_violations!(branch_rows)
 @warn "gamma-stability monotonicity Z(-0.5) >= Z(0) violated (branch cut)" n_viol n_tot
 write_csv("fractional_branchcut", ["kind", "a", "b", "c", "d"], branch_rows)
+# Does the sigma = 0 count actually land on integers, despite the divergent
+# integrand at the origin? That is the empirical test of admissibility.
+resid_stats = map(CASES_G) do case
+    D = make_D_gao(case.lam)
+    params = vec([(kp, ki) for kp in LinRange(case.kpr..., 30),
+                            ki in LinRange(max(case.kir[1], 0.5), case.kir[2], 30)])
+    _, Zraw = calculate_unstable_roots_p_vec(D, params; ω_max = 1e4, n_roots_to_track = 0)
+    r = abs.(Zraw .- round.(Zraw))
+    @info "sigma=0 residual on the fractional chart" case.lam median_r = median(r) max_r = maximum(r)
+    (lam = case.lam, med = median(r), mx = maximum(r), n_unc = count(>(0.25), r), n = length(r))
+end
+for s in resid_stats
+    push!(branch_rows, ("sigma0_residual", s.lam, s.med, s.mx, Float64(s.n_unc)))
+end
 write_macros("fractional_numbers", [
     "FracJump"     => @sprintf("%.1f", branch_rows[1][3]),
     "FracViol"     => string(n_viol),
     "FracViolTot"  => string(n_tot),
+    "FracAxisJump" => @sprintf("%.0e", maximum(r[3] for r in branch_rows
+                                               if r[1] == "jump_across_imaginary_axis")),
+    "FracResidMed" => tex_sci_bare(maximum(s.med for s in resid_stats)),
+    "FracResidMax" => @sprintf("%.3f", maximum(s.mx for s in resid_stats)),
+    "FracResidN"   => string(sum(s.n for s in resid_stats)),
 ])
 
 fig = Figure(size = (W_FULL, W_FULL * 0.42))

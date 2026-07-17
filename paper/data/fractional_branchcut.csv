@@ -2,6 +2,11 @@ kind,a,b,c,d
 jump_at_-0.25,1.0e-6,14.941050317017218,NaN,NaN
 jump_at_-0.25,1.0e-9,14.94105232639069,NaN,NaN
 jump_at_-0.25,1.0e-12,14.941052328400083,NaN,NaN
+jump_across_imaginary_axis,0.001,0.0,NaN,NaN
+jump_across_imaginary_axis,1.0,0.0,NaN,NaN
+jump_across_imaginary_axis,10.0,0.0,NaN,NaN
+D_at_origin,2.0,3.0,15.0,NaN
+D_at_origin,2.0,0.0,1.0999999999999832e-119,NaN
 monotonicity_violation,0.4,-1.0,0.1071428571428571,1.0
 monotonicity_violation,0.4,5.5,-0.5,1.0
 monotonicity_violation,0.4,6.0,-0.5,1.0
