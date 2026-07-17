@@ -63,7 +63,10 @@ set_theme!(paper_theme())
 
 # Fixed color conventions used by EVERY stability chart in the paper
 const CHART_CMAP = :viridis
-const BOUNDARY_COLOR = :black
+# White, not black: the stability boundary often runs along the deep-unstable
+# side of the chart (maroon, near-black) where a black line disappears. White
+# reads against every colour of the bilinear map -- red, maroon, blue, green.
+const BOUNDARY_COLOR = :white
 const BOUNDARY_LW = 1.2
 
 "Combined interpolable coloring: Z in the unstable domain, sigma_est in the stable one."
