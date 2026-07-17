@@ -3,17 +3,17 @@
 \toprule
 system & back-end & chart (100$\times$100) & per point [$\mu$s] & alloc [MB] & wrong $Z$ \\
 \midrule
-2nd-order, no delay & ODE Vern9 + root (default) & 53.5\,ms & 5 & 40 & 0 \\
-2nd-order, no delay & ODE Vern9, Z only & 46.3\,ms & 5 & 17 & 0 \\
-2nd-order, no delay & QuadGK, Z only & 33.0\,ms & 3 & 27 & 0 \\
-2nd-order, no delay & fixed-step (500) & 36.3\,ms & 4 & 1 & 4324 \\
-4th-order + delay & ODE Vern9 + root (default) & 411.7\,ms & 41 & 40 & 0 \\
-4th-order + delay & ODE Vern9, Z only & 408.9\,ms & 41 & 17 & 0 \\
-4th-order + delay & QuadGK, Z only & 182.6\,ms & 18 & 38 & 0 \\
-4th-order + delay & fixed-step (500) & 100.9\,ms & 10 & 1 & 4556 \\
-2-DOF DAE showcase & ODE Vern9 + root (default) & 1.90\,s & 190 & 40 & 0 \\
-2-DOF DAE showcase & ODE Vern9, Z only & 1.85\,s & 185 & 17 & 0 \\
-2-DOF DAE showcase & QuadGK, Z only & 2.60\,s & 260 & 407 & 0 \\
-2-DOF DAE showcase & fixed-step (500) & 83.4\,ms & 8 & 1 & 6097 \\
+2nd-order, no delay & ODE Vern9 + root (default) & 49.9\,ms & 5 & 25 & 0 \\
+2nd-order, no delay & ODE Vern9, Z only & 48.5\,ms & 5 & 27 & 0 \\
+2nd-order, no delay & QuadGK, Z only & 33.4\,ms & 3 & 27 & 0 \\
+2nd-order, no delay & fixed-step (500) & 35.9\,ms & 4 & 1 & 4324 \\
+4th-order + delay & ODE Vern9 + root (default) & 418.3\,ms & 42 & 25 & 0 \\
+4th-order + delay & ODE Vern9, Z only & 426.8\,ms & 43 & 27 & 0 \\
+4th-order + delay & QuadGK, Z only & 185.0\,ms & 18 & 38 & 0 \\
+4th-order + delay & fixed-step (500) & 103.5\,ms & 10 & 1 & 4556 \\
+2-DOF DAE showcase & ODE Vern9 + root (default) & 1.97\,s & 197 & 25 & 0 \\
+2-DOF DAE showcase & ODE Vern9, Z only & 1.89\,s & 189 & 27 & 0 \\
+2-DOF DAE showcase & QuadGK, Z only & 2.77\,s & 277 & 407 & 0 \\
+2-DOF DAE showcase & fixed-step (500) & 85.5\,ms & 9 & 1 & 6097 \\
 \bottomrule
 \end{tabular}

@@ -104,8 +104,11 @@ end
 
 """
 Threaded sweep tracking several roots per point; the `sigma` field holds the
-maximal real part of the refined tracked roots (the dominant root), which is
-the correct spectral-gap measure even where root branches cross.
+maximal real part of the tracked roots (the dominant root), which is the
+correct spectral-gap measure even where root branches cross. Uses the package
+default refinement (`:Linear`, i.e. the raw first-order estimate): it is the
+smoothest field over a chart, which is exactly what the interpolable colouring
+wants. Pass `refinement_method` through `kwargs` for an accurate map.
 """
 # nroots = 15 by default: the tracker keeps the N DEEPEST |D| dips (robust --
 # a spurious minimum with a garbage sigma estimate is shallow and gets evicted),
@@ -114,10 +117,10 @@ the correct spectral-gap measure even where root branches cross.
 # pixels, so its sigma jumps -- the speckle in the stable colouring. Measured on
 # the showcase: 5 -> 15 roots drops the rough pixels 78 -> 34 (the real
 # branch-crossing floor), tolerance-independent, and the march cost is flat in
-# nroots (only the final refinement grows, ~0.1 s). Ranking the buffer by real
-# part instead would be cheaper but is fragile: the sigma estimate blows up at
-# degenerate minima (|D'| ~ 0, common in transcendental D), and a real-part
-# ranked buffer would surface that garbage. Depth-ranking avoids it.
+# nroots. Ranking the buffer by real part instead would be cheaper but is
+# fragile: the raw sigma estimate blows up at degenerate minima (|D'| ~ 0,
+# common in transcendental D), and a real-part ranked buffer would surface that
+# garbage. Depth-ranking avoids it.
 function sweep_grid_dominant(D_func, xv, yv; nroots = 15, kwargs...)
     params = vec([(x, y) for x in xv, y in yv])
     calculate_unstable_roots_p_vec(D_func, params[1:1]; n_roots_to_track = nroots, kwargs...)  # JIT warm-up

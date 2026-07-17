@@ -122,10 +122,11 @@ practically unbounded frequency range, with the integrand evaluated exactly
 by forward-mode automatic differentiation~\cite{revels2016forward}.
 (ii)~The location of the
 characteristic root closest to the integration line -- normally the rightmost
-root -- is estimated \emph{during the same sweep} at negligible extra cost, and
-can be refined to machine precision by a few Newton corrections for a few
-percent of the cost; tracking several local minima yields multiple roots at
-once. This ordered march, and not accuracy or speed, is what distinguishes
+root -- is estimated \emph{during the same sweep} at negligible extra cost; the
+first-order estimate is the smooth, sign-correct default, and an optional local
+polish (Taylor, Newton or a combined mode) sharpens it toward machine precision
+for a few percent of the cost when an accurate root is wanted. Tracking several
+local minima yields multiple roots at once. This ordered march, and not accuracy or speed, is what distinguishes
 the phase ODE from plain quadrature: a recursively subdividing quadrature
 visits the frequencies out of order and cannot recognize the minima at all.
 (iii)~The root

@@ -226,10 +226,15 @@ building the coloring and the boundary objective from it removes the artefact
 at its source. For the count itself the caveat is immaterial, since near the
 boundary the crossing root always produces the global minimum.
 
-\subsection{Higher-order root refinement}\label{sec:refinement}
+\subsection{Optional higher-order root refinement}\label{sec:refinement}
 
-The tracked estimate $(\sest,\west)$ is refined by local corrections built
-from the same automatic derivatives. Writing the Taylor expansion at
+The raw tracked estimate $(\sest,\west)$ -- one Newton step off the minimum
+of $|\Dfun|$ -- is the method's \emph{default} root output, and deliberately
+so. It is first-order accurate, but it is the \emph{smoothest} field over a
+parameter chart (a single formula evaluated at every pixel), it is the
+cheapest, and its \emph{sign} -- all the stability classification needs -- is
+already correct. When an accurate rightmost root is wanted, the same automatic
+derivatives drive an optional local polish. Writing the Taylor expansion at
 $\hat\lam=\sest+\ii\west$,
 \begin{equation}\label{eq:taylor}
   \Dfun(\hat\lam+\Delta) \approx \Dfun + \Dfun_\lam\,\Delta
@@ -238,34 +243,38 @@ $\hat\lam=\sest+\ii\west$,
 \end{equation}
 where the subscripts denote derivatives with respect to $\lam$ evaluated at
 $\hat\lam$, the package offers (i) \emph{Newton--Raphson} iterations
-$\Delta=-\Dfun/\Dfun_\lam$ (four steps by default); (ii) a single
-\emph{quadratic} (Poly-2) or (iii) \emph{cubic} (Poly-3) Taylor solve, where
-the root of the local cubic closest to $\hat\lam$ is selected via the
-eigenvalues of its companion matrix. The first derivative is exact (automatic
-differentiation); the higher derivatives are obtained by central differences
-of the exact first derivative, which avoids the compilation cost of nested
-dual numbers while keeping truncation errors far below the achievable
-accuracy. An optional mode freezes $\west$ and corrects only the real part,
-which is convenient when the frequency is pinned by measurement. The
-accuracy and cost of the variants are quantified in
-Section~\ref{sec:showcase-roots}; the practical summary is that every
-variant costs a few percent of the phase integration, that Newton is
-simultaneously the cheapest and the most accurate -- hence the default --
-and that a few steps converge to machine precision near the
-boundary.\footnote{Like any local root iteration, neither correction is
-guaranteed to converge: a Newton step can leave the basin of the intended
-root, a Taylor root can be spurious when the seed is poor, and at a
-defective (multiple) root, where $\Dfun_\lam\to0$, Newton's convergence
-degrades from quadratic to linear. The implementation therefore rejects
-runaway steps, which suffices in every case study of this paper; should a
-chart nevertheless show isolated irregular root estimates, refinement can be
-switched off (\code{refinement\_method=:Linear}) to fall back to the raw
-tracked estimate, whose sign -- the quantity the charts rely on -- is
-unaffected.} If several estimates are tracked, the
-same refinement applied to each returns a set of dominant roots, comparable
-to the output of dedicated root finders such as
-QPmR~\cite{vyhlidal2009mapping} -- with the difference that here the root
-solve is a cheap post-processing step of the stability count.
+$\Delta=-\Dfun/\Dfun_\lam$; (ii) a single \emph{quadratic} (Poly-2) or (iii)
+\emph{cubic} (Poly-3) Taylor solve, where the root of the local polynomial
+closest to $\hat\lam$ is selected via the eigenvalues of its companion matrix;
+and (iv) a \emph{combined} mode that runs the polynomial and Newton polishes
+and keeps, per root, the candidate with the smallest $|\Dfun|$. The first
+derivative is exact (automatic differentiation); the higher derivatives are
+central differences of that exact first derivative, which avoids the
+compilation cost of nested dual numbers. Each polish is \emph{monotone}: it is
+accepted only if it lowers $|\Dfun|$ below the seed, otherwise the raw estimate
+is returned, so refinement can help but never degrade the estimate.
+
+Which polish is best is genuinely system-dependent, and quantifying it
+requires a method-independent yardstick -- the residual $|\Dfun(\hat\lam)|$
+(distance to an actual root) and comparison against an independent
+semi-discretization reference, \emph{not} agreement with one polish taken as
+truth. On a smooth quasi-polynomial the Newton iteration reaches machine
+precision; on a rational characteristic function, near the poles of the
+plant frequency response, a Newton step can settle on a neighbouring root and
+speckle an otherwise smooth chart, where the Taylor polishes stay put. The
+combined mode is the robust choice -- lowest residual on every system tested --
+at the sum of the individual costs, which is still only about
+$\RefCombOver\%$ over the raw solve. These trade-offs are measured in
+Section~\ref{sec:showcase-roots} and Fig.~\ref{fig:refinement}. The practical
+guidance is simple and matches the design goal of a single, generally valid
+setting: leave refinement off for charts, turn it on when a specific rightmost
+root matters, and read a precise decay-rate \emph{map} from the $\sigma$-level
+contours of Section~\ref{sec:sigmacontours} rather than from a per-pixel polish.
+
+If several estimates are tracked, the same refinement applied to each returns
+a set of dominant roots, comparable to the output of dedicated root finders
+such as QPmR~\cite{vyhlidal2009mapping} -- with the difference that here the
+root solve is a cheap, optional post-processing step of the stability count.
 
 \subsection{Self-validating error estimate}\label{sec:integerness}
 

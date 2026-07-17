@@ -1,3 +1,3 @@
 form,n_points,chart_time_s,per_point_us,mem_mb
-hand-derived (no determinant, no AD),10000,1.9041799,190.41799,40.34949779510498
-automatic extraction from the RHS,10000,38.6718637,3867.1863700000004,0.0
+hand-derived (no determinant, no AD),10000,1.971651,197.1651,24.794123649597168
+automatic extraction from the RHS,10000,41.4745668,4147.456679999999,0.0

@@ -127,10 +127,10 @@ truncation is exposed by the integer-residual diagnostic below, never hidden.
   are visually near-identical even at $10^{-2}$, where the count is already
   uncertain: the tolerance buys certainty rather than appearance, cf.\
   Fig.~\ref{fig:errorfield} and Table~\ref{tab:tolerance}. (The count
-  $\Zint$ is never refined -- the Newton polish of
+  $\Zint$ is never refined -- the optional polish of
   Section~\ref{sec:refinement} only touches the root estimate $\sest$ that
-  colours the stable interior -- so the residuals and miscount columns
-  measure the integrator alone.) To isolate the integrator, this study uses
+  colours the stable interior, and these charts use the raw estimate anyway --
+  so the residuals and miscount columns measure the integrator alone.) To isolate the integrator, this study uses
   $\wmax=10^{6}$ (rather than the $10^{4}$ that suffices for the chart) so
   that the truncated tail does not mask the two tightest tolerances, and
   evaluates the reduced form~\eqref{eq:showcasered} of the same
@@ -283,51 +283,64 @@ same number, the diagnostic tells the user which dial to turn next.
 \begin{figure}[tb]
   \centering
   \maybefig{fig_refinement}{\linewidth}
-  \caption{Rightmost-root accuracy. (a)~Zoom on the dominant root at one
-  parameter point. The two curves are the zero-level sets
-  $\Real\Dfun(\lam)=0$ (blue) and $\Imag\Dfun(\lam)=0$ (orange) in the
-  complex $\lam$-plane: a characteristic root satisfies both conditions
-  simultaneously, i.e.\ it is exactly their intersection. Cross: raw tracked
-  estimate $(\sest,\west)$; red dot: the refined root; diamond: reference.
-  (b--e)~Error maps $\log_{10}|\lam-\lam_{\mathrm{ref}}|$ of the refinement
-  variants over the chart plane. Titles quote the cost \emph{per parameter
-  point of the complete solve}: the ``Linear'' panel gives the phase
-  integration alone, the others the percentage this refinement adds on top of
-  it.}\label{fig:refinement}
+  \caption{The optional root refinement, judged by method-independent metrics
+  on two systems -- a smooth quasi-polynomial (the showcase, top) and a
+  rational frequency-response function with poles (the turning-lobe example of
+  Appendix~\ref{app:gallery}, middle). Error \emph{fields}: per-pixel
+  $\log_{10}|\Real\lam_{\mathrm{dom}}-\sigma_{\mathrm{SD}}|$, the deviation of
+  the dominant root's real part from an independent semi-discretization
+  reference, for the raw estimate and the four polishes. Error \emph{bars}
+  (bottom): distributions, over the stable pixels, of the residual
+  $|\Dfun(\lam_{\mathrm{dom}})|$ (distance to an actual root) and of the same
+  $\sigma$-deviation, for each system, together with the per-point cost. The
+  raw estimate is the smoothest field; every polish sharpens the smooth
+  system uniformly, while on the rational system Newton becomes patchy (it can
+  jump to a neighbouring root near a pole) and the Taylor and combined polishes
+  stay consistent.}\label{fig:refinement}
 \end{figure}
 
 \begin{table}[tb]
   \centering
-  \caption{Accuracy and cost of the root-refinement variants over the
-  chart-plane sweep of Fig.~\ref{fig:refinement} (reference: 15 Newton
-  iterations). Times are per parameter point for the complete solve
-  (integration plus refinement); the overhead column is measured against the
-  unrefined solve.}\label{tab:refinement}
+  \caption{Median error of the dominant root's decay rate $\Real\lam$ against
+  a semi-discretization reference, for each refinement, on the smooth
+  (showcase) and non-smooth (turning) systems of Fig.~\ref{fig:refinement}.
+  Times are per parameter point for the complete solve; overhead is measured
+  against the raw (unrefined) solve.}\label{tab:refinement}
   \maybeinput{tables/tab_refinement.tex}
 \end{table}
 
-Figure~\ref{fig:refinement} quantifies the rightmost-root estimates. The
-raw tracked value $(\sest,\west)$ -- one Newton step evaluated at the
-integrand minimum -- is near-exact on the stability boundary, accurate to
-a few percent in its vicinity, and degrades farther away, exactly as
-predicted in Section~\ref{sec:tracking}. What the timings settle is that the
-choice of refinement is essentially free: measured per parameter point
-against the complete solve, every variant adds only a few percent, because
-the refinement costs a handful of extra evaluations of $\Dfun$ against the
-thousands the frequency march already spent. Four Newton iterations are in
-fact \emph{cheaper} than a cubic Taylor solve -- the latter needs finite
-differences and a companion-matrix eigenvalue problem -- and are
-simultaneously the most accurate, reaching machine precision over almost the
-whole plane (Table~\ref{tab:refinement}). Since it is both better and
-cheaper, Newton-4 is the package default; the Taylor variants remain
-available and are the more conservative choice when a seed is poor, because
-they select the nearest root of a local polynomial rather than following the
-Newton flow. For stability charts the hierarchy is in any case exactly
-right: on the boundary, where the root position defines the chart, the
-estimates are near-exact; deep inside the domains, where only the sign
-matters, even the raw estimate suffices. Tracking $N_r>1$ minima returns
-several dominant roots at once, which is what the multi-root recipe of
-Section~\ref{sec:performance-sd} exploits.
+Figure~\ref{fig:refinement} quantifies the rightmost-root estimates, and it
+does so with a yardstick that favours no method: the residual
+$|\Dfun(\lam)|$, which measures distance to an actual root, and the deviation
+from an independent semi-discretization solve.\footnote{This matters for the
+verdict. A natural but circular way to rank the polishes is to measure each
+against many Newton iterations taken as ``truth'', which trivially makes a few
+Newton steps look best; the metrics used here avoid that trap.} Three facts
+follow. First, the raw tracked value $(\sest,\west)$ -- one Newton step at the
+integrand minimum -- already places the decay rate to
+$\RefShowRaw$ on the smooth system and $\RefTurnRaw$ on the rational one, and
+its sign, all a chart needs, is correct throughout; being a single closed-form
+expression per pixel, it is also the smoothest field, which is why it is the
+default. Second, when an accurate root is wanted, no single polish wins
+everywhere: on the smooth system Newton reaches machine precision
+($\RefShowNewton$), but on the rational system, where the plant response has
+poles near the imaginary axis, a Newton step can settle on a neighbouring root
+and its error \emph{worsens} to $\RefTurnNewton$ -- the patchiness visible in
+its field -- whereas the cubic Taylor polish stays consistent at
+$\RefTurnPolyThree$. The combined mode, which keeps the smallest-residual
+candidate per root, is the robust compromise ($\RefTurnComb$ on the rational
+system) and never speckles. Third, the choice is nearly free: refinement costs
+a handful of extra evaluations of $\Dfun$ against the thousands the march
+already spent, so even the combined mode adds only about $\RefCombOver\%$ to
+the complete solve (Table~\ref{tab:refinement}). For stability charts the
+practical hierarchy is therefore simple: leave refinement off -- the smooth
+default -- since deep inside the domains only the sign matters and on the
+boundary the raw estimate is already near-exact; turn on a polish (the cubic
+Taylor or the combined mode) when a specific rightmost root matters; and for a
+precise decay-rate \emph{map} use the $\sigma$-contours of
+Section~\ref{sec:showcase-sigma} rather than a per-pixel polish. Tracking
+$N_r>1$ minima returns several dominant roots at once, which is what the
+multi-root recipe of Section~\ref{sec:performance-sd} exploits.
 
 \subsection{Decay-rate design: $\sigma$-contours}\label{sec:showcase-sigma}
 

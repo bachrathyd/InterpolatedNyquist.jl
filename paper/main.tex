@@ -41,6 +41,12 @@
 \IfFileExists{generated/repair_numbers.tex}{\input{generated/repair_numbers.tex}}{%
   \newcommand{\RepairPlainFailDP}{[dp]}\newcommand{\RepairDeepDP}{[dp]}%
   \newcommand{\RepairCostFactor}{[x]}\newcommand{\RepairGKFactor}{[x]}}
+% refinement accuracy vs SD reference (paper/scripts/studies/s04_refinement.jl)
+\IfFileExists{generated/refinement_numbers.tex}{\input{generated/refinement_numbers.tex}}{%
+  \newcommand{\RefShowRaw}{[e]}\newcommand{\RefShowPolyTwo}{[e]}%
+  \newcommand{\RefShowNewton}{[e]}\newcommand{\RefTurnRaw}{[e]}%
+  \newcommand{\RefTurnPolyThree}{[e]}\newcommand{\RefTurnNewton}{[e]}%
+  \newcommand{\RefTurnComb}{[e]}\newcommand{\RefCombOver}{[x]}}
 
 \begin{document}
 
