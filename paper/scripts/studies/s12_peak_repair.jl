@@ -32,7 +32,7 @@ rep_counted(D) = (λ, p) -> (REP_COUNTER[] += 1; D(λ, p))
 # at tight tolerances. Deterministic for this D; cached like every grid.
 Pb_rep = with_cache("s12_hopf_point_v1") do
     sig(P) = calculate_unstable_roots_direct(D_REP, (P, D_GAIN_REP); ω_max = 1e6,
-        reltol = 1e-10, abstol = 1e-10, refinement_steps = 15)[4]
+        reltol = 1e-10, abstol = 1e-10, refinement_method = :Newton, refinement_steps = 15)[4]
     lo, hi = 2.0, 3.0
     for _ in 1:60
         m = (lo + hi) / 2

@@ -50,15 +50,26 @@ import MDBM
         end
         p = (-0.3, 2.0)
 
+        # This test checks the absolute-COORDINATE (σ-shift) logic, which is
+        # orthogonal to refinement accuracy, so it selects a polish explicitly
+        # (the chart-level default is now :Linear -- the raw first-order estimate,
+        # good to ~1e-3 for this quadratic, which the σ = 0 assertions below also
+        # exercise).
+
         # σ = 0 (imaginary axis): stable, closest root at -0.3 + 2im
-        Z, Z_raw, min_D, es, wc = calculate_unstable_roots_direct(D_pair, p; ω_max=1e4)
+        Z, Z_raw, min_D, es, wc = calculate_unstable_roots_direct(D_pair, p; ω_max=1e4,
+            refinement_method=:Newton)
         @test Z == 0
         @test isapprox(es, -0.3; atol=1e-6)
         @test isapprox(wc, 2.0; atol=1e-3)
+        # raw (default) estimate is first-order but still lands near the root
+        _, _, _, es_raw, _ = calculate_unstable_roots_direct(D_pair, p; ω_max=1e4)
+        @test isapprox(es_raw, -0.3; atol=1e-2)
 
         # σ = -1: both roots lie right of the shifted line -> Z = 2,
         # and σ_est must be the ABSOLUTE real part (-0.3), not relative to the line.
-        Z, Z_raw, min_D, es, wc = calculate_unstable_roots_direct(D_pair, p, -1.0; ω_max=1e4)
+        Z, Z_raw, min_D, es, wc = calculate_unstable_roots_direct(D_pair, p, -1.0; ω_max=1e4,
+            refinement_method=:Newton)
         @test Z == 2
         @test isapprox(es, -0.3; atol=1e-6)
         @test isapprox(wc, 2.0; atol=1e-3)
@@ -161,21 +172,27 @@ import MDBM
         # A characteristic function that overflows if evaluated far from the
         # origin -- exactly what a runaway Newton step causes, and the overflow
         # then happens INSIDE the user's D where no guard of ours can intercept.
-        # A refinement step must therefore stay local.
+        # A refinement step must therefore stay local: it must not throw, and it
+        # must not report a runaway iterate as a root. Under the monotone
+        # contract a polish is accepted only if it lowers |D| below the seed;
+        # a hopeless far seed (where D overflows on every nearby iterate)
+        # therefore comes back as NaN -- the invalid-root marker -- NOT a
+        # fabricated finite root and NOT Inf. Both outcomes are acceptable here;
+        # the failure the test guards against is a throw or a non-finite blow-up.
         function D_fragile(λ::T, p) where T
             abs(λ) > 1e50 && error("D evaluated absurdly far from the seed: $λ")
             return (λ^2 + p[1] * λ + p[2])^60      # overflows for |λ| ≳ 1e5
         end
-        for m in (:Newton, :Polynomial)
+        for m in (:Newton, :Polynomial, :Combined)
             for seed in (0.5 + 1.0im, 1e3 + 0.0im, -2.0 + 5.0im)
                 r = refine_roots(D_fragile, (0.5, 1.0), seed; method = m,
                                  steps = 6, degree = 3)
-                @test isfinite(abs(r))
+                @test isnan(r) || abs(r) < 1e6      # local root or an honest give-up
             end
         end
         # a seed where D' vanishes must not throw either
         D_flat(λ::T, p) where T = one(T) + 0 * λ + 0 * p[1]
-        @test isfinite(abs(refine_roots(D_flat, (1.0, 1.0), 1.0 + 1.0im; method = :Newton, steps = 4)))
+        @test !isinf(abs(refine_roots(D_flat, (1.0, 1.0), 1.0 + 1.0im; method = :Newton, steps = 4)))
     end
 
     @testset "QuadGK panel coverage over a wide frequency window" begin
@@ -229,8 +246,10 @@ import MDBM
             return (λ - r1) * (λ - conj(r1)) * (λ - r2) * (λ - conj(r2))
         end
         p2 = (-0.3, 2.0, -1.5, 8.0)
+        # exercises refined-root accuracy, so it selects Newton explicitly
+        # (the chart-level default is now :Linear)
         Z, Zr, mds, ess, wcs = calculate_unstable_roots_direct(D_two, p2, -2.0;
-            n_roots_to_track=5, ω_max=1e3, refinement_steps=8)
+            n_roots_to_track=5, ω_max=1e3, refinement_method=:Newton, refinement_steps=8)
         @test Z == 4                        # all four roots right of Re λ = -2
         found = [complex(ess[i], wcs[i]) for i in eachindex(ess) if isfinite(ess[i])]
         @test any(r -> abs(r - (-0.3 + 2.0im)) < 1e-6, found)
@@ -248,7 +267,7 @@ import MDBM
         # cubic (it lands at 2.0 for this D), so allow enough polish steps.
         D_real(λ::T, p) where T = (λ - p[1]) * (λ + 1) * (λ + 2)
         Z, Zr, mds, ess, wcs = calculate_unstable_roots_direct(D_real, (0.5,);
-            n_roots_to_track=3, ω_max=1e3, refinement_steps=12)
+            n_roots_to_track=3, ω_max=1e3, refinement_method=:Newton, refinement_steps=12)
         @test Z == 1
         good = findall(isfinite, ess)
         i = good[argmax(ess[good])]
@@ -379,9 +398,9 @@ import MDBM
             peak_repair=true)
         @test Z_rep == Z_plain + 1                  # the lost ±π is recovered
         @test abs(Zraw_rep - round(Zraw_rep)) < 1e-2
-        # the repaired march restarts exactly at the minimum, so the refined
-        # root must sit essentially on the axis
-        @test abs(es_rep) < 1e-6
+        # the repaired march restarts at the minimum, so even the raw (default)
+        # estimate sits near the axis (first-order accurate, hence 1e-2)
+        @test abs(es_rep) < 1e-2
 
         # stable side of the same Hopf point: plain march overcounts by one,
         # repair fixes it
@@ -402,7 +421,7 @@ import MDBM
         Z_n, _, _, es_v, _ = calculate_unstable_roots_direct(D_show, p_hard;
             n_roots_to_track=5, peak_repair=true)
         @test Z_n == Z_rep
-        @test maximum(filter(isfinite, es_v)) > -1e-6   # dominant root ~ on axis
+        @test maximum(filter(isfinite, es_v)) > -1e-2   # dominant root ~ on axis (raw)
 
         # vectorized sweep forwards the kwarg (Val{0} fast path included)
         Zv, _ = calculate_unstable_roots_p_vec(D_show, [p_hard, p_easy];
