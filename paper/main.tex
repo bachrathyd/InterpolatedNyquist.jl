@@ -28,6 +28,10 @@
   \newcommand{\FemLemmaSpeedup}{[x]}\newcommand{\FemLemmaAgree}{[e]}%
   \newcommand{\FemRawMag}{[m]}\newcommand{\FemRawOrder}{[n]}%
   \newcommand{\FemRawResid}{[r]}\newcommand{\FemRdResid}{[r]}}
+% fractional branch-cut evidence (paper/scripts/studies/s10_fractional_controller.jl)
+\IfFileExists{generated/fractional_numbers.tex}{\input{generated/fractional_numbers.tex}}{%
+  \newcommand{\FracJump}{[j]}\newcommand{\FracViol}{[n]}%
+  \newcommand{\FracViolTot}{[n]}}
 % hand-derived vs auto-extracted cost (paper/scripts/studies/s06_grid_timings.jl)
 \IfFileExists{generated/extraction_numbers.tex}{\input{generated/extraction_numbers.tex}}{%
   \newcommand{\ExtractRatio}{[x]}\newcommand{\ExtractHandT}{[t]}%

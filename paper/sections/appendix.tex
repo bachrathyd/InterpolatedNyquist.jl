@@ -257,9 +257,11 @@ keeping in mind when comparing against time-domain simulations.
   stabilizing regions of the fractional PI controller
   $C(s)=k_p+k_i/s^{\mu}$ for the fractional delayed plant
   $G(s)=5\ee^{-0.4s}/(10 s^{0.5}+1)$, for $\mu=0.4$ (left) and
-  $\mu=1.5$ (right). Curves: boundaries for prescribed stability
-  degrees traced by the shifted-line criterion; white markers: the test
-  points tabulated in~\cite{gao2017robust}.}\label{fig:fraccontroller}
+  $\mu=1.5$ (right). White curve: the traced stability boundary
+  ($\sigma=0$); white markers: the test points tabulated
+  in~\cite{gao2017robust}. Only $\sigma=0$ is shown, and deliberately so: the
+  shifted line of Section~\ref{sec:counting} is \emph{not} admissible for this
+  class -- see the text.}\label{fig:fraccontroller}
 \end{figure}
 
 \paragraph{A.11 Fractional controller chart from the literature.}
@@ -270,7 +272,40 @@ D-decomposition; see also the related design
 charts~\cite{hamamci2007algorithm,hohenbichler2008comments,ruszewski2008stability,cheng2006stabilization}.
 The closed-loop characteristic function
 $\Dfun(s)=s^{\mu}(10s^{0.5}+1)+5\ee^{-0.4s}(k_p s^{\mu}+k_i)$ is a
-one-line model definition for the present method; the traced boundaries and
-the classification of the published test points agree with the reference,
-including the shrinking regions of prescribed stability degree obtained
-with shifted integration lines.
+one-line model definition for the present method, and the traced boundary and
+the classification of the published test points agree with the reference.
+
+\paragraph{Where the shifted line stops working, and how one notices.}
+The $\gamma$-stability construction of Section~\ref{sec:counting} does \emph{not}
+extend to this class, and the reason is worth stating precisely because the
+failure is silent in the count and loud in the picture. The principal branch of
+$s^{\mu}$ carries a cut along the negative real axis: at $s=-0.25$ the two
+sides of the cut differ by $|\Dfun(-0.25+\ii0^{+})-\Dfun(-0.25-\ii0^{-})|
+=\FracJump$, i.e.\ $\Dfun$ is not merely non-smooth there but discontinuous. A
+contour enclosing $\Real\lam>-\sigma_{\deg}$ with $\sigma_{\deg}>0$ therefore
+encloses the segment $[-\sigma_{\deg},0]$ of that cut, $\Dfun$ is not analytic
+inside it, and the argument principle -- which is what
+Eq.~\eqref{eq:count} rests on -- simply does not apply. The
+resulting numbers are not approximations of the right answer; they are answers
+to no question.
+
+The symptom is diagnostic rather than subtle. Counts obtained on a shifted line
+must obey a monotonicity that needs no theory to state: moving the line to the
+left can only ever \emph{add} roots to its right, so $\Zint(-\sigma)$ must be
+non-decreasing in $\sigma$. On this system it is not -- over a $15\times15$
+scan of both charts, $\FracViol$ of $\FracViolTot$ points return
+$\Zint(-0.5)<\Zint(0)$ -- and plotting several $\sigma_{\deg}$ levels makes
+this visible immediately: the contours \emph{cross}, which no family of nested
+$\gamma$-stability regions can do. Earlier drafts of this figure showed exactly
+that.
+
+The $\sigma=0$ boundary, on the other hand, is sound, and the distinction is
+not a matter of degree: the cut lies on the \emph{negative} reals, entirely
+outside the closed right half-plane. Only the branch point at the origin
+touches the contour, and $\Dfun(0)=k_i$ is finite and non-zero there, so the
+usual small indentation around it contributes nothing in the limit. This is why
+the stability chart reproduces the literature while the stability-\emph{degree}
+chart cannot be offered at all. Extending the criterion to fractional systems
+with a prescribed decay rate requires a contour that respects the cut -- a
+keyhole, or a formulation in the $w=s^{1/m}$ plane -- and is left for future
+work (Section~\ref{sec:conclusion}).

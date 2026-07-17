@@ -1,0 +1,7 @@
+kind,a,b,c,d
+jump_at_-0.25,1.0e-6,14.941050317017218,NaN,NaN
+jump_at_-0.25,1.0e-9,14.94105232639069,NaN,NaN
+jump_at_-0.25,1.0e-12,14.941052328400083,NaN,NaN
+monotonicity_violation,0.4,-1.0,0.1071428571428571,1.0
+monotonicity_violation,0.4,5.5,-0.5,1.0
+monotonicity_violation,0.4,6.0,-0.5,1.0

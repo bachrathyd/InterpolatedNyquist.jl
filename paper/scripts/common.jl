@@ -101,11 +101,31 @@ combined_metric(Z_mat, sigma_mat) = Z_mat .+ (Z_mat .== 0) .* sigma_mat
 #     unstable:  Z small              -> RED ........ Z_max     -> BLACK
 const COL_STABLE_ZERO = RGBf(0.15, 0.35, 1.00)   # sigma -> 0-   (marginally stable)
 const COL_STABLE_FAR  = RGBf(0.00, 0.75, 0.25)   # sigma -> min  (deeply stable)
-const COL_UNSTAB_ZERO = RGBf(1.00, 0.15, 0.10)   # Z = 1         (barely unstable)
-const COL_UNSTAB_FAR  = RGBf(0.00, 0.00, 0.00)   # Z = Z_max     (badly unstable)
-const BILINEAR_CMAP = cgrad([COL_STABLE_FAR, COL_STABLE_ZERO,
-                             COL_UNSTAB_ZERO, COL_UNSTAB_FAR],
-                            [0.0, 0.4999, 0.5001, 1.0])
+const COL_UNSTAB_ZERO = RGBf(1.00, 0.15, 0.10)   # Z -> 0+       (barely unstable)
+# Deep maroon rather than pure black at the far end: on charts with only two or
+# three distinct counts the top of the ramp covers large areas, and pure black
+# turns them into heavy voids that dominate the figure and swallow any
+# annotation drawn over them.
+const COL_UNSTAB_FAR  = RGBf(0.28, 0.00, 0.05)   # Z = Z_max     (badly unstable)
+# Built by sampling each branch SEPARATELY, rather than as a 4-stop gradient
+# with the stops crowded around 0.5: any sample landing inside that tiny window
+# is a blue-red average, i.e. purple, and it appears as a violet fringe just
+# inside the stable domain -- exactly where sigma is closest to zero and the
+# chart is read most carefully. Sampling per branch makes the break exact: the
+# last stable level is blue, the first unstable level is red, and no
+# intermediate colour exists.
+const BILINEAR_CMAP = let n = 256
+    lerp(a, b, t) = RGBf(a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t,
+                         a.b + (b.b - a.b) * t)
+    cols = map(range(0, 1; length = n)) do t
+        if t < 0.5
+            lerp(COL_STABLE_FAR, COL_STABLE_ZERO, t / 0.5)   # green -> blue
+        else
+            lerp(COL_UNSTAB_ZERO, COL_UNSTAB_FAR, (t - 0.5) / 0.5)  # red -> maroon
+        end
+    end
+    cgrad(cols)
+end
 
 """
     bilinear_metric(Z_mat, sigma_mat; σ_ref=nothing, Z_ref=nothing) -> (T, sigma_min, Z_max)
