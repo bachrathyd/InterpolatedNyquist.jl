@@ -23,13 +23,13 @@ nP, nD = FAST[] ? (45, 35) : (90, 70)
 Pv = LinRange(SHOWCASE_PRANGE..., nP)
 Dv = LinRange(SHOWCASE_DRANGE..., nD)
 
-grid = with_cache("s01_domgrid_$(nP)x$(nD)") do
-    sweep_grid_dominant(D_showcase, Pv, Dv; ω_max = 1e4)
+grid = with_cache("s01_domgrid_h_$(nP)x$(nD)") do
+    sweep_grid_dominant(D_showcase_reduced, Pv, Dv; ω_max = 1e4)
 end
 C = combined_metric(grid.Z, grid.sigma)
 
-bnd = with_cache("s01_mdbm") do
-    mdbm_boundary(D_showcase, SHOWCASE_PRANGE, SHOWCASE_DRANGE;
+bnd = with_cache("s01_mdbm_h") do
+    mdbm_boundary(D_showcase_reduced, SHOWCASE_PRANGE, SHOWCASE_DRANGE;
         ngrid = 30, Niter = FAST[] ? 3 : 4, ω_max = 1e4)
 end
 
@@ -65,9 +65,9 @@ save_fig(fig, "fig_showcase_hybrid")
 # ---------------------------------------------------------------------------
 # 2. Method walkthrough figure at the two marked points
 # ---------------------------------------------------------------------------
-sol_s = phase_ode_solution(D_showcase, p_stable; ω_max = 1e4)
-sol_u = phase_ode_solution(D_showcase, p_unstable; ω_max = 1e4)
-n_s = get_n_power_max(D_showcase, p_stable)
+sol_s = phase_ode_solution(D_showcase_reduced, p_stable; ω_max = 1e4)
+sol_u = phase_ode_solution(D_showcase_reduced, p_unstable; ω_max = 1e4)
+n_s = get_n_power_max(D_showcase_reduced, p_stable)
 Zraw_s = -sol_s.u[end][1] / π + n_s / 2
 Zraw_u = -sol_u.u[end][1] / π + n_s / 2
 @info "walkthrough winding numbers" Zraw_s Zraw_u nsteps_s = length(sol_s.t) nsteps_u = length(sol_u.t)

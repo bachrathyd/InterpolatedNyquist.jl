@@ -7,8 +7,12 @@
 
 include(joinpath(@__DIR__, "systems.jl"))
 
-const ZOO_WMAX = 1e3
-const ZOO_TIME_CAP = 5.0     # stop escalating a method when a sweep exceeds this
+const ZOO_WMAX = 1e4         # the standard chart window used everywhere
+# Stop escalating a method as soon as one sweep exceeds this. One second per
+# benchmark is plenty to place a method on the Pareto plot, and the point of
+# the plot is which method is on the front -- not a precise timing of a setting
+# nobody should use. This keeps the whole study to a few minutes.
+const ZOO_TIME_CAP = 1.0
 
 nZ = FAST[] ? 20 : 40
 Pz = LinRange(-2.0, 4.0, nZ)
@@ -40,7 +44,12 @@ end
 
 function zoo_run!(method::String, control::Float64, sweep::Function)
     haskey(existing_t, (method, control)) && return existing_t[(method, control)]
-    res = benchmark_sweep(sweep; repeats = 3)
+    # time one sweep first; only repeat it if it is cheap enough to be worth
+    # sharpening (the cap below then stops the escalation anyway)
+    sweep()                                   # warm-up / JIT
+    t1 = @elapsed sweep()
+    res = t1 < ZOO_TIME_CAP ? benchmark_sweep(sweep; repeats = 3) :
+                              (t_med = t1, mem_bytes = 0)
     Z_raws = sweep()
     err = abs.(Z_raws .- Zref)
     open(ZOO_CSV, "a") do io
@@ -51,8 +60,13 @@ function zoo_run!(method::String, control::Float64, sweep::Function)
     return res.t_med
 end
 
-# fixed-step trapezoid: control = number of steps
-for steps in round.(Int, 10 .^ (1.5:0.25:4.5))
+# Fixed-step trapezoid: control = number of steps. The escalation stops early
+# and deliberately. The purpose of these rows is to establish that a uniform
+# grid is off the Pareto front -- its mean error converges with the step count
+# while its worst error over the chart does not, because the peak of a root
+# near the line is arbitrarily narrow. Once that is visible there is nothing to
+# learn from spending minutes on step counts nobody would use.
+for steps in round.(Int, 10 .^ (1.5:0.25:4.0))
     t = zoo_run!("fixed-step", Float64(steps), () ->
         calculate_unstable_roots_fixed_step_p_vec(D_fourth, params_zoo;
             ω_max = ZOO_WMAX, steps = steps)[2])

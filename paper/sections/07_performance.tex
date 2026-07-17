@@ -137,23 +137,21 @@ one of the ten thousand counts matches a tight reference. With an
 same grid resolves about twice as fast, and on those systems still without a
 single wrong count.
 
-The showcase DDAE in the same table is the instructive entry, and it carries
-the paper's sharpest practical lesson. Its accurate chart takes \emph{fifty
-minutes}, its exploratory chart \emph{forty-eight seconds} -- a factor of
-sixty for three miscounted pixels out of ten thousand. The reason is the
-compounding of two costs that Section~\ref{sec:phaseode} treats separately:
-this system's delayed \emph{velocity} feedback makes the phase ripple decay
-only like $\omega^{-1}$, so raising $\wmax$ from $10^{4}$ to $10^{6}$ forces
-the march to resolve two further decades of it, and every one of those
-evaluations runs a $7\times7$ dual-number determinant through the automatic
-extraction. Neither factor is a defect of the counting method; both are
-choices the user makes. And the correct choice here is the cheap one: the
-tail truncated at $\wmax=10^{4}$ contributes $\approx0.2/\wmax=2\cdot10^{-5}$
-to $\Zraw$, five orders of magnitude below the rounding threshold, so the
-expensive chart buys nothing but certainty about pixels that were already
-right. This is what the asymmetric guidance of Section~\ref{sec:phaseode}
-means in practice -- be generous with $\wmax$ when the ripple decays fast,
-where it is nearly free, and frugal when it does not.
+Two settings decide the cost of a chart, and neither is a property of the
+counting method -- both are choices the user makes. They are worth quantifying
+on the showcase DDAE, because together they span three orders of magnitude.
+The first is $\wmax$: this system's delayed \emph{velocity} feedback makes the
+phase ripple decay only like $\omega^{-1}$, so every extra decade must
+genuinely be resolved, and $\wmax=10^{6}$ costs some sixty times $\wmax=10^{4}$
+-- while buying nothing, since the tail truncated at $10^{4}$ contributes
+$\approx0.2/\wmax=2\cdot10^{-5}$ to $\Zraw$, five orders of magnitude below the
+rounding threshold. The second is the form of $\Dfun$: the automatic
+extraction is a factor of $\ExtractRatio$ dearer per evaluation than the
+hand-derived expression (Table~\ref{tab:extraction}). Choosing badly on both
+counts turns the $1.89$\,s chart of Table~\ref{tab:presets} into a
+fifty-minute one. This is what the asymmetric guidance of
+Section~\ref{sec:phaseode} means in practice -- be generous with $\wmax$ when
+the ripple decays fast, where it is nearly free, and frugal when it does not.
 
 Table~\ref{tab:gridtimings} reports the cost of a \emph{complete}
 $100\times100$ chart -- ten thousand parameter points -- on a
@@ -165,12 +163,10 @@ entire hybrid workflow (colored sweep plus MDBM boundary) finishes well
 inside one second -- genuinely interactive. The last column is worth a
 glance: the fixed-step back-end is the fastest entry for the delayed systems
 and gets thousands of the ten thousand counts wrong, for the reason given in
-Section~\ref{sec:alternatives}. For the showcase DDAE every evaluation runs
-the automatic extraction of Section~\ref{sec:extraction}, i.e.\ a $7\times7$
-dual-number determinant, and the chart takes on the order of a minute at
-this resolution; the convenience of never deriving $\Dfun$ by hand thus
-costs roughly two orders of magnitude against a hand-coded characteristic
-function, which the same table quantifies. Memory stays modest throughout
+Section~\ref{sec:alternatives}. The showcase DDAE is listed with its
+hand-derived characteristic function, as are all figures in this paper; what
+the automatic extraction of Section~\ref{sec:extraction} would cost instead
+is measured separately in Table~\ref{tab:extraction}. Memory stays modest throughout
 because the phase ODE carries a single scalar state and the sweep stores
 only the five result fields; no large matrices are formed at any point.
 Cold start is a one-time cost dominated by package loading: in a fresh Julia

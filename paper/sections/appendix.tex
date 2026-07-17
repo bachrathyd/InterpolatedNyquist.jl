@@ -8,21 +8,35 @@ chart. The complete scripts, grid resolutions and timings are part of the
 package repository.
 
 \paragraph{These charts are the speed argument.} Sections~\ref{sec:showcase}
-and~\ref{sec:performance} make the accuracy case, at $\wmax=10^{6}$ and
-tolerances down to $10^{-8}$. The gallery answers the complementary question
--- \emph{what does a chart cost when one simply wants to see the picture?} --
-and so every panel here is computed at settings chosen for speed rather than
-for certainty: a generous $100\times100$ background grid, but $\wmax$ only a
-few decades above the highest resonance and a tolerance of $10^{-4}$, one
-decade looser than the package default. Each panel is annotated with the
-measured wall-clock cost of both stages. At these settings the count of a few
-boundary-adjacent pixels may be off by one (Section~\ref{sec:showcase-tolerance});
-that is precisely the trade a first exploration should make, it is invisible
-at chart resolution, and the traced boundary -- which is built from $\sest$,
-not from the count -- is unaffected. The MDBM traces start from a $7\times7$
-mesh and refine six times, reaching a $448\times448$-equivalent boundary
-resolution -- roughly four times the background grid -- from $49$ blanket
+and~\ref{sec:performance} make the accuracy case, with tolerances down to
+$10^{-8}$. The gallery answers the complementary question -- \emph{what does a
+chart cost when one simply wants to see the picture?} -- and so every panel
+here is computed at settings chosen for speed: a generous $100\times100$
+background grid, and a tolerance of $10^{-4}$, one decade looser than the
+package default. Each panel is annotated with the measured wall-clock cost of
+both stages. At these settings the count of a few boundary-adjacent pixels may
+be off by one (Section~\ref{sec:showcase-tolerance}); that is precisely the
+trade a first exploration should make, it is invisible at chart resolution,
+and the traced boundary -- which is built from $\sest$, not from the count --
+is unaffected. The MDBM traces start from a $7\times7$ mesh and refine until
+the boundary carries roughly four times the resolution of the background grid
+($448\times448$-equivalent on the $100\times100$ panels), from $49$ blanket
 evaluations.
+
+$\wmax=10^{4}$, the standard window of this paper, is used wherever it helps.
+Five panels use less, for reasons of substance: the phase ripple of a
+\emph{neutral} system (A.4--A.6) does not decay at all, so a wider window buys
+no accuracy whatsoever -- what bounds the error is $\arcsin|a|/\pi$, not
+$\wmax$ -- while for the beam and the finite element bar (A.8--A.9) the
+Kelvin--Voigt damping makes the integrand vanish like
+$\ee^{-\sqrt{\omega/2c}}$ long before $\omega=200$. Rather than assert that
+these choices are adequate, each panel reports the measured integer
+residual~\eqref{eq:eps} of its own grid
+(\code{data/gallery\_timings.csv}): on every \emph{retarded} panel the median
+residual is $\sim10^{-4}$ and at most a handful of the $10^4$ points are
+uncertain, which is what a well-chosen $\wmax$ looks like. On the neutral
+panels the median is $\approx0.1$ -- the irreducible tail oscillation
+discussed in Section~\ref{sec:integerness}, not a symptom of truncation.
 
 \paragraph{Reading the charts.} Every panel uses the same convention, the
 combined field $C$ of~\eqref{eq:coloring}: $\sest$ where $\Zint=0$, and
@@ -167,8 +181,8 @@ The same bar discretized by 29 linear finite elements, with stiffness-
 proportional (Kelvin--Voigt) damping $\mat C=c\mat K$. The naive formulation
 is the raw determinant $\det(\lam^2\mat M+\lam\mat C+\mat K + K_p\,h^{-1}
 \ee^{-\lam\tau}\,\vect e_{29}\vect e_1^{\!\top})$ ($h$ = element length), and
-it is a poor one: it grows like $\lam^{58}$, reaches magnitudes of
-$\sim\FemRawMag$ before overflowing, and forces the counting formula onto an
+it is a poor one: it grows like $\lam^{58}$, reaches $\sim\FemRawMag$ at the top of the
+integration range, and forces the counting formula onto an
 estimate of a very large leading order -- which leaves an integer residual of
 $\FemRawResid$, a rounded count barely better than a coin toss. Factoring out
 the open-loop dynamics,
@@ -189,10 +203,9 @@ scalar return difference $1+L(\lam)$ of~\eqref{eq:beam},
                 \vect e_1^{\!\top}\mat Q_0(\lam)^{-1}\vect e_{29},
 \end{equation}
 which replaces a full $29\times29$ solve \emph{and} a $29\times29$
-determinant by one solve with a single right-hand side: agreeing with the
-determinant form to $\FemLemmaAgree$ relative and $\FemLemmaSpeedup$ times
-faster per evaluation, which is what makes this panel affordable at the
-gallery's resolution. For multi-input feedback of
+determinant by one solve with a single right-hand side: it agrees with the
+determinant form to $\FemLemmaAgree$ relative and is $\FemLemmaSpeedup$ times
+cheaper per evaluation. For multi-input feedback of
 rank $r$ the same lemma leaves an $r\times r$ determinant. This is the
 large-system economy that Section~\ref{sec:conclusion} points to, and it is
 worth more than any tuning of the integrator. One caveat is inherited from classical loop analysis: an exact

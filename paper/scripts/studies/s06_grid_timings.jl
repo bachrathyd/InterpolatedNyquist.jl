@@ -16,10 +16,17 @@ const NGRID = FAST[] ? 40 : 100           # 100 x 100 chart everywhere
 const MDBM_N0 = 20                        # initial mesh per axis
 const MDBM_IT = 4                         # refinement levels
 
+# omega_max = 1e4 for every chart in the paper: three decades above the highest
+# resonance of these systems, leaving a truncated tail five orders below the
+# rounding threshold. (For the 4th-order system, whose ripple decays like
+# omega^-3, 1e6 would be nearly free -- 1426 vs 1330 evaluations -- but for the
+# showcase, whose ripple decays like 1/omega, it costs ~60x. One window,
+# chosen for the harder case.)
+const WMAX_CHART = 1e4
 CASES = [
-    ("2nd-order, no delay", D_simple,   (-1.0, 2.0), (-1.0, 2.0), 1e3),
-    ("4th-order + delay",   D_fourth,   (-2.0, 4.0), (-2.0, 5.0), 1e6),
-    ("2-DOF DAE showcase",  D_showcase, SHOWCASE_PRANGE, SHOWCASE_DRANGE, 1e4),
+    ("2nd-order, no delay", D_simple,   (-1.0, 2.0), (-1.0, 2.0), WMAX_CHART),
+    ("4th-order + delay",   D_fourth,   (-2.0, 4.0), (-2.0, 5.0), WMAX_CHART),
+    ("2-DOF DAE showcase",  D_showcase_reduced, SHOWCASE_PRANGE, SHOWCASE_DRANGE, WMAX_CHART),
 ]
 
 BACKENDS = [
@@ -37,7 +44,7 @@ BACKENDS = [
 # backends must match everywhere; the fixed-step backend (hand-set resolution,
 # real-time floor) reports its mismatches honestly in the table.
 # ---------------------------------------------------------------------------
-timing_rows = with_cache("s06_grid_timings_v3_$(NGRID)") do
+timing_rows = with_cache("s06_grid_timings_v4_$(NGRID)") do
     out = Tuple[]
     for (cname, D, xr, yr, wm) in CASES
         xv = LinRange(xr..., NGRID); yv = LinRange(yr..., NGRID)
@@ -50,7 +57,13 @@ timing_rows = with_cache("s06_grid_timings_v3_$(NGRID)") do
             if n_wrong > 0 && !occursin("fixed-step", bname)
                 error("s06: backend '$bname' returned $n_wrong wrong counts on '$cname'")
             end
-            res = benchmark_sweep(() -> runner(D, params, wm); repeats = FAST[] ? 2 : 5)
+            # Repeat only cheap sweeps. The DAE showcase chart takes ~1 min per
+            # sweep; five repeats of it per back-end would spend twenty minutes
+            # refining a number whose leading digits are already stable.
+            f = () -> runner(D, params, wm)
+            t1 = @elapsed f()
+            res = t1 < 5.0 ? benchmark_sweep(f; repeats = FAST[] ? 2 : 5) :
+                             (t_med = t1, t_std = 0.0, mem_bytes = 0)
             push!(out, (cname, bname, length(params), res.t_med,
                 res.t_med / length(params) * 1e6, res.t_std, res.mem_bytes / 2^20,
                 n_wrong))
@@ -66,7 +79,7 @@ write_csv("grid_timings",
 # ---------------------------------------------------------------------------
 # MDBM boundary tracing: cost AND what resolution it buys
 # ---------------------------------------------------------------------------
-mdbm_rows = with_cache("s06_mdbm_stats_v2") do
+mdbm_rows = with_cache("s06_mdbm_stats_v3") do
     out = Tuple[]
     for (cname, D, xr, yr, wm) in CASES
         f = () -> mdbm_boundary(D, xr, yr; ngrid = MDBM_N0, Niter = MDBM_IT, ω_max = wm)
@@ -86,27 +99,28 @@ write_csv("mdbm_stats",
      "time_s", "saving_factor"], mdbm_rows)
 
 # ---------------------------------------------------------------------------
-# The paper's two operating points, measured on the SAME 100x100 chart:
-#   ACCURATE -- the safe defaults (omega_max = 1e6, tol = 1e-5): certified
-#               counts, reference-quality; the claim is "seconds".
-#   FAST     -- an exploratory preset (omega_max = 1e4, tol = 1e-4): a few
-#               boundary-adjacent counts may be off by one; the claim is
-#               "a tenth of a second at the same grid size".
+# The paper's two operating points, measured on the SAME 100x100 chart and the
+# SAME window (omega_max = 1e4). They differ only in the tolerance, which is
+# the knob a user actually turns:
+#   ACCURATE -- tol = 1e-5, the package default: certified counts.
+#   FAST     -- tol = 1e-3, for a first exploration: a few boundary-adjacent
+#               counts may be off by one, and the traced boundary is unmoved.
 # Both are reported against the same reference count so the price of the fast
 # preset is stated, not hidden.
 # ---------------------------------------------------------------------------
-preset_rows = with_cache("s06_presets_v1_$(NGRID)") do
+preset_rows = with_cache("s06_presets_v2_$(NGRID)") do
     out = Tuple[]
     for (cname, D, xr, yr, wm) in CASES
         xv = LinRange(xr..., NGRID); yv = LinRange(yr..., NGRID)
         params = vec([(x, y) for x in xv, y in yv])
-        # Reference counts. ω_max = 1e6 with tol = 1e-8 is deliberately
-        # over-tight; on the DAE showcase (7x7 dual determinant, ω^-1 ripple)
-        # that single sweep already costs the better part of an hour, which is
-        # itself the point of the accurate/fast split below.
-        Z_ref, _ = calculate_unstable_roots_p_vec(D, params; ω_max = 1e6,
+        # Reference counts at the same window, tight tolerance.
+        Z_ref, _ = calculate_unstable_roots_p_vec(D, params; ω_max = WMAX_CHART,
             n_roots_to_track = 0, reltol = 1e-8, abstol = 1e-8)
-        for (pname, pwm, ptol) in (("accurate", 1e6, 1e-5), ("fast", 1e4, 1e-4))
+        # Both presets use the standard window; they differ in the tolerance,
+        # which is the knob a user actually turns. "accurate" is the package
+        # default; "fast" is the exploratory setting of the gallery.
+        for (pname, pwm, ptol) in (("accurate", WMAX_CHART, 1e-5),
+                                   ("fast", WMAX_CHART, 1e-3))
             f = () -> calculate_unstable_roots_p_vec(D, params; ω_max = pwm,
                 reltol = ptol, abstol = ptol)
             # Warm up on a handful of points (JIT only), then time ONE sweep.
@@ -133,6 +147,66 @@ end
 write_csv("presets",
     ["system", "preset", "wmax", "tol", "n_points", "chart_time_s",
      "per_point_us", "n_wrong_vs_ref"], preset_rows)
+
+# ---------------------------------------------------------------------------
+# What the convenience of automatic extraction costs.
+#
+# The two characteristic functions are the SAME function (verified to machine
+# precision in s01) and give bit-identical charts; they differ only in how they
+# are obtained:
+#   hand-derived : a flat scalar expression, no determinant, no AD -- what a
+#                  user gets after doing the algebra once, by hand.
+#   auto-extracted: one evaluation of the user's ODE right-hand side seeded
+#                  with ForwardDiff duals, then a 7x7 determinant of the
+#                  descriptor matrix -- no algebra at all.
+# The counts are asserted identical before either time is recorded, so the
+# ratio is a pure measure of the convenience, not of a different answer.
+# ---------------------------------------------------------------------------
+FORMS = [("hand-derived (no determinant, no AD)", D_showcase_reduced),
+         ("automatic extraction from the RHS",    D_showcase)]
+extraction_rows = with_cache("s06_extraction_v1_$(NGRID)") do
+    xv = LinRange(SHOWCASE_PRANGE..., NGRID); yv = LinRange(SHOWCASE_DRANGE..., NGRID)
+    params = vec([(x, y) for x in xv, y in yv])
+    out = Tuple[]
+    Z_first = nothing
+    for (fname, D) in FORMS
+        f = () -> calculate_unstable_roots_p_vec(D, params; ω_max = WMAX_CHART)
+        f()                                            # warm-up / JIT
+        t1 = @elapsed r = f()
+        res = t1 < 5.0 ? benchmark_sweep(f; repeats = 3) : (t_med = t1, mem_bytes = 0)
+        Z = r[1]
+        if Z_first === nothing
+            Z_first = Z
+        else
+            n_diff = count(Z .!= Z_first)
+            n_diff == 0 || error("s06: the two forms of D disagree on $n_diff points")
+        end
+        push!(out, (fname, length(params), res.t_med,
+            res.t_med / length(params) * 1e6, res.mem_bytes / 2^20))
+        @info "extraction cost" fname chart_s = res.t_med
+    end
+    out
+end
+write_csv("extraction_cost",
+    ["form", "n_points", "chart_time_s", "per_point_us", "mem_mb"], extraction_rows)
+
+let t_hand = extraction_rows[1][3], t_auto = extraction_rows[2][3]
+    # No memory column: the expensive form skips the repeat-benchmark that
+    # measures allocations, so it would report a misleading 0.
+    rows_ex = [[r[1], tex_time(r[3]), @sprintf("%.0f", r[4])] for r in extraction_rows]
+    push!(rows_ex, ["\\emph{ratio}", @sprintf("%.0f\$\\times\$", t_auto / t_hand),
+                    @sprintf("%.0f\$\\times\$", extraction_rows[2][4] / extraction_rows[1][4])])
+    write_booktabs("tab_extraction", "lcc",
+        ["form of \$\\Dfun\$", "chart ($(NGRID)\$\\times\$$(NGRID))",
+         "per point [\$\\mu\$s]"], rows_ex)
+    write_macros("extraction_numbers", [
+        "ExtractRatio"   => @sprintf("%.0f", t_auto / t_hand),
+        "ExtractHandT"   => tex_time(t_hand),
+        "ExtractAutoT"   => tex_time(t_auto),
+        "ExtractHandUs"  => @sprintf("%.0f", extraction_rows[1][4]),
+        "ExtractAutoUs"  => @sprintf("%.0f", extraction_rows[2][4]),
+    ])
+end
 
 rows_pre = Vector{String}[]
 for (cname, pname, pwm, ptol, n, t, per_pt, nw) in preset_rows

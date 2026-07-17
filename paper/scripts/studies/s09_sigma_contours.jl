@@ -9,7 +9,7 @@ Pv = LinRange(SHOWCASE_PRANGE..., nP)
 Dv = LinRange(SHOWCASE_DRANGE..., nD)
 
 grid = with_cache("s01_domgrid_$(nP)x$(nD)") do   # reuse the s01 cache if present
-    sweep_grid_dominant(D_showcase, Pv, Dv; ω_max = 1e4)
+    sweep_grid_dominant(D_showcase_reduced, Pv, Dv; ω_max = 1e4)
 end
 
 # Choose contour levels from the actual depth of the stable region
@@ -20,7 +20,7 @@ end
 
 contours = with_cache("s09_sigma_mdbm") do
     map(σ_levels) do σ
-        bnd = mdbm_boundary(D_showcase, SHOWCASE_PRANGE, SHOWCASE_DRANGE;
+        bnd = mdbm_boundary(D_showcase_reduced, SHOWCASE_PRANGE, SHOWCASE_DRANGE;
             ngrid = 24, Niter = FAST[] ? 3 : 4, σ = σ, ω_max = 1e4)
         @info "sigma contour traced" σ t = bnd.t
         (σ = σ, edges = bnd.edges, t = bnd.t)

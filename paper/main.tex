@@ -28,6 +28,11 @@
   \newcommand{\FemLemmaSpeedup}{[x]}\newcommand{\FemLemmaAgree}{[e]}%
   \newcommand{\FemRawMag}{[m]}\newcommand{\FemRawOrder}{[n]}%
   \newcommand{\FemRawResid}{[r]}\newcommand{\FemRdResid}{[r]}}
+% hand-derived vs auto-extracted cost (paper/scripts/studies/s06_grid_timings.jl)
+\IfFileExists{generated/extraction_numbers.tex}{\input{generated/extraction_numbers.tex}}{%
+  \newcommand{\ExtractRatio}{[x]}\newcommand{\ExtractHandT}{[t]}%
+  \newcommand{\ExtractAutoT}{[t]}\newcommand{\ExtractHandUs}{[t]}%
+  \newcommand{\ExtractAutoUs}{[t]}}
 
 \begin{document}
 

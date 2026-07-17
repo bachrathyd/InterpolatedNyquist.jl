@@ -24,7 +24,7 @@ end
 # ω_max is chosen so that the truncated tail (≈0.2/ω_max for this
 # velocity-feedback system) stays far below the tightest tolerance studied.
 const WMAX_CONV = 1e6
-n_pow = get_n_power_max(D_showcase, p_conv)
+n_pow = get_n_power_max(D_showcase_reduced, p_conv)
 Z_EXACT = 2
 @info "leading order" n_pow err = abs(n_pow - 4)
 
@@ -33,7 +33,7 @@ Z_EXACT = 2
 # (no phase integral, no leading-order estimate, no ω_max truncation). Each
 # characteristic exponent with Re λ > 0 maps to a multiplier |μ| > 1; the
 # spurious discretization modes cluster far inside the unit circle.
-z_check = with_cache("s03_zexact_check_v1") do
+z_check = with_cache("s03_zexact_check_v2") do
     A, B = showcase_AB(p_conv)
     Δt = SM.tau / 120
     lddep = SemiDiscretizationMethod.LDDEProblem(
@@ -51,30 +51,31 @@ end
 
 TOLS = 10.0 .^ (-2:-1.0:-10)   # starts in the order-one-error regime on purpose
 METHODS = [
-    ("Vern9 (default)", tol -> calculate_unstable_roots_direct(D_showcase, p_conv;
+    ("Vern9 (default)", tol -> calculate_unstable_roots_direct(D_showcase_reduced, p_conv;
         n_roots_to_track = 0, ω_max = WMAX_CONV, reltol = tol, abstol = tol,
         solver = Vern9(), n_power_max = n_pow, maxiters = 10^9)[2]),
-    ("Tsit5", tol -> calculate_unstable_roots_direct(D_showcase, p_conv;
+    ("Tsit5", tol -> calculate_unstable_roots_direct(D_showcase_reduced, p_conv;
         n_roots_to_track = 0, ω_max = WMAX_CONV, reltol = tol, abstol = tol,
         solver = Tsit5(), n_power_max = n_pow, maxiters = 10^9)[2]),
-    ("BS3", tol -> calculate_unstable_roots_direct(D_showcase, p_conv;
+    ("BS3", tol -> calculate_unstable_roots_direct(D_showcase_reduced, p_conv;
         n_roots_to_track = 0, ω_max = WMAX_CONV, reltol = tol, abstol = tol,
         solver = BS3(), n_power_max = n_pow, maxiters = 10^9)[2]),
-    ("Rosenbrock23", tol -> calculate_unstable_roots_direct(D_showcase, p_conv;
+    ("Rosenbrock23", tol -> calculate_unstable_roots_direct(D_showcase_reduced, p_conv;
         n_roots_to_track = 0, ω_max = WMAX_CONV, reltol = tol, abstol = tol,
         solver = Rosenbrock23(), n_power_max = n_pow, maxiters = 10^9)[2]),
-    ("QuadGK", tol -> calculate_unstable_roots_quadgk(D_showcase, p_conv;
+    ("QuadGK", tol -> calculate_unstable_roots_quadgk(D_showcase_reduced, p_conv;
         ω_max = WMAX_CONV, reltol = tol, abstol = tol, n_power_max = n_pow)[2]),
 ]
 
-# A single evaluation of a low-order pair at a tight tolerance over this
-# frequency range can take a minute, so each method stops escalating once one
-# point exceeds the cap. The dropped points are logged rather than silently
-# omitted, and the curves simply end where the method becomes impractical --
-# which is itself the relevant information.
-const T_CAP = 20.0
+# Each method stops escalating once a single evaluation exceeds this cap. One
+# second per point is far more than any usable setting needs -- a method that
+# has not converged by then has already made the point -- and it keeps the
+# whole study to minutes instead of the twenty that a 20 s cap cost. The
+# dropped points are logged rather than silently omitted, and the curves simply
+# end where the method becomes impractical, which is itself the information.
+const T_CAP = 1.0
 
-data = with_cache("s03_convergence_v4") do
+data = with_cache("s03_convergence_v5") do
     out = Dict{String, Vector{Tuple{Float64, Float64, Float64}}}()
     for (name, runner) in METHODS
         rows = Tuple{Float64, Float64, Float64}[]
@@ -125,8 +126,8 @@ save_fig(fig, "fig_convergence")
 # The peak half-width equals |σ_est|, so this is where a marching solver can
 # step over the peak and silently lose exactly one root.
 # ---------------------------------------------------------------------------
-stress = with_cache("s03_boundary_stress") do
-    sig(P) = calculate_unstable_roots_direct(D_showcase, (P, 1.5); ω_max = WMAX_CONV,
+stress = with_cache("s03_boundary_stress_v2") do
+    sig(P) = calculate_unstable_roots_direct(D_showcase_reduced, (P, 1.5); ω_max = WMAX_CONV,
         reltol = 1e-10, abstol = 1e-10, n_power_max = n_pow,
         refinement_method = :Newton, refinement_steps = 15)[4]
     lo, hi = 2.0, 3.0
@@ -138,9 +139,9 @@ stress = with_cache("s03_boundary_stress") do
     @info "Hopf boundary located" P_b
     rows = Tuple[]
     for dP in (1e-2, 1e-4, 1e-6, 1e-8, 1e-10)
-        zo = calculate_unstable_roots_direct(D_showcase, (P_b + dP, 1.5); ω_max = WMAX_CONV,
+        zo = calculate_unstable_roots_direct(D_showcase_reduced, (P_b + dP, 1.5); ω_max = WMAX_CONV,
             reltol = 1e-8, abstol = 1e-8, n_power_max = n_pow)
-        zg = calculate_unstable_roots_quadgk(D_showcase, (P_b + dP, 1.5); ω_max = WMAX_CONV,
+        zg = calculate_unstable_roots_quadgk(D_showcase_reduced, (P_b + dP, 1.5); ω_max = WMAX_CONV,
             reltol = 1e-8, abstol = 1e-8, n_power_max = n_pow)
         push!(rows, (dP, zo[4], zo[1], zg[1], abs(zo[2] - round(zo[2])),
             abs(zg[2] - round(zg[2]))))

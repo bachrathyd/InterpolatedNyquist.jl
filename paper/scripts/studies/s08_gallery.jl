@@ -6,6 +6,7 @@
 
 include(joinpath(@__DIR__, "systems.jl"))
 using Random
+using BenchmarkTools: @belapsed
 
 # ---------------------------------------------------------------------------
 # System definitions (mirroring examples/ but headless and seeded)
@@ -128,14 +129,26 @@ end
 # ---------------------------------------------------------------------------
 # Panel specifications
 # ---------------------------------------------------------------------------
-# This gallery is the paper's SPEED argument (Section 7 makes the accuracy
-# case at ω_max = 1e6 and tight tolerances). Every panel therefore uses the
-# same generous 100x100 background grid and settings tuned for a chart in a
-# fraction of a second: ω_max a few decades above the highest resonance and
-# tol = 1e-4, one decade looser than the default. At those settings a count
-# can be off by one on a few boundary-adjacent pixels (Section 6.3) -- which
-# is exactly the trade a first exploration should make, and invisible at
-# chart resolution.
+# This gallery is the paper's SPEED argument. Every panel uses the same
+# generous 100x100 background grid and tol = 1e-4 (one decade looser than the
+# package default): at those settings a count can be off by one on a few
+# boundary-adjacent pixels (Section 6.3), which is exactly the trade a first
+# exploration should make and is invisible at chart resolution.
+#
+# omega_max = 1e4 is the paper's standard window and is used wherever it is
+# affordable. Three panels keep a smaller window, for reasons of substance
+# rather than convenience:
+#   * neutral, high-gain neutral, PDA (200-500): the phase ripple of a NEUTRAL
+#     system does not decay at all -- the integrand oscillates up to infinite
+#     frequency -- so a larger window buys no accuracy whatsoever. What bounds
+#     the truncation error is the analytic asin(|a|)/pi < 1/2 estimate of
+#     Section 2.2, not omega_max. Raising it would only multiply the cost.
+#   * beam, FEM bar (200): the Kelvin-Voigt damping makes |sech(gamma)| decay
+#     like e^{-sqrt(omega/2c)}, so the integrand is dead long before omega=200;
+#     and each evaluation costs a 29x29 solve, so a 50x larger window would
+#     turn a 7-minute panel into a 6-hour one for no change in the chart.
+#   * 50x50 determinant (200): same argument, with a dense 50x50 determinant
+#     per evaluation.
 #
 # MDBM: a 7x7 initial mesh refined until the traced boundary has ~4x the
 # per-axis resolution of the panel's background grid, from only 49 blanket
@@ -152,9 +165,9 @@ SPECS = [
     (id = "fourth",  D = D_fourth,     xl = "P",  yl = "D",  xr = (-2.0, 4.0), yr = (-2.0, 5.0),
      nx = half(NBF), ny = half(NBF), ω = 1e4, tol = 1e-4, title = "4th-order + delayed PD"),
     (id = "algebraic", D = D_algebraic, xl = "a", yl = "b", xr = (-1.0, 1.0), yr = (-1.0, 1.0),
-     nx = half(NBF), ny = half(NBF), ω = 1e3, tol = 1e-4, title = "delayed oscillator"),
+     nx = half(NBF), ny = half(NBF), ω = 1e4, tol = 1e-4, title = "delayed oscillator"),
     (id = "distributed", D = D_distributed, xl = "a", yl = "b", xr = (0.0, 2.0), yr = (-1.0, 5.0),
-     nx = half(NBF), ny = half(NBF), ω = 1e3, tol = 1e-4, title = "distributed delay"),
+     nx = half(NBF), ny = half(NBF), ω = 1e4, tol = 1e-4, title = "distributed delay"),
     # NOTE: neutral integrands oscillate persistently up to infinite frequency,
     # so the truncation must stay moderate; the tail error is bounded by
     # asin(|a|)/pi < 1/2, hence the rounded count remains correct.
@@ -167,7 +180,7 @@ SPECS = [
      hlines = [-1.0, 1.0], title = "PDA control (neutral, essential)"),
     # w starts slightly above 0: at w = 0 the rational D is constant (no roots)
     (id = "turning", D = D_turning, xl = "Ω", yl = "w", xr = (0.08, 1.2), yr = (0.01, 1.2),
-     nx = half(NBF), ny = half(NBF), ω = 1e3, tol = 1e-4, title = "multi-DOF turning lobes"),
+     nx = half(NBF), ny = half(NBF), ω = 1e4, tol = 1e-4, title = "multi-DOF turning lobes"),
     (id = "beam", D = D_beam, xl = "Kp", yl = "τ", xr = (0.0, 2.0), yr = (0.1, 3.0),
      nx = half(NBF), ny = half(NBF), ω = 200.0, tol = 1e-4, title = "transcendental beam"),
     # SAME window as the beam panel (same physical feedback law: tip force
@@ -180,7 +193,7 @@ SPECS = [
     (id = "bigmat", D = D_bigmat, xl = "gain", yl = "τ", xr = (-0.95, 1.0), yr = (0.05, 1.5),
      nx = half(40), ny = half(40), ω = 200.0, tol = 1e-4, title = "50x50 matrix determinant"),
     (id = "frac", D = D_frac, xl = "k", yl = "τ", xr = (0.0, 5.0), yr = (0.1, 2.0),
-     nx = half(NBF), ny = half(NBF), ω = 100.0, tol = 1e-4, title = "fractional oscillator"),
+     nx = half(NBF), ny = half(NBF), ω = 1e4, tol = 1e-4, title = "fractional oscillator"),
 ]
 
 getcap(s) = hasproperty(s, :cap) ? s.cap : nothing
@@ -228,8 +241,26 @@ function gallery_panel!(fig, r, c, spec)
     text!(ax, 0.03, 0.03; text = lab, space = :relative, align = (:left, :bottom),
         fontsize = 6, color = :white,
         strokecolor = :black, strokewidth = 0.6)
+    # The integer residual PROVES this panel's settings are adequate: a
+    # truncated tail or an under-resolved march shows up as Z_raw sitting away
+    # from an integer. It costs nothing (Z_raw is already computed) and turns
+    # the choice of omega_max from a judgement call into a checkable claim.
+    #
+    # Report the MEDIAN and the number of uncertain points, not just the max:
+    # the max over 10^4 points is set by the single worst pixel and says almost
+    # nothing about the chart. (On the beam panel, for instance, the max is 0.47
+    # while the median is 1e-4 and 5 points in 10^4 exceed 0.25 -- all of them
+    # deep in the unstable domain, where a dozen roots have each contributed a
+    # little error and the stable/unstable classification is unaffected.)
+    r = filter(isfinite, abs.(vec(grid.Z_raw) .- round.(vec(grid.Z_raw))))
+    n_nonfinite = count(!isfinite, grid.Z_raw)
+    resid_max = isempty(r) ? NaN : maximum(r)
+    resid_med = isempty(r) ? NaN : median(r)
+    n_uncert = count(>(0.25), r)
+    @info "panel residual" spec.id ω = spec.ω resid_med resid_max n_uncert n_nonfinite
     return (spec.id, spec.nx * spec.ny, grid.t, bnd === nothing ? NaN : bnd.t,
-            spec.ω, spec.tol, MDBM_N0_G, mit, mdbm_equiv(spec.nx))
+            spec.ω, spec.tol, MDBM_N0_G, mit, mdbm_equiv(spec.nx),
+            resid_med, resid_max, n_uncert, n_nonfinite)
 end
 
 # ---------------------------------------------------------------------------
@@ -254,25 +285,20 @@ fem_diag = with_cache("s08_fem_diag_v1") do
     λs = (0.3 + 2.0im, -0.1 + 15.0im, 0.05 - 40.0im)
     agree = maximum(abs(D_fem_full(λ, p_fd) - D_fem(λ, p_fd)) /
                     max(abs(D_fem_full(λ, p_fd)), 1e-300) for λ in λs)
-    # cost per evaluation of each form (median of repeats).
-    # NOTE: `@elapsed for ... end` does not parse -- the loop must be wrapped
-    # in a begin block for the macro to take a single expression.
-    function bench(f)
-        f(λs[1], p_fd)                      # warm-up
-        ts = Float64[]
-        for _ in 1:5
-            t = @elapsed begin
-                for _ in 1:200
-                    f(λs[1], p_fd)
-                end
-            end
-            push!(ts, t / 200)
-        end
-        return median(ts)
-    end
-    t_full = bench(D_fem_full); t_lem = bench(D_fem)
-    # magnitude and integer residual of the RAW determinant vs the return difference
-    mag_raw = abs(D_fem_raw(1.0 + 50.0im, p_fd))
+    # Cost per evaluation of each form. BenchmarkTools with interpolated
+    # arguments, NOT a hand-rolled @elapsed loop through a function-valued
+    # closure: the closure adds a dynamically dispatched call to every
+    # iteration, which is a fixed overhead added to both forms and therefore
+    # compresses the ratio toward 1 (it reported 1.5x where the true ratio is
+    # several times that).
+    λb = 0.3 + 12.0im
+    t_full = @belapsed D_fem_full($λb, $p_fd)
+    t_lem  = @belapsed D_fem($λb, $p_fd)
+    # Magnitude of the RAW determinant at the TOP of the integration range --
+    # the largest value the march actually has to represent, which is what
+    # decides whether it overflows. (Probing at some interior omega understates
+    # it by many orders: |D| ~ omega^58 here.)
+    mag_raw = abs(D_fem_raw(200.0im, p_fd))
     n_raw = get_n_power_max(D_fem_raw, p_fd)
     n_rd  = get_n_power_max(D_fem, p_fd)
     _, zr_raw = calculate_unstable_roots_direct(D_fem_raw, p_fd; ω_max = 200.0,
@@ -288,11 +314,11 @@ write_csv("fem_diagnostics", ["key", "value"],
     [(string(k), getfield(fem_diag, k)) for k in propertynames(fem_diag)])
 write_macros("fem_numbers", [
     "FemLemmaSpeedup" => @sprintf("%.1f", fem_diag.speedup),
-    "FemLemmaAgree"   => tex_sci(fem_diag.agree),
+    "FemLemmaAgree"   => tex_sci_bare(fem_diag.agree),
     "FemRawMag"       => @sprintf("10^{%d}", round(Int, log10(max(fem_diag.mag_raw, 1.0)))),
     "FemRawOrder"     => @sprintf("%.1f", fem_diag.n_raw),
     "FemRawResid"     => @sprintf("%.2f", fem_diag.res_raw),
-    "FemRdResid"      => tex_sci(fem_diag.res_rd),
+    "FemRdResid"      => tex_sci_bare(fem_diag.res_rd),
 ])
 
 timings = Tuple[]
@@ -313,4 +339,14 @@ save_fig(figb, "fig_gallery_b")
 
 write_csv("gallery_timings",
     ["system", "n_points", "grid_time_s", "mdbm_time_s", "wmax", "tol",
-     "mdbm_n0", "mdbm_levels", "mdbm_equiv_res"], timings)
+     "mdbm_n0", "mdbm_levels", "mdbm_equiv_res",
+     "median_int_residual", "max_int_residual", "n_uncertain", "n_nonfinite"],
+    timings)
+# A panel is suspect when a non-trivial FRACTION of its points are uncertain --
+# that is what a truncated tail or an under-resolved march looks like. A single
+# bad pixel is not: it is the tail of a distribution whose median is ~1e-4.
+let bad = [(t[1], t[12], t[2]) for t in timings if t[12] > 0.01 * t[2]]
+    isempty(bad) || @warn "gallery: panels where >1% of points are uncertain" bad
+end
+@info "gallery residual summary" worst_median = maximum(t[10] for t in timings) total_uncertain =
+    sum(t[12] for t in timings) total_points = sum(t[2] for t in timings)

@@ -178,6 +178,18 @@ function tex_sci(x::Real; digits::Int = 1)
 end
 
 """
+Scientific notation WITHOUT the surrounding `\$ \$`, for use inside a macro that
+the manuscript will place in its own math context (`tex_sci` brings its own
+delimiters, which then nest and break the build).
+"""
+function tex_sci_bare(x::Real)
+    x == 0 && return "0"
+    e = floor(Int, log10(abs(x)))
+    m = x / 10.0^e
+    return @sprintf("%.1f \\cdot 10^{%d}", m, e)
+end
+
+"""
 Write a set of `\\newcommand` macros to `generated/<name>.tex`.
 
 Every number quoted in the manuscript prose should come from here rather than

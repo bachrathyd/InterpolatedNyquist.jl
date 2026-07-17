@@ -18,24 +18,29 @@ Dv = LinRange(SHOWCASE_DRANGE..., nD)
 # wrong-Z columns measure the integrator alone.)
 TOLS = [1e-2, 1e-4, 1e-6, 1e-8]
 
-# This study isolates the INTEGRATOR, so two deliberate choices:
+# omega_max = 1e4: the standard chart window used everywhere in the paper.
 #
-# 1. ω_max = 1e6, not the 1e4 that the chart itself needs.  The velocity
-#    feedback of this system makes the phase ripple decay only like 1/ω, so the
-#    truncated tail contributes ~0.2/ω_max to Z̃; at ω_max = 1e4 that floors
-#    the residual at ~2e-5 and the two tightest tolerances would be
-#    indistinguishable.  (§6.3 states this trade-off explicitly.)
-# 2. The reduced (hand-derived) form of the SAME characteristic function.  It
-#    is identical to the automatically extracted one to machine precision
-#    (§6.1) and gives the identical chart, but costs ~15x less per evaluation
-#    because it skips the 7x7 dual-number determinant.  Since ω_max = 1e6
-#    already multiplies the work by ~100, the extracted form would make this
-#    study take hours to say exactly the same thing about the integrator.
-const WMAX_TOL = 1e6
+# This makes the study show TWO regimes rather than one, which is the honest
+# picture. The delayed VELOCITY feedback of this system makes the phase ripple
+# decay only like 1/omega, so the tail truncated at omega_max contributes
+# ~0.2/omega_max ~ 2e-5 to Z_raw. The residual therefore tracks the rule
+# eps ~ 100*tol while the integrator dominates, and FLOORS at ~2e-5 once the
+# truncation does -- i.e. tightening past ~1e-6 buys nothing at this window.
+# Both effects are predicted in Sections 3.1 and 3.4; the figure measures them.
+# (omega_max = 1e6 would expose the tolerance over the whole ladder, but costs
+# ~60x more per grid and certifies pixels that are already right: the floor is
+# still five orders below the 1/2 rounding threshold.)
+#
+# D_showcase_reduced is the hand-derived form of the SAME characteristic
+# function: identical to the automatically extracted one to machine precision
+# (Sec. 6.1) and giving the identical chart, but ~15x cheaper per evaluation
+# because it skips the 7x7 dual-number determinant. This study is about the
+# integrator, not the extraction.
+const WMAX_TOL = 1e4
 const D_TOL = D_showcase_reduced
 
 # cache v4: v3 used the 1e-3..1e-9 ladder
-tol_grids = with_cache("s02_grids_v4_$(nP)x$(nD)") do
+tol_grids = with_cache("s02_grids_v5_$(nP)x$(nD)") do
     map(TOLS) do tol
         g = sweep_grid(D_TOL, Pv, Dv; ω_max = WMAX_TOL, reltol = tol, abstol = tol)
         @info "tolerance grid done" tol t = g.t
@@ -105,7 +110,7 @@ write_macros("crosscheck_numbers", [
 ])
 
 # Boundary (traced once, high accuracy) overlaid on every panel
-bnd = with_cache("s02_mdbm_ref_v3") do
+bnd = with_cache("s02_mdbm_ref_v4") do
     mdbm_boundary(D_TOL, SHOWCASE_PRANGE, SHOWCASE_DRANGE;
         ngrid = 30, Niter = 4, ω_max = WMAX_TOL, reltol = 1e-8, abstol = 1e-8)
 end
@@ -118,7 +123,7 @@ end
 # alone. Measure the displacement (one-sided Hausdorff, in parameter units)
 # of loose traces against the reference trace above.
 # ---------------------------------------------------------------------------
-bnd_loose = [with_cache("s02_mdbm_tol$(tol)_v1") do
+bnd_loose = [with_cache("s02_mdbm_tol$(tol)_v2") do
         mdbm_boundary(D_TOL, SHOWCASE_PRANGE, SHOWCASE_DRANGE;
             ngrid = 30, Niter = 4, ω_max = WMAX_TOL, reltol = tol, abstol = tol)
     end for tol in TOLS]

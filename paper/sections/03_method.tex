@@ -140,7 +140,7 @@ an open-loop stable structure, lie in the left half-plane and leave the
 right-half-plane count untouched), and tends to $1$ at infinity. Then $n=0$
 \emph{exactly}, no estimate is needed, and the enormous magnitudes disappear:
 for the $29$-DOF finite element bar of Appendix~\ref{app:gallery} the raw determinant
-grows like $\lam^{58}$, reaches $\sim\FemRawMag$, and leaves an integer
+grows like $\lam^{58}$, reaches $\sim\FemRawMag$ at the top of the integration range, and leaves an integer
 residual of $\FemRawResid$ -- a rounded count barely better than a coin toss
 -- while the return difference leaves $\FemRdResid$. Where the split exists,
 it is worth more than any tuning of the integrator.
@@ -289,6 +289,25 @@ order of magnitude below the rounding threshold $1/2$ and produces reliable
 charts at near-maximal speed, and $10^{-8}$ yields reference-quality values
 at a moderate CPU-time premium; the package default $10^{-5}$ adds a further
 safety decade at little cost.
+
+The diagnostic has a precondition that deserves to be stated rather than
+discovered, and it is not the tolerance but the \emph{convergence of the
+tail}. Equation~\eqref{eq:eps} measures the distance of $\Zraw$ from an
+integer, and $\Zraw$ is only \emph{expected} to be an integer when the
+truncated remainder $\int_{\wmax}^{\infty}$ is negligible. For retarded
+systems it is, and $\varepsilon$ behaves as described: across the retarded
+case studies of Appendix~\ref{app:gallery} the median residual is
+$\sim10^{-4}$ and essentially no grid point is uncertain. For \emph{neutral}
+systems it is not. There the integrand does not decay at all, the tail
+contributes an oscillation bounded by $\arcsin|a|/\pi$ rather than a
+vanishing remainder (Section~\ref{sec:classes}), and the residual inherits
+it: on the neutral panels of Appendix~\ref{app:gallery} the median residual
+is $\approx0.1$ and between $10\%$ and $27\%$ of grid points exceed the
+$1/4$ mark -- with the counts nevertheless correct. For that class,
+therefore, $\varepsilon$ is \emph{not} a usable self-check, and what protects
+the count is the analytic bound $\arcsin|a|/\pi<1/2$ instead. Enlarging
+$\wmax$ does not help and should not be attempted: the oscillation is
+bounded, not decaying.
 
 One caveat is inherited from the argument principle itself and deserves to
 be stated sharply, because it bounds what $\varepsilon$ can certify. A march
