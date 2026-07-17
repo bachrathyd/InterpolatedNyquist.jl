@@ -35,35 +35,56 @@ function D_pda(λ::T, p) where T
     return λ^2 + T(0.1) * λ + one(T) + (P + T(0.1) * λ + A * λ^2) * exp(-λ)
 end
 
-# Transcendental beam with KELVIN-VOIGT (material) damping and delayed boundary
-# feedback, in return-difference form D = 1 + Kp e^{-λτ} sech(γ L), γ = λ/√(1+cλ).
+# ===========================================================================
+# ELASTIC BAR WITH DELAYED BOUNDARY FEEDBACK -- Zhang & Stepan, JSV 367 (2016)
+# 219-232, doi:10.1016/j.jsv.2016.01.002. This panel reproduces their Fig. 8.
 #
-# The choice of damping model is what makes this a valid counting problem.
-# External/viscous damping (γ = √(λ²+cλ)) damps every mode equally, so the
-# roots accumulate on a vertical line and Z is 0 or ∞ -- the essential-spectrum
-# obstruction of a neutral system. Kelvin-Voigt damping is both physically
-# correct (real material damping is rate-dependent) and mathematically
-# benign: γ ~ √(λ/c) for large λ, so the high modes are damped ever harder,
-# Re λ_k → −∞, only finitely many roots sit near the axis, and |sech(γ)| decays
-# like e^{−√ω} on the imaginary axis. The count is then well defined.
-# The return-difference form additionally gives D → 1 (n = 0), no discretization.
-# Parameter window (Kp, tau) = (0..2, 0.1..3) follows the delayed-boundary-
-# control analysis of the elastic bar in the literature (Zhang & Stepan 2016);
-# BEAM_C is a SMALL Kelvin-Voigt damping added on top: the undamped bar has
-# infinitely many undamped modes on the imaginary axis, so no finite count
-# exists, while any physical material damping restores one (see the appendix).
-const BEAM_C = 0.02      # Kelvin-Voigt (rate-dependent) damping coefficient
+# Physical model (their Sec. 2 and 6): a bar of length l, fixed at x = l, where
+# the normal force F(l,t) = A E u'(l,t) is sensed and fed back with gain K and
+# delay tau to the free end x = 0, so F(0,t) = K F(l, t-tau). With internal
+# viscous ("Kelvin-Voigt") damping eta, proportional to the elastic forces:
+#
+#   PDE  (their 49):  u_tt - eta c^2 u_txx - c^2 u_xx = 0,   c = sqrt(E/rho)
+#   BCs  (their 5-6): u(l,t) = 0,   u'(0,t) - K u'(l,t-tau) = 0
+#   char (their 54):  D(lam) = lam * ( cosh(T lam / sqrt(1+eta lam)) - K e^{-tau lam} )
+#
+# with T = l/c the wave travel time. The lam = 0 factor is the trivial rigid
+# translation (their remark after Eq. 13) and is dropped. Non-dimensionalizing
+# with T = 1 leaves exactly two parameters -- the delay ratio tau/T and the
+# gain K -- which are the axes of their Fig. 8, at eta_tilde = eta/T = 0.01.
+#
+# NOTE ON THE DAMPING: the paper's internal damping enters as
+# 1/sqrt(1 + eta*lam) inside the cosh, i.e. gamma ~ sqrt(lam/eta) for large
+# lam, so the high modes are damped ever harder and Re lam_k -> -inf. That is
+# what makes the count finite at all: the UNDAMPED bar (their Fig. 6) has its
+# roots on finitely many vertical lines and is at best marginally stable, so no
+# argument-principle count exists for it. This is the same conclusion this
+# appendix reaches on physical grounds, and it is the paper's too.
+const BEAM_ETA = 0.01          # eta_tilde = eta/T, the value of their Fig. 8
 function D_beam(λ::T, p) where T
-    Kp, τ = p
-    γ = λ / sqrt(one(T) + T(BEAM_C) * λ)
-    return one(T) + Kp * exp(-λ * τ) / cosh(γ)
+    r, K = p                   # r = tau/T (delay ratio), K = feedback gain
+    γ = λ / sqrt(one(T) + T(BEAM_ETA) * λ)
+    # Return-difference form of (54) after dropping the trivial lam factor:
+    # same zeros, but D -> 1 at infinity, hence n = 0 exactly.
+    return one(T) - K * exp(-r * λ) / cosh(γ)
 end
 
-# n_el elements of length h = 1/n_el on n_el+1 nodes -> the bar has UNIT length,
-# so the FE model discretizes exactly the continuum bar of the beam panel and
-# the two charts are directly comparable. (An earlier version assembled N-1
-# elements of length 1/N: a bar of length (N-1)/N, whose ~3% frequency shift
-# visibly displaces the stability bands.)
+# FINITE ELEMENT COUNTERPART of the very same bar (A.9), over the SAME axes.
+#
+# Zhang & Stepan's warning that the exact chart "draws attention to the
+# numerical difficulties of finite degree of freedom approximations" is made
+# for the UNDAMPED bar (their Figs. 5-6), whose stable set has measure zero in
+# the delay ratio: no finite-DoF model can reproduce a zero-measure set. It does
+# NOT transfer to Fig. 8, the damped case, where the stable regions have finite
+# width -- and the damping suppresses precisely the high modes a coarse mesh
+# gets wrong. Measured here rather than asserted (see fem_vs_exact below): the
+# two stable maps agree almost everywhere.
+#
+# Linear bar elements, EA = rho A = l = 1 (hence c = 1 and T = l/c = 1, matching
+# the non-dimensionalization of D_beam). Node 1 sits at x = 0 (the driven, free
+# end), node n_el+1 at x = l (clamped: u = 0, removed from the DOFs).
+# Stiffness-proportional damping C = eta*K is the discrete form of the paper's
+# internal damping u_txx term, with the same eta.
 function build_fem(n_el)
     h = 1.0 / n_el
     n_nodes = n_el + 1
@@ -72,12 +93,13 @@ function build_fem(n_el)
         ke = (1 / h) * [1 -1; -1 1]; me = (h / 6) * [2 1; 1 2]
         K[i:i+1, i:i+1] += ke; M[i:i+1, i:i+1] += me
     end
-    # clamp node 1 -> n_el free DOFs. C = BEAM_C * K is the discrete form of the
-    # same Kelvin-Voigt law the continuum panel uses, so the two charts are
-    # directly comparable.
-    return M[2:end, 2:end], BEAM_C .* K[2:end, 2:end], K[2:end, 2:end], h
+    # drop the clamped last node -> DOFs 1..n_el, DOF 1 = the free end x = 0
+    return M[1:end-1, 1:end-1], BEAM_ETA .* K[1:end-1, 1:end-1], K[1:end-1, 1:end-1], h
 end
-const M_f, C_f, K_f, H_FEM = build_fem(29)   # 29 elements -> 29 DOF, length 1
+# 12 elements: enough to resolve the low modes that the damping leaves alive,
+# and ~6x cheaper per evaluation than 29 (each is a dense solve per frequency).
+const M_f, C_f, K_f, H_FEM = build_fem(12)   # 12 elements -> 12 DOF, length 1
+const N_FEM = size(K_f, 1)
 # Written as a RETURN DIFFERENCE det(I + Q0^-1 E) rather than the raw
 # determinant det(Q0 + E). Same zeros; the poles it introduces are the
 # open-loop roots, all in the left half-plane, so they do not affect the
@@ -91,14 +113,41 @@ const M_f, C_f, K_f, H_FEM = build_fem(29)   # 29 elements -> 29 DOF, length 1
 # replaces a full 29x29 solve plus a 29x29 determinant by ONE solve with a
 # single right-hand side. Same number, a few times cheaper -- this is the
 # large-system optimization Section 8 points to, exercised here.
-const E_N_FEM = begin
-    v = zeros(size(K_f, 1)); v[end] = 1.0; v
+const E_1_FEM = begin
+    v = zeros(N_FEM); v[1] = 1.0; v         # the free, driven end x = 0
 end
 function D_fem(λ::T, p) where T
-    Kp, τ = p
+    r, K = p                                # same axes as D_beam: (tau/T, K)
     Q0 = λ^2 .* T.(M_f) .+ λ .* T.(C_f) .+ T.(K_f)
-    c = Kp / T(H_FEM) * exp(-λ * τ)          # strain reading at the clamped end
-    return one(T) + c * (Q0 \ T.(E_N_FEM))[1]
+    # Boundary condition u'(0,t) = K u'(l, t-tau). The sensed quantity is the
+    # STRAIN at the clamped end: u'(l) ~ (u_{N+1} - u_N)/h = -u_N/h, since the
+    # last node is fixed -- and it is that MINUS sign that the load at x = 0
+    # carries. (Getting it wrong mirrors the whole chart in K: the up-peak at
+    # tau/T ~ 1 becomes a down-spike. Verified against the paper's own critical
+    # curves, Eqs. 57-58, where |D| must vanish: with this sign the FEM gives
+    # 1e-4..1e-2 there, i.e. discretization error only, and its stable map
+    # differs from the continuum at 0.4% of points instead of 18%.)
+    # The weak form turns the prescribed strain at x = 0 into a nodal load
+    # carrying the damped modulus EA(1 + eta*lam) of the natural boundary term.
+    # The feedback is RANK ONE, so the determinant lemma leaves a single solve.
+    c = -K * (one(T) + T(BEAM_ETA) * λ) / T(H_FEM) * exp(-r * λ)
+    return one(T) + c * (Q0 \ T.(E_1_FEM))[N_FEM]
+end
+
+# The analytic Kelvin-Voigt beam of the earlier drafts, kept as a panel in its
+# own right: same transcendental class, but a collocated tip-force law rather
+# than Zhang & Stepan's end-to-end feedback, and swept over (gain, delay)
+# instead of (delay ratio, gain). It shows the method on a cosh-type D whose
+# parameters are NOT taken from a reference chart.
+const BEAM_C = 0.02
+# Same argument order and axes as D_beam, so the two transcendental panels can
+# be read side by side: delay first, gain second. The only difference from the
+# Zhang-Stepan bar is the feedback law -- a collocated tip force (+Kp) rather
+# than their end-to-end strain feedback (-K) -- and a slightly larger damping.
+function D_beam_kv(λ::T, p) where T
+    τ, Kp = p
+    γ = λ / sqrt(one(T) + T(BEAM_C) * λ)
+    return one(T) + Kp * exp(-λ * τ) / cosh(γ)
 end
 
 # 50x50 dense stress test. The previous parameters put the whole window deep in
@@ -183,13 +232,25 @@ SPECS = [
     # w starts slightly above 0: at w = 0 the rational D is constant (no roots)
     (id = "turning", D = D_turning, xl = "Ω", yl = "w", xr = (0.08, 1.2), yr = (0.01, 1.2),
      nx = half(NBF), ny = half(NBF), ω = 1e4, tol = 1e-4, title = "multi-DOF turning lobes"),
-    (id = "beam", D = D_beam, xl = "Kp", yl = "τ", xr = (0.0, 2.0), yr = (0.1, 3.0),
-     nx = half(NBF), ny = half(NBF), ω = 200.0, tol = 1e-4, title = "transcendental beam"),
+    # Reproduction of Zhang & Stepan (2016) Fig. 8: the exact axes and parameters
+    # of the paper -- delay ratio tau/T against gain K, at eta_tilde = 0.01.
+    (id = "beam", D = D_beam, xl = "τ/T", yl = "K", xr = (0.02, 10.5), yr = (-0.75, 1.0),
+     nx = half(NBF), ny = half(NBF), ω = 400.0, tol = 1e-4, npow = 0.0,
+     title = "elastic bar, exact (Zhang & Stépán Fig. 8)"),
     # SAME window as the beam panel (same physical feedback law: tip force
     # from clamped-end strain, KV damping) so the two charts are directly
     # comparable. ω above the highest structural mode (FE bar modes reach ~60).
-    (id = "fem", D = D_fem, xl = "Kp", yl = "τ", xr = (0.0, 2.0), yr = (0.1, 3.0),
-     nx = half(NBF), ny = half(NBF), ω = 200.0, tol = 1e-4, title = "29-DOF FEM bar"),
+    # The SAME bar, discretized: same axes, same eta -> the two panels are a
+    # direct test of the convergence the paper warns about.
+    (id = "fem", D = D_fem, xl = "τ/T", yl = "K", xr = (0.02, 10.5), yr = (-0.75, 1.0),
+     nx = half(NBF), ny = half(NBF), ω = 400.0, tol = 1e-4, npow = 0.0,
+     title = "same bar, 12-DOF FEM"),
+    # Same axes and ranges as the two Zhang-Stepan panels above, so the three
+    # transcendental charts are directly comparable: delay horizontal, gain
+    # vertical, delay out to 10 wave-travel times.
+    (id = "beamkv", D = D_beam_kv, xl = "τ/T", yl = "Kp", xr = (0.02, 10.5), yr = (-0.75, 1.0),
+     nx = half(NBF), ny = half(NBF), ω = 400.0, tol = 1e-4, npow = 0.0,
+     title = "collocated tip force (Kelvin-Voigt)"),
     # gain > -1: at gain = -1 exactly, the delayed stiffness cancels the static
     # one and a characteristic root sits ON the integration line (Z undefined)
     (id = "bigmat", D = D_bigmat, xl = "gain", yl = "τ", xr = (-0.95, 1.0), yr = (0.05, 1.5),
@@ -252,7 +313,10 @@ function gallery_panel!(fig, r, c, spec)
     lab = "$(spec.nx)×$(spec.ny): $(tex_time_plain(grid.t))"
     bnd !== nothing && (lab *= "\nMDBM: $(tex_time_plain(bnd.t))")
     lab *= "\nσ≤$(round(σ_min, sigdigits = 2)) Z≤$(Z_max)"
-    annotate_panel!(ax, spec.xr, spec.yr, lab)
+    # Put the plate where it hides the least: over a solidly unstable corner
+    # (a flat colour plateau) rather than on the stable island, whose shading
+    # is the only part of the chart that actually varies.
+    annotate_panel!(ax, spec.xr, spec.yr, lab; corner = pick_annotation_corner(grid.Z))
     # The integer residual PROVES this panel's settings are adequate: a
     # truncated tail or an under-resolved march shows up as Z_raw sitting away
     # from an integer. It costs nothing (Z_raw is already computed) and turns
@@ -331,6 +395,44 @@ write_macros("fem_numbers", [
     "FemRawOrder"     => @sprintf("%.1f", fem_diag.n_raw),
     "FemRawResid"     => @sprintf("%.2f", fem_diag.res_raw),
     "FemRdResid"      => tex_sci_bare(fem_diag.res_rd),
+])
+
+# ---------------------------------------------------------------------------
+# DOES the finite-DoF bar reproduce the continuum chart? Measure it; do not
+# assert it either way.
+#
+# Zhang & Stepan's warning about finite-DoF approximations is made for the
+# UNDAMPED bar (their Figs. 5-6), where the stable set has measure zero in the
+# delay ratio -- no finite-DoF model can reproduce a zero-measure set. Fig. 8 is
+# the DAMPED case, where the stable regions have finite width, and there is no
+# reason a modest FE model should fail on those: the damping kills exactly the
+# high modes the discretization gets wrong. So the honest question is not
+# "does it fail" but "by how much, and where".
+# ---------------------------------------------------------------------------
+fem_vs_exact = with_cache("s08_femcmp_v1") do
+    xv = LinRange(0.02, 10.5, 100); yv = LinRange(-0.75, 1.0, 100)
+    params = vec([(x, y) for x in xv, y in yv])
+    Ze, = calculate_unstable_roots_p_vec(D_beam, params; ω_max = 400.0,
+        reltol = 1e-4, abstol = 1e-4, n_roots_to_track = 0, n_power_max = 0.0)
+    Zf, = calculate_unstable_roots_p_vec(D_fem, params; ω_max = 400.0,
+        reltol = 1e-4, abstol = 1e-4, n_roots_to_track = 0, n_power_max = 0.0)
+    # what a reader compares is the stable/unstable MAP, not the exact count
+    stable_e = Ze .== 0; stable_f = Zf .== 0
+    disagree = stable_e .!= stable_f
+    # where do they disagree? report the mean delay ratio of those points
+    r_dis = isempty(findall(disagree)) ? NaN : mean(first.(params[findall(disagree)]))
+    (n = length(params), n_dis = count(disagree),
+     frac = count(disagree) / length(params),
+     n_stable_e = count(stable_e), n_stable_f = count(stable_f), r_dis = r_dis)
+end
+@info "12-DoF FEM vs exact continuum (Zhang & Stepan Fig. 8 plane)" fem_vs_exact
+write_csv("fem_vs_exact", ["key", "value"],
+    [(string(k), getfield(fem_vs_exact, k)) for k in propertynames(fem_vs_exact)])
+write_macros("femcmp_numbers", [
+    "FemCmpN"      => string(fem_vs_exact.n),
+    "FemCmpDis"    => string(fem_vs_exact.n_dis),
+    "FemCmpPct"    => @sprintf("%.1f", 100 * fem_vs_exact.frac),
+    "FemCmpRdis"   => isnan(fem_vs_exact.r_dis) ? "--" : @sprintf("%.1f", fem_vs_exact.r_dis),
 ])
 
 timings = Tuple[]

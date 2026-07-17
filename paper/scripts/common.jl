@@ -202,13 +202,32 @@ function bilinear_ticks(σ_min, Z_max; n = 3)
 end
 
 """
-    annotate_panel!(ax, xr, yr, text_str)
+    pick_annotation_corner(Z_mat) -> Symbol
 
-Put an annotation in the lower-left corner of a chart on a semi-transparent
-white plate, so that it stays readable over any colour -- in particular over
-the black of a badly unstable region, where white-on-dark text disappears.
+Choose the corner of a chart whose text will hide the least. Scores each corner
+block by the fraction of points that are UNSTABLE (`Z > 0`): those regions are
+flat plateaus of the colour map, and covering one costs the reader nothing,
+whereas a plate dropped on the stable island hides the spectral gap -- the one
+field on the chart that actually varies. Ties go to the lower-left.
 """
-function annotate_panel!(ax, xr, yr, text_str; fontsize = 6,
+function pick_annotation_corner(Z_mat)
+    nx, ny = size(Z_mat)
+    fx, fy = max(2, nx ÷ 3), max(2, ny ÷ 3)
+    blocks = ((:lb, view(Z_mat, 1:fx, 1:fy)),
+              (:rb, view(Z_mat, (nx-fx+1):nx, 1:fy)),
+              (:lt, view(Z_mat, 1:fx, (ny-fy+1):ny)),
+              (:rt, view(Z_mat, (nx-fx+1):nx, (ny-fy+1):ny)))
+    best, best_score = :lb, -1.0
+    for (k, blk) in blocks
+        score = count(z -> z > 0, blk) / length(blk)
+        if score > best_score + 1e-9        # strict: first (lower-left) wins ties
+            best, best_score = k, score
+        end
+    end
+    return best
+end
+
+function annotate_panel!(ax, xr, yr, text_str; fontsize = 6, corner = :lb,
                          panel_pt = (W_FULL / 3, W_FULL * 0.60 / 2))
     w, h = xr[2] - xr[1], yr[2] - yr[1]
     lines_ = split(text_str, '\n')
@@ -227,7 +246,8 @@ function annotate_panel!(ax, xr, yr, text_str; fontsize = 6,
     line_pt = 1.35 * fontsize                     # line height
     pw = min(0.95, (ncols * char_pt) / (0.74 * panel_pt[1]) + 0.05) * w
     ph = min(0.60, (nlines * line_pt) / (0.72 * panel_pt[2]) + 0.04) * h
-    x0, y0 = xr[1] + 0.025w, yr[1] + 0.025h
+    x0 = (corner === :lb || corner === :lt) ? xr[1] + 0.025w : xr[2] - 0.025w - pw
+    y0 = (corner === :lb || corner === :rb) ? yr[1] + 0.025h : yr[2] - 0.025h - ph
     poly!(ax, Rect2f(x0, y0, pw, ph); color = (:white, 0.82),
         strokecolor = (:black, 0.35), strokewidth = 0.3)
     text!(ax, x0 + 0.02w, y0 + 0.02h; text = text_str, align = (:left, :bottom),
