@@ -59,13 +59,17 @@ function calculate_encirclement_number(D_func::Function, omega_values::AbstractV
 end
 
 """
-    argument_principle_with_MDBM(D_func, mdbm, omega_coars; σ=0.0)
+    argument_principle_with_MDBM(D_func, mdbm, omega_coars; σ=0.0, n_power_max=nothing)
 
 Enriches a coarse grid evaluation of the argument principle with MDBM results.
 Assumes the last axis of the MDBM problem is ω.
-`n_power_max` is calculated internally.
+
+`n_power_max` is the leading order of `D`. Pass it when it is known -- it is
+then exact, it is used for every parameter point, and the per-point estimation
+is skipped entirely. Leave it as `nothing` to have it estimated at each
+parameter point via [`get_n_power_max`](@ref).
 """
-function argument_principle_with_MDBM(D_func, mdbm, omega_coars; σ=0.0)
+function argument_principle_with_MDBM(D_func, mdbm, omega_coars; σ=0.0, n_power_max=nothing)
     # 1. Get data from MDBM
     D_re_im = getevaluatedfunctionvalues(mdbm)
     D_comp = [D[1] + 1im * D[2] for D in D_re_im]
@@ -107,9 +111,10 @@ function argument_principle_with_MDBM(D_func, mdbm, omega_coars; σ=0.0)
         # b. Calculate D for the extra low-res points
         D_extra = [D_func(σ + 1im * ω, p_val) for ω in omega_coars]
 
-        # c. Calculate n_power_max for this parameter set
-        # Use a large frequency to estimate polynomial order
-        n_power_max = get_n_power_max(D_func, p_val, σ)
+        # c. The leading order: use the value the caller supplied, otherwise
+        #    estimate it for this parameter set (see get_n_power_max).
+        n_pow = n_power_max === nothing ? get_n_power_max(D_func, p_val, σ) :
+                                          Float64(n_power_max)
 
         # d. Combine MDBM, extra, and symmetric points
         om_combined = vcat(om_mdbm, omega_coars)
@@ -118,7 +123,7 @@ function argument_principle_with_MDBM(D_func, mdbm, omega_coars; σ=0.0)
         D_full = vcat(D_combined, conj.(D_combined))
 
         # e. Use the dedicated function to calculate encirclement number
-        Ncirc[i] = calculate_encirclement_number(D_full, om_full; n_power_max=n_power_max)
+        Ncirc[i] = calculate_encirclement_number(D_full, om_full; n_power_max=n_pow)
     end
 
     return p_uniq_keys, Ncirc
@@ -179,11 +184,14 @@ function triangulation_of_MDBM_results(mdbm, p_uniq, color_values)
 end
 
 """
-    argument_principle_solver_with_MDBM(D_func, axlist, ω_coars; σ=0.0)
+    argument_principle_solver_with_MDBM(D_func, axlist, ω_coars; σ=0.0, n_power_max=nothing)
 
 Complete workflow for MDBM enrichment using brute-force evaluation for background.
+
+`n_power_max`: the leading order of `D`; pass it when known, otherwise it is
+estimated per parameter point. See [`calculate_unstable_roots_p_vec`](@ref).
 """
-function argument_principle_solver_with_MDBM(D_func, axlist, ω_coars; σ=0.0)
+function argument_principle_solver_with_MDBM(D_func, axlist, ω_coars; σ=0.0, n_power_max=nothing)
     
     function Dchar_foo_ReIm(p_all...)
         # Assume last parameter is ω, rest are p
@@ -203,7 +211,8 @@ function argument_principle_solver_with_MDBM(D_func, axlist, ω_coars; σ=0.0)
     MDBM.solve!(boundary_mdbm, Niter, verbosity=1, checkneighbourNum=2, doThreadprecomp=true, normp=10.0, ncubetolerance=0.6)
 
     @info "Stability Verification (Enrichment)"
-    p_uniq, Ncirc = argument_principle_with_MDBM(D_func, boundary_mdbm, ω_coars; σ=σ)
+    p_uniq, Ncirc = argument_principle_with_MDBM(D_func, boundary_mdbm, ω_coars; σ=σ,
+        n_power_max=n_power_max)
 
     @info "Triangulation"
     mesh_points, mesh_faces, mesh_colors, edge2plot_xyz = triangulation_of_MDBM_results(boundary_mdbm, p_uniq, Ncirc)
@@ -228,12 +237,13 @@ continuously, so the objective is continuous and the traced set contains only
 genuine boundary points. Pass `n_roots=1` to recover the old (cheaper,
 discontinuous) behaviour.
 """
-function sensitivity_mapping_with_MDBM(D_func, axlist; σ=0.0, ω_max=1e6, Niter=4, n_roots::Int=5)
+function sensitivity_mapping_with_MDBM(D_func, axlist; σ=0.0, ω_max=1e6, Niter=4, n_roots::Int=5,
+                                       n_power_max=nothing)
 
     function mdbm_objective(p_all...)
         p = length(p_all) > 1 ? Tuple(p_all) : p_all[1]
         zi, zr, md, es, wc = calculate_unstable_roots_direct(D_func, p, σ;
-            ω_max=ω_max, n_roots_to_track=n_roots)
+            ω_max=ω_max, n_roots_to_track=n_roots, n_power_max=n_power_max)
         sign_val = (max(zi, 0) == 0) ? 1.0 : -1.0
         # `es` holds the absolute real parts of the tracked roots; the dominant
         # one is the largest. Its distance to the integration line λ = σ + im*ω

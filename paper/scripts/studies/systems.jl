@@ -83,7 +83,13 @@ end
 # ===========================================================================
 # Chart helpers
 # ===========================================================================
-"Threaded brute-force sweep over a 2-parameter grid; returns matrices + wall time."
+"""
+Threaded brute-force sweep over a 2-parameter grid; returns matrices + wall time.
+
+Extra keywords (`n_power_max`, tolerances, ...) are forwarded to the solver, so
+a panel whose leading order is known by inspection can pass `n_power_max = 2`
+and skip the estimation entirely.
+"""
 function sweep_grid(D_func, xv, yv; kwargs...)
     params = vec([(x, y) for x in xv, y in yv])
     calculate_unstable_roots_p_vec(D_func, params[1:1]; kwargs...)  # JIT warm-up, outside the timer
@@ -133,11 +139,12 @@ crossing (it is the max over branches, not the nearest one), so the objective
 stays continuous and the trace stays clean.
 """
 function mdbm_boundary(D_func, xrange, yrange; ngrid = 30, Niter = 4, σ = 0.0,
-                       ω_max = 1e6, reltol = 1e-5, abstol = 1e-5, nroots = 5)
+                       ω_max = 1e6, reltol = 1e-5, abstol = 1e-5, nroots = 5,
+                       n_power_max = nothing)
     function wrapper(x, y)::Float64
         zi, zr, md, es, wc = calculate_unstable_roots_direct(D_func, (x, y), σ;
             ω_max = ω_max, reltol = reltol, abstol = abstol,
-            n_roots_to_track = nroots)
+            n_roots_to_track = nroots, n_power_max = n_power_max)
         sign_val = (max(zi, 0) == 0) ? 1.0 : -1.0
         σ_dom = maximum(filter(isfinite, es); init = -Inf)
         g = sign_val * abs(σ_dom - σ)

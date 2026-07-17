@@ -489,20 +489,49 @@ function _calculate_unstable_roots_direct_impl(D_func::NyquistWrapper{P}, p::P, 
 end
 
 """
-    calculate_unstable_roots_p_vec(D_func, params_vec::AbstractVector; ...)
+    calculate_unstable_roots_p_vec(D_func, params_vec::AbstractVector; n_power_max=nothing, ...)
 
 Vectorized stability sweep using multi-threading.
+
+`n_power_max` is the leading order `n` of `D` in the counting
+formula `Z = n/2 - (1/π)∫₀^ωmax Im(D'/D) dω`:
+
+* `nothing` (default): estimate it automatically, once, at `params_vec[1]`
+  (see `parameter_independent_nmax`) via [`get_n_power_max`](@ref).
+* a number: use it as given for every parameter point, and skip the estimation
+  entirely.
+
+**Supply it whenever you know it.** It is exact where the estimator can only be
+accurate, it costs nothing, and for some classes the estimator is working
+uphill: for a neutral system `|D|` does not settle onto a power law at all but
+oscillates by a factor `(1+|a|)/(1-|a|)` forever, and for a transcendental
+`D` (e.g. `cosh`-type) it is not polynomially bounded in the right half-plane,
+so the fit falls back to a weaker estimate. The order is usually obvious by
+inspection — `D = λ²(1 + a e^{-λ}) + …` has `n = 2`, since `e^{-s} → 0` along
+the real axis — and one number removes a whole class of doubt. Non-integer
+orders are legitimate (fractional systems).
+
+Note that a correct `n` does not by itself make a neutral count *certain*: the
+truncated tail of a neutral system contributes an oscillation bounded by
+`asin(|a|)/π < 1/2` regardless of `ω_max`, which is what keeps the rounded
+count right and what stops the integer residual from being a useful check
+there.
 """
-function calculate_unstable_roots_p_vec(@nospecialize(D_func), params_vec::AbstractVector{P}; 
+function calculate_unstable_roots_p_vec(@nospecialize(D_func), params_vec::AbstractVector{P};
     n_roots_to_track=1,
-    σ::S=0.0, ω_max=1e6, reltol=1e-5, abstol=1e-5, solver=Vern9(), 
+    σ::S=0.0, ω_max=1e6, reltol=1e-5, abstol=1e-5, solver=Vern9(),
+    n_power_max=nothing,
     parameter_independent_nmax=true, verbosity=0, maxiters=Int(1e6),
     refinement_method=:Newton, refinement_steps=4, refinement_degree=3) where {P, S}
-    
+
     wrapped_D = (D_func isa NyquistWrapper{P}) ? D_func : NyquistWrapper{P}(D_func)
-    
+
     n_params = length(params_vec)
-    n_pow_fixed = parameter_independent_nmax ? _get_n_power_max_impl(wrapped_D, params_vec[1], σ) : nothing
+    # A user-supplied order wins outright: it is exact, it costs nothing, and
+    # it is the documented escape hatch for the classes where the estimator is
+    # least comfortable.
+    n_pow_fixed = n_power_max !== nothing ? Float64(n_power_max) :
+        (parameter_independent_nmax ? _get_n_power_max_impl(wrapped_D, params_vec[1], σ) : nothing)
 
     if n_roots_to_track == 1
         Z_ints = zeros(Int, n_params)
@@ -634,17 +663,23 @@ function _calculate_unstable_roots_quadgk_impl(D_func::NyquistWrapper{P}, p::P, 
 end
 
 """
-    calculate_unstable_roots_quadgk_p_vec(D_func, params_vec::AbstractVector; ...)
+    calculate_unstable_roots_quadgk_p_vec(D_func, params_vec::AbstractVector; n_power_max=nothing, ...)
 
 Vectorized stability sweep using QuadGK and multi-threading.
+
+`n_power_max`: pass the leading order explicitly when it is known; `nothing`
+estimates it once at `params_vec[1]`. See
+[`calculate_unstable_roots_p_vec`](@ref).
 """
-function calculate_unstable_roots_quadgk_p_vec(@nospecialize(D_func), params_vec::AbstractVector{P}; 
-    σ::S=0.0, ω_max=1e6, reltol=1e-5, abstol=1e-5, parameter_independent_nmax=true, verbosity=0) where {P, S}
-    
+function calculate_unstable_roots_quadgk_p_vec(@nospecialize(D_func), params_vec::AbstractVector{P};
+    σ::S=0.0, ω_max=1e6, reltol=1e-5, abstol=1e-5, n_power_max=nothing,
+    parameter_independent_nmax=true, verbosity=0) where {P, S}
+
     wrapped_D = (D_func isa NyquistWrapper{P}) ? D_func : NyquistWrapper{P}(D_func)
-    
+
     n_params = length(params_vec)
-    n_pow_fixed = parameter_independent_nmax ? _get_n_power_max_impl(wrapped_D, params_vec[1], σ) : nothing
+    n_pow_fixed = n_power_max !== nothing ? Float64(n_power_max) :
+        (parameter_independent_nmax ? _get_n_power_max_impl(wrapped_D, params_vec[1], σ) : nothing)
 
     Z_ints = zeros(Int, n_params)
     Z_raws = zeros(Float64, n_params)
@@ -895,13 +930,15 @@ end
 
 Vectorized stability sweep using ultra-fast fixed-step integration.
 """
-function calculate_unstable_roots_fixed_step_p_vec(@nospecialize(D_func), params_vec::AbstractVector{P}; 
-    σ::S=0.0, ω_max=1e6, steps=500, parameter_independent_nmax=true, verbosity=0) where {P, S}
-    
+function calculate_unstable_roots_fixed_step_p_vec(@nospecialize(D_func), params_vec::AbstractVector{P};
+    σ::S=0.0, ω_max=1e6, steps=500, n_power_max=nothing,
+    parameter_independent_nmax=true, verbosity=0) where {P, S}
+
     wrapped_D = (D_func isa NyquistWrapper{P}) ? D_func : NyquistWrapper{P}(D_func)
-    
+
     n_params = length(params_vec)
-    n_pow_fixed = parameter_independent_nmax ? _get_n_power_max_impl(wrapped_D, params_vec[1], σ) : nothing
+    n_pow_fixed = n_power_max !== nothing ? Float64(n_power_max) :
+        (parameter_independent_nmax ? _get_n_power_max_impl(wrapped_D, params_vec[1], σ) : nothing)
 
     Z_ints = zeros(Int, n_params)
     Z_raws = zeros(Float64, n_params)

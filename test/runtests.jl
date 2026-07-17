@@ -1,6 +1,7 @@
 using Test
 using InterpolatedNyquist
 using StaticArrays
+import MDBM
 
 @testset "InterpolatedNyquist.jl Core Tests" begin
 
@@ -277,6 +278,62 @@ using StaticArrays
             ω_max=1e3, n_power_max=2.0)
         @test isnan(es_o) && isnan(wc_o)
         @test !isfinite(md_o)
+    end
+
+    @testset "User-supplied leading order (n_power_max) in the sweeps" begin
+        # A neutral system: |D| = |λ²(1 + a e^{-λ}) + ...| never settles onto a
+        # power law on the imaginary axis, but n = 2 by inspection.
+        D_neu(λ, p) = λ^2 + p[1] * λ^2 * exp(-λ) + 1 + p[2] * exp(-λ)
+        params = [(0.5, c) for c in LinRange(-2.0, 2.0, 12)]
+
+        Z_est, Zr_est = calculate_unstable_roots_p_vec(D_neu, params; ω_max = 200.0,
+            n_roots_to_track = 0)
+        Z_usr, Zr_usr = calculate_unstable_roots_p_vec(D_neu, params; ω_max = 200.0,
+            n_roots_to_track = 0, n_power_max = 2.0)
+        # the estimator finds n = 2 here, so supplying it must not change a thing
+        @test Z_usr == Z_est
+        @test Zr_usr ≈ Zr_est rtol = 1e-8
+
+        # ... and a deliberately WRONG order must shift Z_raw by exactly the
+        # difference of the n/2 terms, proving the value is really being used
+        Z_bad, Zr_bad = calculate_unstable_roots_p_vec(D_neu, params; ω_max = 200.0,
+            n_roots_to_track = 0, n_power_max = 4.0)
+        @test Zr_bad ≈ Zr_est .+ 1.0 rtol = 1e-8
+
+        # the other two back-ends honour it as well
+        Zq, Zrq = calculate_unstable_roots_quadgk_p_vec(D_neu, params; ω_max = 200.0,
+            n_power_max = 4.0)
+        @test Zrq ≈ Zr_bad rtol = 1e-4
+        Zf, Zrf = calculate_unstable_roots_fixed_step_p_vec(D_neu, params; ω_max = 200.0,
+            steps = 2000, n_power_max = 4.0)
+        @test all(isfinite, Zrf)
+    end
+
+    @testset "n_power_max is accepted by the MDBM-level entry points" begin
+        # These paths estimated n internally with no way to override it, and
+        # argument_principle_with_MDBM additionally fed a Float64 estimate into
+        # a kwarg once typed ::Integer -- i.e. the documented workflow threw a
+        # TypeError before it could produce a number.
+        D_osc(λ, p) = λ^2 + 0.2 * λ + 1.0 + p[1] * exp(-λ)
+        ax = [LinRange(0.0, 2.0, 5), LinRange(0.0, 6.0, 5)]   # (p, ω)
+        prob = MDBM.MDBM_Problem((p, ω) -> begin
+                D = D_osc(1im * ω, (p,))
+                (real(D), imag(D))
+            end, ax)
+        MDBM.solve!(prob, 2, verbosity = 0)
+
+        # estimated (the default) must not throw ...
+        p_uniq, Nc = argument_principle_with_MDBM((λ, p) -> D_osc(λ, p), prob, [0.0, 1.0])
+        @test length(p_uniq) == length(Nc)
+        @test all(isfinite, Nc)
+
+        # ... and a supplied order must be honoured: n = 2 here, and feeding
+        # n = 4 must shift every count by exactly (4-2)/2 = 1
+        _, Nc2 = argument_principle_with_MDBM((λ, p) -> D_osc(λ, p), prob, [0.0, 1.0];
+            n_power_max = 2.0)
+        _, Nc4 = argument_principle_with_MDBM((λ, p) -> D_osc(λ, p), prob, [0.0, 1.0];
+            n_power_max = 4.0)
+        @test Nc4 ≈ Nc2 .+ 1.0
     end
 
     @testset "Peak-skip cross-check" begin

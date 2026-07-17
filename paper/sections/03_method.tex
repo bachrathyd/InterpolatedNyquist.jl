@@ -290,9 +290,27 @@ charts at near-maximal speed, and $10^{-8}$ yields reference-quality values
 at a moderate CPU-time premium; the package default $10^{-5}$ adds a further
 safety decade at little cost.
 
-The diagnostic has a precondition that deserves to be stated rather than
-discovered, and it is not the tolerance but the \emph{convergence of the
-tail}. Equation~\eqref{eq:eps} measures the distance of $\Zraw$ from an
+\paragraph{Supplying the leading order.} The order $n$ is an \emph{input} of
+the counting formula~\eqref{eq:count}, not a result of it, and the estimator
+of Section~\ref{sec:extraction} exists only so that a user who does not know
+$n$ is not blocked. Whenever $n$ is known -- and it usually is, by inspection
+of the model -- it should simply be passed
+(\code{n\_power\_max}), for every back-end and for a whole chart at once. It is
+then exact rather than estimated, and it costs nothing. This matters most
+exactly where the estimator is least comfortable: a neutral $\Dfun =
+\lam^{2}(1+a\ee^{-\lam})+\dots$ has $n=2$ by inspection, because
+$\ee^{-s}\to0$ along the real axis, yet on the imaginary axis $|\Dfun|$ never
+settles onto a power law -- it oscillates by a factor
+$(1+|a|)/(1-|a|)$, up to $39$ at $|a|=0.95$, for ever. The estimator does
+recover $n=2$ there (to all printed digits, on every neutral case study of
+Appendix~\ref{app:gallery}), but the user has no way to know that in advance,
+and one declared number removes the doubt. The same applies to fractional
+orders, which are legitimate non-integer inputs.
+
+\paragraph{When the residual stops being a check.} The diagnostic has a
+precondition that deserves to be stated rather than discovered, and -- as the
+neutral case shows -- it is neither the tolerance nor the leading order, but
+the \emph{convergence of the tail}. Equation~\eqref{eq:eps} measures the distance of $\Zraw$ from an
 integer, and $\Zraw$ is only \emph{expected} to be an integer when the
 truncated remainder $\int_{\wmax}^{\infty}$ is negligible. For retarded
 systems it is, and $\varepsilon$ behaves as described: across the retarded

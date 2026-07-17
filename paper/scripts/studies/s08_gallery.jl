@@ -172,11 +172,13 @@ SPECS = [
     # so the truncation must stay moderate; the tail error is bounded by
     # asin(|a|)/pi < 1/2, hence the rounded count remains correct.
     (id = "neutral", D = D_neutral, xl = "a", yl = "c", xr = (-0.9, 0.9), yr = (-2.0, 2.0),
-     nx = half(NBF), ny = half(NBF), ω = 200.0, tol = 1e-4, title = "neutral DDE"),
+     nx = half(NBF), ny = half(NBF), ω = 200.0, tol = 1e-4, npow = 2.0,
+     title = "neutral DDE"),
     (id = "neutral_hg", D = D_neutral_hg, xl = "a", yl = "c", xr = (-0.95, 0.95), yr = (-10.0, 10.0),
-     nx = half(NBF), ny = half(NBF), ω = 200.0, tol = 1e-4, title = "high-gain neutral DDE"),
+     nx = half(NBF), ny = half(NBF), ω = 200.0, tol = 1e-4, npow = 2.0,
+     title = "high-gain neutral DDE"),
     (id = "pda", D = D_pda, xl = "P", yl = "A", xr = (-1.5, 2.5), yr = (-1.6, 1.6),
-     nx = half(NBF), ny = half(NBF), ω = 500.0, tol = 1e-4, cap = 10.0,
+     nx = half(NBF), ny = half(NBF), ω = 500.0, tol = 1e-4, npow = 2.0, cap = 10.0,
      hlines = [-1.0, 1.0], title = "PDA control (neutral, essential)"),
     # w starts slightly above 0: at w = 0 the rational D is constant (no roots)
     (id = "turning", D = D_turning, xl = "Ω", yl = "w", xr = (0.08, 1.2), yr = (0.01, 1.2),
@@ -198,6 +200,13 @@ SPECS = [
 
 getcap(s) = hasproperty(s, :cap) ? s.cap : nothing
 gethl(s) = hasproperty(s, :hlines) ? s.hlines : nothing
+# A panel may state its leading order instead of having it estimated. This is
+# the recommended practice wherever n is known by inspection, and it matters
+# most for the NEUTRAL panels: their |D| = |λ²(1 + a e^{-λ}) + ...| oscillates
+# by a factor (1+|a|)/(1-|a|) -- up to 39x at a = 0.95 -- forever, instead of
+# settling onto a power law, so the estimator is working uphill for a number
+# that is simply 2.
+getnpow(s) = hasproperty(s, :npow) ? s.npow : nothing
 
 function gallery_panel!(fig, r, c, spec)
     xv = LinRange(spec.xr..., spec.nx)
@@ -206,18 +215,22 @@ function gallery_panel!(fig, r, c, spec)
     # panel's ranges / ω_max / tolerance can never silently reuse a stale
     # grid computed for different axes (the classic stale-figure trap)
     mit = mdbm_levels(spec.nx)
-    skey = string(hash((spec.xr, spec.yr, spec.ω, spec.tol, MDBM_N0_G, mit)); base = 16)
+    skey = string(hash((spec.xr, spec.yr, spec.ω, spec.tol, MDBM_N0_G, mit,
+                        getnpow(spec))); base = 16)
     # the DOMINANT root (max Re over several tracked minima) -- a single
     # tracked minimum can belong to a non-dominant branch away from the
     # boundary, which shows up as discontinuous shading
     grid = with_cache("s08_$(spec.id)_$(skey)_$(spec.nx)x$(spec.ny)") do
+        np = getnpow(spec)
+        kw = np === nothing ? (;) : (; n_power_max = np)
         sweep_grid_dominant(spec.D, xv, yv; nroots = 5, ω_max = spec.ω,
-            reltol = spec.tol, abstol = spec.tol)
+            reltol = spec.tol, abstol = spec.tol, kw...)
     end
     bnd = with_cache("s08_$(spec.id)_$(skey)_mdbm") do
         mdbm_boundary(spec.D, spec.xr, spec.yr; ngrid = MDBM_N0_G,
             Niter = FAST[] ? max(3, mit - 2) : mit,
-            ω_max = spec.ω, reltol = spec.tol, abstol = spec.tol)
+            ω_max = spec.ω, reltol = spec.tol, abstol = spec.tol,
+            n_power_max = getnpow(spec))
     end
     C = combined_metric(grid.Z, grid.sigma)
     cap = getcap(spec)
