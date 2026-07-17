@@ -70,6 +70,139 @@ const BOUNDARY_LW = 1.2
 combined_metric(Z_mat, sigma_mat) = Z_mat .+ (Z_mat .== 0) .* sigma_mat
 
 # ---------------------------------------------------------------------------
+# SIGNED BILINEAR colour scale (the one the charts actually use)
+# ---------------------------------------------------------------------------
+# A single linear axis over C = Z + (Z==0)*sigma wastes almost all of its range:
+# the unstable side spans integers up to 5 or 6 while the stable side spans
+# sigma in (-0.1, 0), so the entire spectral-gap information is squeezed into
+# ~2% of the colour bar and reads as one flat shade.
+#
+# Instead, map each side to its OWN normalized coordinate with a common zero at
+# the stability boundary:
+#
+#     t = -|sigma| / |sigma_min|          in [-1, 0)   where Z == 0  (stable)
+#     t = (Z - 1) / (Z_max - 1), shifted   in (0, +1]   where Z >= 1  (unstable)
+#
+# Note the unstable branch is normalized over [1, Z_max], not [0, Z_max]: the
+# smallest count that exists is 1, and mapping it to Z/Z_max would put it a
+# quarter of the way to black on a chart with Z_max = 4 -- so the "barely
+# unstable" region would already be painted dark.
+#
+# so both halves use the full width of their own colour ramp regardless of how
+# different their magnitudes are. The scale is linear on each side (no arctan
+# compression is needed here: neither branch is singular at 0), and the break at
+# t = 0 is deliberate -- that is the stability boundary, where the colour SHOULD
+# jump.
+#
+#     stable:    sigma = 0 (boundary) -> BLUE ....... sigma_min -> GREEN
+#     unstable:  Z small              -> RED ........ Z_max     -> BLACK
+const COL_STABLE_ZERO = RGBf(0.15, 0.35, 1.00)   # sigma -> 0-   (marginally stable)
+const COL_STABLE_FAR  = RGBf(0.00, 0.75, 0.25)   # sigma -> min  (deeply stable)
+const COL_UNSTAB_ZERO = RGBf(1.00, 0.15, 0.10)   # Z = 1         (barely unstable)
+const COL_UNSTAB_FAR  = RGBf(0.00, 0.00, 0.00)   # Z = Z_max     (badly unstable)
+const BILINEAR_CMAP = cgrad([COL_STABLE_FAR, COL_STABLE_ZERO,
+                             COL_UNSTAB_ZERO, COL_UNSTAB_FAR],
+                            [0.0, 0.4999, 0.5001, 1.0])
+
+"""
+    bilinear_metric(Z_mat, sigma_mat) -> (T, sigma_min, Z_max)
+
+Signed bilinear chart field `T ∈ [-1, 1]` with the stability boundary at 0
+(see the comment above). Plot with `colormap = BILINEAR_CMAP` and
+`colorrange = (-1, 1)`. Returns the two extremes as well, since they are what
+the colour bar must be labelled with -- each panel is normalized to its OWN
+`sigma_min` and `Z_max`, which is the entire point.
+
+Points with the invalid marker (`Z < 0`, i.e. a root exactly on the line, so
+the count is undefined) become `NaN` and are left unpainted.
+"""
+function bilinear_metric(Z_mat, sigma_mat; σ_quantile = 0.02)
+    stable_σ = [sigma_mat[i] for i in eachindex(Z_mat)
+                if Z_mat[i] == 0 && isfinite(sigma_mat[i])]
+    # ROBUST lower limit, not the outright minimum. A handful of deeply stable
+    # pixels (sigma ~ -1.8) against a domain whose typical gap is ~ -0.1 would
+    # otherwise squeeze the entire visible variation into a few percent of the
+    # ramp -- the same defect, moved from the whole chart into the stable half.
+    # The reference implementation solves this with an arctan; on a linear
+    # scale the equivalent is to clip the tail, so the deepest few percent
+    # saturate at green and the rest of the domain gets the full gradient.
+    σ_min = isempty(stable_σ) ? -1.0 :
+            min(quantile(stable_σ, σ_quantile), -eps())
+    unstable_Z = [Z_mat[i] for i in eachindex(Z_mat) if Z_mat[i] > 0]
+    Z_max = isempty(unstable_Z) ? 1 : maximum(unstable_Z)
+    T = map(eachindex(Z_mat)) do i
+        z = Z_mat[i]
+        if z < 0                      # invalid marker: count undefined here
+            NaN
+        elseif z == 0
+            s = isfinite(sigma_mat[i]) ? sigma_mat[i] : 0.0
+            -clamp(abs(s) / abs(σ_min), 0.0, 1.0)
+        else
+            _z_to_t(z, Z_max)
+        end
+    end
+    return reshape(T, size(Z_mat)), σ_min, Z_max
+end
+
+# Z = 1 -> just above 0 (red), Z = Z_max -> 1 (black). The small offset keeps
+# Z = 1 strictly on the unstable side of the break in the colour map.
+const _T_FLOOR = 0.03
+function _z_to_t(z, Z_max)
+    Z_max <= 1 && return 1.0
+    return _T_FLOOR + (1 - _T_FLOOR) * clamp((z - 1) / (Z_max - 1), 0.0, 1.0)
+end
+
+"""
+    bilinear_ticks(σ_min, Z_max; n=3) -> (positions, labels)
+
+Tick positions on the `t ∈ [-1,1]` axis together with the REAL values they
+stand for: decay rates on the stable half, root counts on the unstable half.
+"""
+function bilinear_ticks(σ_min, Z_max; n = 3)
+    pos = Float64[]; lab = String[]
+    for k in n:-1:1                                  # stable half: t < 0
+        t = -k / n
+        # the end of the ramp is a CLIP, not the minimum -- say so
+        s = @sprintf("%.2g", t * abs(σ_min))
+        push!(pos, t); push!(lab, k == n ? "≤" * s : s)
+    end
+    # No tick at 0: Z = 1 sits at t = 0.03 and the two labels would overprint.
+    # The blue-to-red break in the colour map marks the boundary unambiguously.
+    # unstable half: tick the ACTUAL integer counts, at the t they map to --
+    # they are what the colours mean, and there are rarely more than a handful
+    zs = Z_max <= 6 ? (1:Z_max) : round.(Int, range(1, Z_max; length = 5))
+    for z in unique(zs)
+        push!(pos, _z_to_t(z, Z_max)); push!(lab, string(z))
+    end
+    return pos, lab
+end
+
+"""
+    annotate_panel!(ax, xr, yr, text_str)
+
+Put an annotation in the lower-left corner of a chart on a semi-transparent
+white plate, so that it stays readable over any colour -- in particular over
+the black of a badly unstable region, where white-on-dark text disappears.
+"""
+function annotate_panel!(ax, xr, yr, text_str; fontsize = 6)
+    w, h = xr[2] - xr[1], yr[2] - yr[1]
+    lines_ = split(text_str, '\n')
+    nlines = length(lines_)
+    ncols = maximum(length, lines_)
+    # Plate sized from the text metrics, deliberately GENEROUS: black text that
+    # runs past the edge of the plate lands on the black of a badly unstable
+    # region and vanishes, which is the exact failure this plate exists to fix.
+    pw = min(0.95, 0.0235 * ncols + 0.03) * w
+    ph = (0.055 * nlines + 0.025) * h
+    x0, y0 = xr[1] + 0.02w, yr[1] + 0.02h
+    poly!(ax, Rect2f(x0, y0, pw, ph); color = (:white, 0.80),
+        strokecolor = (:black, 0.35), strokewidth = 0.3)
+    text!(ax, x0 + 0.015w, y0 + 0.015h; text = text_str, align = (:left, :bottom),
+        fontsize = fontsize, color = :black)
+    return nothing
+end
+
+# ---------------------------------------------------------------------------
 # Saving figures (PDF with rasterized heatmaps by default; PNG on request)
 # ---------------------------------------------------------------------------
 function save_fig(fig, name::AbstractString; kind::Symbol = :vector, px_per_unit = 4)

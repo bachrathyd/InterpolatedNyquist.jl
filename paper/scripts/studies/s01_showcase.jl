@@ -50,16 +50,26 @@ p_unstable = (Pv[unstable_idx[1]], Dv[unstable_idx[2]])
 
 fig = Figure(size = (W_ONEHALF, W_ONEHALF * 0.62))
 ax = MAxis(fig[1, 1], xlabel = "proportional gain  P", ylabel = "derivative gain  D")
-hm = stability_panel!(ax, Pv, Dv, C; edges = bnd.edges)
-Colorbar(fig[1, 2], hm, label = "Z (unstable)  /  σ̂ (stable)")
+# Signed bilinear scale: half the colour range for the spectral gap of the
+# stable island (blue at the boundary -> green deep inside), half for the root
+# count outside (red just past the boundary -> black where Z is largest). A
+# single linear axis over Z + (Z==0)*σ would give the whole σ range of this
+# chart about 2% of the colour bar.
+Cb, σ_min, Z_max = bilinear_metric(grid.Z, grid.sigma)
+hm = heatmap!(ax, Pv, Dv, Cb; colormap = BILINEAR_CMAP, colorrange = (-1, 1),
+    rasterize = 8)
+lines!(ax, bnd.edges[1], bnd.edges[2]; color = BOUNDARY_COLOR, linewidth = BOUNDARY_LW)
+tpos, tlab = bilinear_ticks(σ_min, Z_max)
+Colorbar(fig[1, 2], hm, label = "σ̂ (stable)   |   Z (unstable)",
+    ticks = (tpos, tlab))
 lines!(ax, ell[1], ell[2]; color = :red, linewidth = 1.2)
 scatter!(ax, [circ.x], [circ.y]; color = :red, marker = :star5, markersize = 9)
-scatter!(ax, [p_stable[1]], [p_stable[2]]; color = :white, strokecolor = :black,
-    strokewidth = 0.8, marker = :circle, markersize = 8)
-text!(ax, p_stable[1], p_stable[2]; text = " S", color = :white, fontsize = 9)
-scatter!(ax, [p_unstable[1]], [p_unstable[2]]; color = :white, strokecolor = :black,
-    strokewidth = 0.8, marker = :rect, markersize = 8)
-text!(ax, p_unstable[1], p_unstable[2]; text = " U", color = :white, fontsize = 9)
+for (pt, mk, tag) in ((p_stable, :circle, " S"), (p_unstable, :rect, " U"))
+    scatter!(ax, [pt[1]], [pt[2]]; color = :white, strokecolor = :black,
+        strokewidth = 0.8, marker = mk, markersize = 8)
+    text!(ax, pt[1], pt[2]; text = tag, color = :black, fontsize = 9,
+        strokecolor = :white, strokewidth = 1.2)
+end
 save_fig(fig, "fig_showcase_hybrid")
 
 # ---------------------------------------------------------------------------

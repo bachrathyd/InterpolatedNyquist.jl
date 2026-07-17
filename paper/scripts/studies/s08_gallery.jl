@@ -232,28 +232,27 @@ function gallery_panel!(fig, r, c, spec)
             ω_max = spec.ω, reltol = spec.tol, abstol = spec.tol,
             n_power_max = getnpow(spec))
     end
-    C = combined_metric(grid.Z, grid.sigma)
+    # Signed bilinear field: the stable half is scaled by this panel's own
+    # sigma_min and the unstable half by its own Z_max, so a chart with Z up to
+    # 6 and sigma down to only -0.1 still spends half the colour range on each.
+    Zc = grid.Z
     cap = getcap(spec)
-    cap !== nothing && (C = clamp.(C, -2.0, cap))
-    # Colour range: the spectral gap varies over orders of magnitude, so a raw
-    # extrema() lets a few deeply-stable pixels flatten the whole map. Clip the
-    # stable end at a robust quantile of sigma instead.
-    fin = filter(isfinite, vec(C))
-    lo = isempty(fin) ? -1.0 : quantile(fin, 0.02)
-    hi = isempty(fin) ? 1.0 : maximum(fin)
-    crange = lo < hi ? (lo, hi) : nothing
+    cap !== nothing && (Zc = clamp.(Zc, -1, round(Int, cap)))
+    C, σ_min, Z_max = bilinear_metric(Zc, grid.sigma)
     ax = MAxis(fig[r, c], xlabel = spec.xl, ylabel = spec.yl, title = spec.title,
         titlesize = 8)
-    stability_panel!(ax, xv, yv, C; edges = bnd === nothing ? nothing : bnd.edges,
-        crange = crange)
+    heatmap!(ax, xv, yv, C; colormap = BILINEAR_CMAP, colorrange = (-1, 1),
+        rasterize = 8)
+    bnd === nothing || lines!(ax, bnd.edges[1], bnd.edges[2];
+        color = BOUNDARY_COLOR, linewidth = BOUNDARY_LW)
     hl = gethl(spec)
     hl !== nothing && hlines!(ax, hl; color = :red, linestyle = :dash, linewidth = 1.0)
-    # CPU cost of BOTH stages, printed on the chart itself
-    lab = "grid $(spec.nx)×$(spec.ny): $(tex_time_plain(grid.t))"
+    # CPU cost of BOTH stages, plus this panel's own colour limits: each panel
+    # is normalized to its own extremes, so those numbers must travel with it.
+    lab = "$(spec.nx)×$(spec.ny): $(tex_time_plain(grid.t))"
     bnd !== nothing && (lab *= "\nMDBM: $(tex_time_plain(bnd.t))")
-    text!(ax, 0.03, 0.03; text = lab, space = :relative, align = (:left, :bottom),
-        fontsize = 6, color = :white,
-        strokecolor = :black, strokewidth = 0.6)
+    lab *= "\nσ≤$(round(σ_min, sigdigits = 2)) Z≤$(Z_max)"
+    annotate_panel!(ax, spec.xr, spec.yr, lab)
     # The integer residual PROVES this panel's settings are adequate: a
     # truncated tail or an under-resolved march shows up as Z_raw sitting away
     # from an integer. It costs nothing (Z_raw is already computed) and turns
