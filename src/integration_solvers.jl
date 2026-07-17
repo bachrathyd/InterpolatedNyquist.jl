@@ -350,12 +350,15 @@ tolerances: the plain march miscounts within `~1e-6` of a Hopf boundary,
 the adaptive-quadrature backend silently miscounts at `~1e-10`, while the
 repaired march stays correct down to `~1e-10` — at ≈ 2–3× the march cost,
 comparable to the quadrature backend (per-step condition checks dominate;
-the repair quadrature itself is ~0.2% of evaluations). Off by default: a
-generic chart pixel gains nothing. Enable
-it to re-check pixels flagged by [`peak_skip_suspect`](@ref) or when
-evaluating deliberately close to a boundary. Roots within ~1e3 ulps of the
-σ-line would make the callback re-fire in place; a stuck guard then
-disables further repairs for the rest of that march (a point that close is
+the repair quadrature itself is ~0.2% of evaluations). Off by default
+because its benefit is deliberately narrow: the repair matters only in the
+immediate vicinity of a stability boundary, and arming it for a whole
+chart doubles the sweep to certify at most a few boundary-grazing pixels —
+rarely a good trade. It is one keyword to switch on where it pays: to
+re-check pixels flagged by [`peak_skip_suspect`](@ref), or when evaluating
+deliberately close to a boundary. Roots within ~1e3 ulps of the σ-line
+would make the callback re-fire in place; a stuck guard then disables
+further repairs for the rest of that march (a point that close is
 numerically on the boundary).
 """
 function calculate_unstable_roots_direct(@nospecialize(D_func), p::P, σ::S=0.0;
