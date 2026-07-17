@@ -1,0 +1,4 @@
+backend,t_load_s,t_first_point_s,t_first_sweep_s,n_sweep
+direct,12.4400663,0.0886881,0.1504041,1000
+quadgk,6.9868727,0.7276367,0.2644878,1000
+fixed,6.7166457,0.0664374,0.2359376,1000

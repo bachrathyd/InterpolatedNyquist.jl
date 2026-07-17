@@ -100,16 +100,32 @@ preset_rows = with_cache("s06_presets_v1_$(NGRID)") do
     for (cname, D, xr, yr, wm) in CASES
         xv = LinRange(xr..., NGRID); yv = LinRange(yr..., NGRID)
         params = vec([(x, y) for x in xv, y in yv])
+        # Reference counts. ω_max = 1e6 with tol = 1e-8 is deliberately
+        # over-tight; on the DAE showcase (7x7 dual determinant, ω^-1 ripple)
+        # that single sweep already costs the better part of an hour, which is
+        # itself the point of the accurate/fast split below.
         Z_ref, _ = calculate_unstable_roots_p_vec(D, params; ω_max = 1e6,
             n_roots_to_track = 0, reltol = 1e-8, abstol = 1e-8)
         for (pname, pwm, ptol) in (("accurate", 1e6, 1e-5), ("fast", 1e4, 1e-4))
             f = () -> calculate_unstable_roots_p_vec(D, params; ω_max = pwm,
                 reltol = ptol, abstol = ptol)
-            res = benchmark_sweep(f; repeats = FAST[] ? 2 : 5)
-            Z = f()[1]
-            push!(out, (cname, pname, pwm, ptol, length(params), res.t_med,
-                res.t_med / length(params) * 1e6, count(Z .!= Z_ref)))
-            @info "preset" cname pname chart_s = res.t_med wrong = count(Z .!= Z_ref)
+            # Warm up on a handful of points (JIT only), then time ONE sweep.
+            # Repeating is only worth it when a sweep is short: the showcase's
+            # accurate preset is a ~50 min chart, and five repeats of that cost
+            # four hours to sharpen a number whose leading digit is already
+            # certain.
+            calculate_unstable_roots_p_vec(D, params[1:min(20, end)]; ω_max = pwm,
+                reltol = ptol, abstol = ptol)
+            t1 = @elapsed Zt = f()
+            t = t1
+            if t1 < 10.0
+                res = benchmark_sweep(f; repeats = FAST[] ? 2 : 5)
+                t = res.t_med
+            end
+            Z = Zt[1]
+            push!(out, (cname, pname, pwm, ptol, length(params), t,
+                t / length(params) * 1e6, count(Z .!= Z_ref)))
+            @info "preset" cname pname chart_s = t wrong = count(Z .!= Z_ref)
         end
     end
     out

@@ -64,10 +64,12 @@ n_flip = [count((g.Z .== 0) .!= (Z_ref_grid .== 0)) for g in tol_grids]
 # where a root lies CLOSE to the line, so the test is restricted to a
 # neighbourhood |sigma_est| < CHECK_H -- orders of magnitude below the
 # typical |sigma_est| of the deep domain, quantified by ref_med below.
+# NB: broadcast so the masks keep the MATRIX shape of the grid -- `flips` below
+# comes from findall on a matrix and therefore holds CartesianIndex values,
+# which cannot index a flat Vector.
 const CHECK_H = 1e-3
-naive_flag(g) = [(g.sigma[i] < 0) != (g.Z[i] == 0) for i in eachindex(g.Z)]
-near_flag(g) = [((g.sigma[i] < 0) != (g.Z[i] == 0)) && abs(g.sigma[i]) < CHECK_H
-                for i in eachindex(g.Z)]
+naive_flag(g) = (g.sigma .< 0) .!= (g.Z .== 0)
+near_flag(g) = ((g.sigma .< 0) .!= (g.Z .== 0)) .& (abs.(g.sigma) .< CHECK_H)
 ref_g = tol_grids[end]
 ref_med = median(abs.(ref_g.sigma[naive_flag(ref_g)]))
 check_rows = Tuple[]

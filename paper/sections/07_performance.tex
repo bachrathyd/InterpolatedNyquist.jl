@@ -128,36 +128,54 @@ rapidly decaying tail (Section~\ref{sec:performance-zoo}).
 \end{table}
 
 Two operating points matter in practice, and Table~\ref{tab:presets}
-separates them because conflating them is what makes performance claims
-about stability charts unfalsifiable. With the \emph{safe} settings --
+separates them because conflating them is what makes performance claims about
+stability charts unfalsifiable. With the \emph{safe} settings --
 $\wmax=10^{6}$ and $\mathrm{tol}=10^{-5}$ -- a complete $100\times100$ chart
-of a scalar characteristic function is a matter of seconds and every count
-matches a tight reference. With an \emph{exploratory} preset --
-$\wmax=10^{4}$, $\mathrm{tol}=10^{-4}$ -- the same grid resolves in a
-fraction of that, at the price of a handful of boundary-adjacent counts
-(Section~\ref{sec:showcase-tolerance}); the traced boundary, which is built
-from $\sest$ rather than from the count, is unaffected. Neither setting is
-``the'' performance of the method: the first is what to quote for a
-published chart, the second for interactive exploration.
+of a scalar characteristic function costs a fraction of a second, and every
+one of the ten thousand counts matches a tight reference. With an
+\emph{exploratory} preset -- $\wmax=10^{4}$, $\mathrm{tol}=10^{-4}$ -- the
+same grid resolves about twice as fast, and on those systems still without a
+single wrong count.
+
+The showcase DDAE in the same table is the instructive entry, and it carries
+the paper's sharpest practical lesson. Its accurate chart takes \emph{fifty
+minutes}, its exploratory chart \emph{forty-eight seconds} -- a factor of
+sixty for three miscounted pixels out of ten thousand. The reason is the
+compounding of two costs that Section~\ref{sec:phaseode} treats separately:
+this system's delayed \emph{velocity} feedback makes the phase ripple decay
+only like $\omega^{-1}$, so raising $\wmax$ from $10^{4}$ to $10^{6}$ forces
+the march to resolve two further decades of it, and every one of those
+evaluations runs a $7\times7$ dual-number determinant through the automatic
+extraction. Neither factor is a defect of the counting method; both are
+choices the user makes. And the correct choice here is the cheap one: the
+tail truncated at $\wmax=10^{4}$ contributes $\approx0.2/\wmax=2\cdot10^{-5}$
+to $\Zraw$, five orders of magnitude below the rounding threshold, so the
+expensive chart buys nothing but certainty about pixels that were already
+right. This is what the asymmetric guidance of Section~\ref{sec:phaseode}
+means in practice -- be generous with $\wmax$ when the ripple decays fast,
+where it is nearly free, and frugal when it does not.
 
 Table~\ref{tab:gridtimings} reports the cost of a \emph{complete}
 $100\times100$ chart -- ten thousand parameter points -- on a
 \CPUmodel{} (\NumThreads{} threads, \RAMgb\,GB RAM, Julia~\JuliaVersion,
 package revision \PkgCommit), with the per-point cost listed alongside so
 that other resolutions can be scaled directly. For scalar characteristic
-functions a full chart takes a few tens of milliseconds, and the entire
-hybrid workflow (colored sweep plus MDBM boundary) finishes well inside one
-second -- genuinely interactive. For the showcase DDAE every evaluation runs
+functions a full chart takes tens to hundreds of milliseconds, and the
+entire hybrid workflow (colored sweep plus MDBM boundary) finishes well
+inside one second -- genuinely interactive. The last column is worth a
+glance: the fixed-step back-end is the fastest entry for the delayed systems
+and gets thousands of the ten thousand counts wrong, for the reason given in
+Section~\ref{sec:alternatives}. For the showcase DDAE every evaluation runs
 the automatic extraction of Section~\ref{sec:extraction}, i.e.\ a $7\times7$
 dual-number determinant, and the chart takes on the order of a minute at
 this resolution; the convenience of never deriving $\Dfun$ by hand thus
-costs roughly an order of magnitude against a hand-coded characteristic
+costs roughly two orders of magnitude against a hand-coded characteristic
 function, which the same table quantifies. Memory stays modest throughout
 because the phase ODE carries a single scalar state and the sweep stores
 only the five result fields; no large matrices are formed at any point.
-Cold start is a one-time cost dominated by package loading: in a fresh
-Julia process, loading takes about $5.5$\,s and the first thousand-point
-sweep $0.1$--$0.3$\,s thanks to the precompilation workload shipped with the
+Cold start is a one-time cost dominated by package loading: in a fresh Julia
+process, loading takes $7$--$12$\,s and the first thousand-point sweep
+$0.15$--$0.26$\,s thanks to the precompilation workload shipped with the
 package, after which every further chart runs at the warm speeds of
 Table~\ref{tab:gridtimings}.
 
@@ -175,9 +193,9 @@ Table~\ref{tab:mdbm} makes the boundary-tracing argument of
 Section~\ref{sec:mdbm} concrete. Four refinement levels from a
 $20\times20$ mesh yield a boundary resolved as finely as a
 $320\times320$ uniform grid would resolve it, while evaluating only the
-cells that actually bracket the boundary -- a saving of two orders of
-magnitude in function evaluations, which is precisely why the high-resolution
-boundary is affordable on top of a deliberately coarse colored background. These numbers substantiate the practical claim
+cells that actually bracket the boundary -- a saving of $20$ to $50$ times in
+function evaluations, which is precisely why the high-resolution boundary is
+affordable on top of a deliberately coarse colored background. These numbers substantiate the practical claim
 of the paper: the stability chart of a nontrivial delayed system refreshes
 fast enough to be explored \emph{interactively}, which changes how such
 charts are used in design -- parameter studies and optimization loops can
@@ -288,13 +306,18 @@ nothing about the quadrature failed. The breakpoints cost a few dozen extra
 evaluations and remove the failure mode entirely.
 
 Figure~\ref{fig:zoo} extends the comparison to a wider selection of ODE
-solvers on the fourth-order benchmark system. The qualitative picture is
-robust: (i)~the fixed-step trapezoid is unbeatable for crude, high-speed
-scans but its accuracy stagnates unless the step count grows
-with the requested accuracy; (ii)~all adaptive methods follow their tolerance;
-(iii)~higher-order pairs dominate at tight tolerances, while the linearly
-implicit pair is uniformly dominated -- there is no stiffness for it to
-exploit. The spread between the methods is far smaller than the gap
-that separates all of them from methods that rebuild discretization
-matrices at every parameter point, which is the practical message of this
-section.
+solvers on the fourth-order benchmark system, and one of its lessons is
+negative enough to be worth stating plainly. (i)~The fixed-step trapezoid is
+\emph{dominated everywhere} on this problem: matching the mean accuracy that
+the ninth-order pair reaches at its loosest setting already costs it more
+than an order of magnitude in time, and even at $3\cdot10^{4}$ steps its
+worst error over the chart remains several roots, because a uniform grid
+cannot resolve a peak that narrows without bound as a root approaches the
+line. Its zero-overhead appeal is real only where the integrand has no such
+peak. (ii)~All adaptive methods follow their tolerance. (iii)~Higher-order
+pairs dominate at tight tolerances, while the linearly implicit pair is
+uniformly dominated -- there is no stiffness for it to exploit. The spread
+between the \emph{adaptive} methods is far smaller than the gap that
+separates all of them from a fixed grid, and smaller still than the gap to
+methods that rebuild discretization matrices at every parameter point, which
+is the practical message of this section.

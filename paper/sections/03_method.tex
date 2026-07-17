@@ -363,8 +363,16 @@ default, because every chart in this paper is built from the tracked root:
 the interpolable coloring~\eqref{eq:coloring}, the boundary
 objective~\eqref{eq:objective}, the refinement seeds, and the consistency
 check of Section~\ref{sec:integerness} all consume $\sest$, not $\Zint$
-alone. A third back-end evaluates the integral
-by a fixed-step trapezoidal rule; it lacks adaptivity but has essentially
-zero overhead, which makes it attractive for real-time, interactive
-parameter studies where occasional off-by-one counts near the boundaries
-are acceptable (Section~\ref{sec:performance}).
+alone. A third back-end evaluates the integral by a fixed-step trapezoidal rule with
+no adaptivity and essentially zero overhead. It is included for completeness
+and as a real-time floor, but the measurements of
+Section~\ref{sec:performance-zoo} do not support recommending it for the
+systems studied here, and it is worth saying why: a \emph{uniform} frequency
+grid cannot resolve the peak~\eqref{eq:peak} of a root that lies close to the
+line, and near a stability boundary that peak is arbitrarily narrow. Its mean
+count error therefore converges with the step count while its \emph{worst}
+error over a chart does not -- at $3\cdot10^{4}$ steps, more than an order of
+magnitude slower than the adaptive default, individual points are still off
+by several roots. Adaptivity is thus not a convenience here but the very
+mechanism that makes the count trustworthy, which is the same reason the
+step-size control was introduced in Section~\ref{sec:phaseode}.

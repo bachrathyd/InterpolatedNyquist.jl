@@ -1,0 +1,4 @@
+system,n0,iters,equiv_res,n_evaluated,n_boundary_pts,time_s,saving_factor
+2nd-order, no delay,20,4,320,1988,411,0.064804,51.50905432595574
+4th-order + delay,20,4,320,3462,792,0.304283,29.57827845176199
+2-DOF DAE showcase,20,4,320,5011,1221,29.384796,20.435042905607663

@@ -1,0 +1,5 @@
+system,wmax,n_march,n_quad,Z
+showcase ($\omega^{-1}$ ripple),10000.0,11138,15315,4
+showcase ($\omega^{-1}$ ripple),1.0e6,578418,1675500,4
+4th-order ($\omega^{-3}$ ripple),10000.0,1330,555,2
+4th-order ($\omega^{-3}$ ripple),1.0e6,1426,570,2
