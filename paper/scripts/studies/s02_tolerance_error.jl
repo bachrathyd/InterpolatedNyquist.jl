@@ -41,17 +41,16 @@ const D_TOL = D_showcase_reduced
 
 # cache v4: v3 used the 1e-3..1e-9 ladder
 # The stable region is coloured by sigma_est of the DOMINANT root, and that
-# field must be smooth. Isolated pixels used to jump to a smaller sigma where
-# the dominant root was evicted from the tracking buffer by deeper non-dominant
-# minima. That is now fixed in the tracker itself (it keeps the N RIGHTMOST
-# roots, not the N deepest |D| dips), so the DEFAULT buffer is already enough --
-# no per-chart nroots tuning. Measured (stable domain, pixels whose sigma jumps
-# >0.01 from the neighbour median): with the rightmost-keep policy the default
-# 5-root buffer gives 32-36 rough pixels, matching a 15-root buffer, and those
-# ~34 are REAL sigma jumps (fast branch crossings; nroots = 50 agrees at every
-# one), not artifacts. Turning refinement OFF makes it far worse (300+), so the
-# Newton polish is not the cause -- it drives sigma to machine precision.
-tol_grids = with_cache("s02_grids_v9_$(nP)x$(nD)") do
+# field must be smooth. Isolated pixels jump to a smaller sigma where the
+# dominant (rightmost) root is crowded out of the tracking buffer by deeper
+# non-dominant minima -- so max-Re lands on a more negative root. The cure is a
+# bigger buffer: sweep_grid_dominant defaults to 15 tracked roots (see
+# systems.jl), which drops the rough pixels 78 -> 34 on this chart, the real
+# branch-crossing floor (nroots = 50 agrees at every one). Measured causes
+# ruled out: it is NOT the Newton polish (turning refinement off makes it far
+# worse, 300+ pixels, since sigma then carries the raw tolerance error), and the
+# count flips are a separate, tolerance-driven effect (peak skips).
+tol_grids = with_cache("s02_grids_v10_$(nP)x$(nD)") do
     map(TOLS) do tol
         g = sweep_grid_dominant(D_TOL, Pv, Dv; ω_max = WMAX_TOL,
             reltol = tol, abstol = tol)

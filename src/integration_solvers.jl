@@ -362,18 +362,9 @@ function _calculate_unstable_roots_direct_impl(D_func::NyquistWrapper{P}, p::P, 
     n_power_max=nothing, verbosity=0, maxiters=Int(1e6),
     refinement_method=:Newton, refinement_steps=4, refinement_degree=3) where {P, S, N}
 
-    # The buffer keeps the N ROOTS OF LARGEST REAL PART (the rightmost), sorted
-    # by re_vec descending, with d_sq_vec and roots_vec running parallel. This
-    # is deliberately NOT a "keep the N deepest |D| dips" buffer: the depth of a
-    # minimum is |D'(λ)|·|Re λ|, so a far-off root with a small |D'| can dip
-    # deeper than the DOMINANT (rightmost) root. A depth-ranked buffer can fill
-    # with such deep non-dominant roots and then reject the dominant one when it
-    # is detected later -- exactly the failure that makes the σ-coloured charts
-    # speckle. Ranking by real part admits the dominant root whatever its depth.
     d_sq_vec = MVector{N, Float64}(fill(Inf, N))
     roots_vec = MVector{N, ComplexF64}(fill(NaN + NaN*im, N))
-    re_vec = MVector{N, Float64}(fill(-Inf, N))
-
+    
     # Boundary check at ω = 0
     # Because |D(ω)|^2 is even, a positive derivative at ω ≈ 0 implies a local
     # minimum at 0. NOTE: evenness holds for real-coefficient D (conjugate
@@ -394,7 +385,6 @@ function _calculate_unstable_roots_direct_impl(D_func::NyquistWrapper{P}, p::P, 
         est_sigma_0 = σ - (re_val_0 * dim_0 - im_val_0 * dre_0) / (dim_0^2 + dre_0^2)
         d_sq_vec[1] = d_sq_0
         roots_vec[1] = est_sigma_0 + 0.0im
-        re_vec[1] = est_sigma_0
     end
 
     prev_d_sq_deriv = Ref(d_sq_deriv_0)
@@ -427,45 +417,39 @@ function _calculate_unstable_roots_direct_impl(D_func::NyquistWrapper{P}, p::P, 
             # ω monotonically, so the same minimum can be detected more than
             # once at nearly identical ω. Deduplicate by ω-proximity: keep the
             # deeper of the two detections instead of storing both.
-            # The solver's RK stages and rejected/retried steps do not sample ω
-            # monotonically, so the same minimum can be detected more than once
-            # at nearly identical ω. Deduplicate by ω-proximity: keep the deeper
-            # (smaller |D|²) detection, since it is the better estimate.
-            do_insert = true
+            insert_val = d_sq
+            dup_idx = 0
             for j in 1:N
                 if isfinite(imag(roots_vec[j])) &&
                    abs(curr_ω - imag(roots_vec[j])) <= 1e-6 * max(curr_ω, 1.0)
-                    if d_sq < d_sq_vec[j]
-                        # remove the shallower duplicate; shift the tail up so a
-                        # free slot opens at N and the re-insert below re-ranks it
-                        for k in j:N-1
-                            re_vec[k] = re_vec[k+1]
-                            d_sq_vec[k] = d_sq_vec[k+1]
-                            roots_vec[k] = roots_vec[k+1]
-                        end
-                        re_vec[N] = -Inf; d_sq_vec[N] = Inf; roots_vec[N] = NaN + NaN*im
-                    else
-                        do_insert = false   # shallower re-detection: keep existing
-                    end
+                    dup_idx = j
                     break
                 end
             end
+            if dup_idx > 0
+                if insert_val < d_sq_vec[dup_idx]
+                    # drop the shallower duplicate, then re-insert sorted below
+                    for j in dup_idx:N-1
+                        d_sq_vec[j] = d_sq_vec[j+1]
+                        roots_vec[j] = roots_vec[j+1]
+                    end
+                    d_sq_vec[N] = Inf
+                    roots_vec[N] = NaN + NaN*im
+                else
+                    insert_val = Inf   # shallower re-detection: skip the insert
+                end
+            end
 
-            # Admit if more dominant (larger real part) than the least dominant
-            # root currently held. re_vec is kept sorted descending, so re_vec[N]
-            # is the smallest real part (and -Inf for an empty slot).
-            if do_insert && est_sigma > re_vec[N]
+            if insert_val < d_sq_vec[N]
                 idx = N
-                while idx > 1 && est_sigma > re_vec[idx-1]
+                while idx > 1 && insert_val < d_sq_vec[idx-1]
                     idx -= 1
                 end
                 for j in N:-1:idx+1
-                    re_vec[j] = re_vec[j-1]
                     d_sq_vec[j] = d_sq_vec[j-1]
                     roots_vec[j] = roots_vec[j-1]
                 end
-                re_vec[idx] = est_sigma
-                d_sq_vec[idx] = d_sq
+                d_sq_vec[idx] = insert_val
                 roots_vec[idx] = new_root
             end
         end
@@ -489,8 +473,7 @@ function _calculate_unstable_roots_direct_impl(D_func::NyquistWrapper{P}, p::P, 
         # The ω-proximity dedupe above cannot catch re-detections of the same
         # minimum at stage abscissae further apart than its window; those
         # collapse onto the SAME root only after refinement. Blank the
-        # duplicates (entries are real-part-sorted, so the first is the
-        # rightmost -- the one we most want to keep).
+        # duplicates (entries are depth-sorted, so the first is the deepest).
         for j in 2:N
             for k in 1:j-1
                 if isfinite(abs(refined_roots[j])) && isfinite(abs(refined_roots[k])) &&

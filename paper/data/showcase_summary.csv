@@ -2,8 +2,8 @@ key,value
 extraction_ratio_dev,7.096940512410915e-16
 grid_nx,90
 grid_ny,70
-grid_time_s,1.436000108718872
-mdbm_time_s,3.896984
+grid_time_s,1.2409999370574951
+mdbm_time_s,3.2398827
 robust_P,1.6082361769642752
 robust_D,1.5464967052296996
 robust_R_scaled,0.6081955171389647

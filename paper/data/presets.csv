@@ -1,7 +1,7 @@
 system,preset,wmax,tol,n_points,chart_time_s,per_point_us,n_wrong_vs_ref
-2nd-order, no delay,accurate,10000.0,1.0e-5,10000,0.0554685,5.54685,0
-2nd-order, no delay,fast,10000.0,0.001,10000,0.0434781,4.34781,0
-4th-order + delay,accurate,10000.0,1.0e-5,10000,0.4106922,41.069219999999994,0
-4th-order + delay,fast,10000.0,0.001,10000,0.2108649,21.086489999999998,14
-2-DOF DAE showcase,accurate,10000.0,1.0e-5,10000,1.8873544,188.73543999999998,0
-2-DOF DAE showcase,fast,10000.0,0.001,10000,1.1448988,114.48988,32
+2nd-order, no delay,accurate,10000.0,1.0e-5,10000,0.055429,5.5428999999999995,0
+2nd-order, no delay,fast,10000.0,0.001,10000,0.0437859,4.37859,0
+4th-order + delay,accurate,10000.0,1.0e-5,10000,0.4195548,41.95548,0
+4th-order + delay,fast,10000.0,0.001,10000,0.2139484,21.39484,14
+2-DOF DAE showcase,accurate,10000.0,1.0e-5,10000,1.9255196,192.55196,0
+2-DOF DAE showcase,fast,10000.0,0.001,10000,1.1157919,111.57919000000001,32

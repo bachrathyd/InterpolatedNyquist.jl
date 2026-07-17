@@ -83,9 +83,9 @@ contour!(axr, σs, ωs, ImD; levels = [0.0], color = Makie.wong_colors()[2])
 lines!(axr, [NaN], [NaN]; color = Makie.wong_colors()[1], label = "Re D(λ) = 0")
 lines!(axr, [NaN], [NaN]; color = Makie.wong_colors()[2], label = "Im D(λ) = 0")
 scatter!(axr, [real(seeds_zoom[k_dom])], [imag(seeds_zoom[k_dom])];
-    color = :black, marker = :cross, markersize = 13, label = "integrator seed")
+    color = :black, marker = :cross, markersize = 10, label = "integrator seed")
 scatter!(axr, [real(ref_zoom[k_dom])], [imag(ref_zoom[k_dom])];
-    color = :red, marker = :circle, markersize = 7, label = "Newton-4 refined")
+    color = :red, marker = :xcross, markersize = 10, label = "Newton-4 refined")
 scatter!(axr, [real(λ0)], [imag(λ0)]; color = :white, strokecolor = :black,
     strokewidth = 0.7, marker = :diamond, markersize = 6, label = "reference")
 axislegend(axr; position = :rb, labelsize = 6)

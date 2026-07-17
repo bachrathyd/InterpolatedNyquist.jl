@@ -134,20 +134,57 @@ function D_fem(λ::T, p) where T
     return one(T) + c * (Q0 \ T.(E_1_FEM))[N_FEM]
 end
 
-# The analytic Kelvin-Voigt beam of the earlier drafts, kept as a panel in its
-# own right: same transcendental class, but a collocated tip-force law rather
-# than Zhang & Stepan's end-to-end feedback, and swept over (gain, delay)
-# instead of (delay ratio, gain). It shows the method on a cosh-type D whose
-# parameters are NOT taken from a reference chart.
-const BEAM_C = 0.02
-# Same argument order and axes as D_beam, so the two transcendental panels can
-# be read side by side: delay first, gain second. The only difference from the
-# Zhang-Stepan bar is the feedback law -- a collocated tip force (+Kp) rather
-# than their end-to-end strain feedback (-K) -- and a slightly larger damping.
-function D_beam_kv(λ::T, p) where T
-    τ, Kp = p
-    γ = λ / sqrt(one(T) + T(BEAM_C) * λ)
-    return one(T) + Kp * exp(-λ * τ) / cosh(γ)
+# ===========================================================================
+# CONNECTED CRUISE CONTROL, N VEHICLES ON A RING -- Ge, Orosz, Hajdu, Insperger
+# & Moehlis, "To Delay or Not to Delay -- Stability of Connected Cruise
+# Control", Advances in Delays and Dynamics, Springer 2017, pp. 263-282.
+# This panel reproduces the linear (plant) stability of their Fig. 4(d).
+#
+# N vehicles on a ring road, each following the one ahead with gains alpha
+# (headway) and beta (velocity) and a driver reaction delay sigma. The circulant
+# structure block-diagonalizes into N independent wave numbers k, giving their
+# Eq. 27 -- here multiplied through by e^{-s sigma} to put it in RETARDED form:
+#
+#   D_k(s) = s^2 + e^{-s sigma}[ (alpha+beta)s + alpha f* - (beta s + alpha f*) z_k ]
+#   z_k = exp(2 pi i k / N),   f* = V'(h*) = pi/2 [1/s] at v* = 15 m/s, h* = 20 m
+#
+# and the ring's characteristic function is the product over k. Three points
+# decide the implementation, and none of them is optional:
+#
+#  * k = 0 is DROPPED. It has a root at s = 0 for every (alpha, beta) -- the
+#    ring's translational invariance, which the paper states explicitly. Keeping
+#    it would put a root exactly on the integration line and no count would
+#    exist anywhere on the chart.
+#  * The product must be NORMALIZED. Raw, it grows like s^(2(N-1)) = s^198;
+#    at omega = 1e4 that is 1e792, and Float64 dies at 1e308. Dividing each
+#    factor by (s+a)^2 with a > 0 places the extra poles in the LEFT half-plane,
+#    where they cannot change the right-half-plane count, and makes D -> 1, i.e.
+#    n = 0 exactly -- no leading-order estimate needed at all.
+#  * The product over k = 1..N-1 is used, not individual factors: each factor
+#    alone has COMPLEX coefficients (z_k is complex), so its roots are not
+#    conjugate-symmetric and the half-line formula would not apply. The full
+#    product is conjugate-symmetric (verified to 5e-15) because {z_k} is closed
+#    under conjugation.
+#
+# With A = G/(s+a)^2 and B = (beta s + alpha f*)e^{-s sigma}/(s+a)^2, the
+# product over k=1..N-1 telescopes to (A^N - B^N)/(A - B) = sum_j A^{N-1-j}B^j,
+# evaluated below by a division-free recurrence that never forms either power.
+const CCC_N = 100              # vehicles on the ring, as in their Fig. 4
+const CCC_F = pi / 2           # f* [1/s], their maximum range-policy slope
+const CCC_SIG = 0.2            # driver reaction delay [s], their panel (d)
+const CCC_A = 1.0              # normalization pole: LHP, cancels from the count
+function D_ccc(s::T, p) where T
+    β, α = p
+    e = exp(-T(CCC_SIG) * s)
+    d = (s + T(CCC_A))^2
+    A = (s^2 + ((α + β) * s + α * T(CCC_F)) * e) / d
+    B = ((β * s + α * T(CCC_F)) * e) / d
+    S = one(T); pA = one(T)
+    for _ in 2:CCC_N
+        pA *= A
+        S = pA + B * S
+    end
+    return S
 end
 
 # 50x50 dense stress test. The previous parameters put the whole window deep in
@@ -245,14 +282,25 @@ SPECS = [
     (id = "fem", D = D_fem, xl = "τ/T", yl = "K", xr = (0.02, 10.5), yr = (-0.75, 1.0),
      nx = half(NBF), ny = half(NBF), ω = 400.0, tol = 1e-4, npow = 0.0,
      title = "same bar, 12-DOF FEM"),
-    # Same axes and ranges as the two Zhang-Stepan panels above, so the three
-    # transcendental charts are directly comparable: delay horizontal, gain
-    # vertical, delay out to 10 wave-travel times.
-    (id = "beamkv", D = D_beam_kv, xl = "τ/T", yl = "Kp", xr = (0.02, 10.5), yr = (-0.75, 1.0),
-     nx = half(NBF), ny = half(NBF), ω = 400.0, tol = 1e-4, npow = 0.0,
-     title = "collocated tip force (Kelvin-Voigt)"),
-    # gain > -1: at gain = -1 exactly, the delayed stiffness cancels the static
-    # one and a characteristic root sits ON the integration line (Z undefined)
+    # Reproduction of Ge, Orosz, Hajdu, Insperger & Moehlis (2017) Fig. 4(d):
+    # the exact axes and parameters of the paper.
+    # alpha starts just above 0: at alpha = 0 EVERY wave number has D_k(0) = 0,
+    # so a root sits exactly on the integration line and no count exists. That
+    # line is the paper's own Eq. 12 stability boundary; our residual diagnostic
+    # flags it unprompted (it was the only row of uncertain points on the chart).
+    # This panel is the one place the gallery's tol = 1e-4 is not enough, and the
+    # reason is worth recording. The (s+a)^2 normalization leaves a phase tail
+    # ~2aN/omega which N = 100 amplifies, so the two knobs pull against each
+    # other: raising omega_max shortens the tail but lengthens the march, and at
+    # a loose tolerance the march's own error wins. Measured on a 40x40 grid: at
+    # tol = 1e-6 the median residual falls 0.016 -> 0.0022 going from omega_max
+    # 1e4 to 1e5, but at tol = 1e-4 it RISES 0.022 -> 0.032. Hence omega_max =
+    # 1e4 with a tightened tol = 1e-5. What remains is not alarming in context:
+    # this chart counts up to Z ~ 240 roots, so a residual of ~0.02 is a
+    # RELATIVE error of order 1e-4.
+    (id = "ccc", D = D_ccc, xl = "β [1/s]", yl = "α [1/s]", xr = (-10.0, 10.0), yr = (0.05, 16.0),
+     nx = half(NBF), ny = half(NBF), ω = 1e4, tol = 1e-5, npow = 0.0,
+     title = "$(CCC_N)-vehicle ring, CCC (Ge & Orosz Fig. 4d)"),
     (id = "bigmat", D = D_bigmat, xl = "gain", yl = "τ", xr = (-0.95, 1.0), yr = (0.05, 1.5),
      nx = half(40), ny = half(40), ω = 200.0, tol = 1e-4, title = "50x50 matrix determinant"),
     (id = "frac", D = D_frac, xl = "k", yl = "τ", xr = (0.0, 5.0), yr = (0.1, 2.0),
@@ -276,15 +324,23 @@ function gallery_panel!(fig, r, c, spec)
     # panel's ranges / ω_max / tolerance can never silently reuse a stale
     # grid computed for different axes (the classic stale-figure trap)
     mit = mdbm_levels(spec.nx)
+    # 15 tracked roots removes the sigma-colour speckle (see systems.jl); the
+    # three panels whose D is expensive per evaluation (a dense solve or a
+    # 100-factor product) keep 5, where the extra refinement would cost minutes
+    # for a colour improvement invisible at chart resolution.
+    nr = spec.id in ("fem", "bigmat", "ccc") ? 5 : 15
+    # the cache key hashes every numeric knob of the spec, so editing a
+    # panel's ranges / ω_max / tolerance / nroots can never silently reuse a
+    # stale grid computed for different settings (the classic stale-figure trap)
     skey = string(hash((spec.xr, spec.yr, spec.ω, spec.tol, MDBM_N0_G, mit,
-                        getnpow(spec))); base = 16)
+                        getnpow(spec), nr)); base = 16)
     # the DOMINANT root (max Re over several tracked minima) -- a single
     # tracked minimum can belong to a non-dominant branch away from the
     # boundary, which shows up as discontinuous shading
     grid = with_cache("s08_$(spec.id)_$(skey)_$(spec.nx)x$(spec.ny)") do
         np = getnpow(spec)
         kw = np === nothing ? (;) : (; n_power_max = np)
-        sweep_grid_dominant(spec.D, xv, yv; nroots = 5, ω_max = spec.ω,
+        sweep_grid_dominant(spec.D, xv, yv; nroots = nr, ω_max = spec.ω,
             reltol = spec.tol, abstol = spec.tol, kw...)
     end
     bnd = with_cache("s08_$(spec.id)_$(skey)_mdbm") do
