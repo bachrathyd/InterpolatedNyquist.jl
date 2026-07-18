@@ -110,24 +110,34 @@ const COL_UNSTAB_ZERO = RGBf(1.00, 0.15, 0.10)   # Z -> 0+       (barely unstabl
 # turns them into heavy voids that dominate the figure and swallow any
 # annotation drawn over them.
 const COL_UNSTAB_FAR  = RGBf(0.28, 0.00, 0.05)   # Z = Z_max     (badly unstable)
-# Built by sampling each branch SEPARATELY, rather than as a 4-stop gradient
-# with the stops crowded around 0.5: any sample landing inside that tiny window
-# is a blue-red average, i.e. purple, and it appears as a violet fringe just
-# inside the stable domain -- exactly where sigma is closest to zero and the
-# chart is read most carefully. Sampling per branch makes the break exact: the
-# last stable level is blue, the first unstable level is red, and no
-# intermediate colour exists.
-const BILINEAR_CMAP = let n = 256
+# The break at t = 0.5 (sigma = 0) must be HARD: a colour landing between the
+# last stable level (blue) and the first unstable level (red) is their average,
+# i.e. purple, and it appears as a violet fringe just inside the stable domain
+# -- exactly where sigma is closest to zero and the chart is read most
+# carefully. On a chart whose stable gap is genuinely tiny over a large area
+# (the low-order fractional controller, mu = 0.4, sits at sigma ~ 0 over ~60% of
+# its stable domain) that fringe swells into a large purple blob. Sampling the
+# two branches into one 256-colour ramp does NOT fix it, and NEITHER does a
+# positioned `cgrad` with the blue/red stops a hair apart: `cgrad` RESAMPLES to
+# 256 colours internally, so any two stops closer than ~1/256 are averaged in
+# that resample -- recreating the purple exactly where sigma = 0. (This bites
+# hardest on a chart whose gap is genuinely ~0 over a large area: the mu = 0.4
+# fractional controller sits at sigma = 0 to < 5e-5 over most of its stable
+# domain, so the whole region maps to t = 0 and goes violet.)
+#
+# The construction that survives the resample is a CATEGORICAL gradient: 128
+# green->blue levels for the stable branch followed by 128 red->maroon levels
+# for the unstable one, with NO interpolation between adjacent levels. The
+# stable/unstable break is then a genuine step -- t = 0 (sigma = 0) lands on the
+# last blue level, t just above lands on the first red level, and no blue-red
+# average is ever produced. 256 levels are visually indistinguishable from a
+# smooth ramp within each branch.
+const BILINEAR_CMAP = let n = 128
     lerp(a, b, t) = RGBf(a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t,
                          a.b + (b.b - a.b) * t)
-    cols = map(range(0, 1; length = n)) do t
-        if t < 0.5
-            lerp(COL_STABLE_FAR, COL_STABLE_ZERO, t / 0.5)   # green -> blue
-        else
-            lerp(COL_UNSTAB_ZERO, COL_UNSTAB_FAR, (t - 0.5) / 0.5)  # red -> maroon
-        end
-    end
-    cgrad(cols)
+    stable = [lerp(COL_STABLE_FAR, COL_STABLE_ZERO, t) for t in range(0, 1; length = n)]
+    unstab = [lerp(COL_UNSTAB_ZERO, COL_UNSTAB_FAR, t) for t in range(0, 1; length = n)]
+    cgrad(vcat(stable, unstab); categorical = true)
 end
 
 """
