@@ -67,6 +67,83 @@ with one-Newton-step σ estimate), 100×100 chart of the 4th-order benchmark,
   (65 % naive sign agreement here, the known deep-domain caveat — the
   multi-minimum buffer would port, but wasn't needed for feasibility).
 
+## Round 2: two-system validation + real-time prototype (user request)
+
+`two_system_validation.jl` — the requested 100×100 BF validation on the two
+paper systems, kernel vs package Vern9 at the same tol 10⁻⁵, ω_max = 10⁴:
+
+| system | package (16 threads) | kernel FP64 | kernel FP32 | wrong counts | warp-32 eff. |
+|---|---|---|---|---|---|
+| showcase 2-DOF DAE (ω⁻¹ ripple) | 181 µs/pt | 254 µs/pt | 290 µs/pt | **0/10000 (both)** | 83 % / 50 % random |
+| turning two-mode lobes (rational) | 1825 µs/pt | 97 µs/pt | 97 µs/pt | 3/10000 (FP64), 4 (FP32) | 54 % / 40 % random |
+
+- The showcase — the hard case — validates perfectly in FP32 as well; the
+  kernel is slower than Vern9 per CPU thread there (BS3 needs ~4100 steps/px
+  where 9th order strides), which is precisely the gap thousands of GPU
+  threads close.
+- The turning disagreements are boundary-adjacent skipped peaks of the
+  low-order pair at this tolerance (the class §6.3 of the paper analyses;
+  the residual/σ cross-check flags them for CPU re-solve). Warp efficiency
+  is lower here because the dense lobe structure decorrelates neighbours.
+
+`realtime_chart.jl` — the "shader-style" live-chart prototype:
+sliders (c₁, ζ, τ of the 4th-order oscillator) → KA kernel sweep → heatmap
+of the paper's interpolable coloring, with progressive refinement (60×60
+while dragging, 140×140 half a second after the sliders rest). Measured
+frame rates, CPU backend, 16 threads, FP32, tol 10⁻⁴:
+
+    60×60: 35 ms/frame (28 fps) · 100×100: 47 ms (21 fps) · 140×140: 86 ms (12 fps)
+
+So for ripple-light systems the dream already runs in real time on the CPU;
+the GPU backend is what extends it to the showcase/turning class (~10-40×
+more work per pixel) and to higher resolutions. The GUI part needs GLMakie;
+`--bench` runs headless.
+
+**Real-time architecture notes** for the eventual tool: (i) Julia's JIT is
+the enabler for *arbitrary user-supplied parametric D(λ)* — a new model
+specializes the kernel once (seconds), then every slider move is a pure
+kernel launch, which is exactly the shader experience without transpiling
+the model to GLSL; (ii) sliders must map to *non-swept* parameters (the two
+chart axes stay fixed per view); (iii) progressive refinement + the free
+integer residual as a per-pixel confidence overlay make the fast preset
+safe to show live.
+
+## Round 3: the GPU chart version (400×400 real-time target)
+
+`realtime_chart.jl` is now the full GPU implementation:
+
+- **Backend auto-detection**: `CUDA.functional()` → `CUDABackend()`, otherwise
+  the multithreaded CPU backend with a clear message. CUDA.jl is in this
+  environment and verified to load gracefully on this driverless machine
+  (`functional = false` → CPU fallback) — on a machine with an NVIDIA driver
+  the same command runs the sweep on the GPU with no code change.
+- **400×400 with persistent device buffers** (allocated once per resolution,
+  reused every frame; the device→host copy is 640 kB/frame — negligible).
+- **Progressive refinement on CPU**: the app measures one full-res frame at
+  startup and sizes the drag resolution to ~80 ms (here: 150×150), refining
+  to the full 400×400 half a second after the sliders rest. On GPU it
+  simply redraws the full resolution live.
+- The GUI smoke test passes on this machine (window opens, renders, and
+  `screenshot_realtime.png` shows the correct chart: green stable island
+  with the smooth in-kernel σ-gradient, integer plateaus outside, the
+  divergence line at P = −1 where D(0) = 1 + P vanishes).
+
+Measured frame times (FP32, tol 10⁻⁴, 4th-order oscillator):
+
+| resolution | CPU 16 threads | GPU (projected, 20–100×) |
+|---|---|---|
+| 100×100 | 46 ms (22 fps) | ≲ 2 ms |
+| 200×200 | 157 ms (6 fps) | 2–8 ms |
+| **400×400** | **509 ms (2 fps)** | **5–25 ms (40–200 fps)** |
+
+The 400×400 target is precisely the regime that needs the GPU: real-time on
+CPU only up to ~120×120, projected comfortably real-time on any mid-range
+CUDA card (the projection uses the measured 83–86 % warp efficiency and the
+FP32 validation of rounds 1–2). **Final validation step on a GPU machine**:
+clone, `julia --project=benchmark/gpu -t auto benchmark/gpu/realtime_chart.jl --bench`
+— the printed backend line must say GPU, and the 400×400 row gives the true
+frame time.
+
 ## Reproduce
 
 ```powershell

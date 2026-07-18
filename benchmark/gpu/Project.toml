@@ -1,5 +1,7 @@
 [deps]
+CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
 ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
+GLMakie = "e9467ef8-e4e7-5192-8a1a-b1aee30e663a"
 InterpolatedNyquist = "1b0c7da8-4eb4-4bd5-bd5a-0bb1b0f4bca1"
 KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
 Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
