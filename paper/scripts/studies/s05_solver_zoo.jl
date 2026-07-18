@@ -12,7 +12,7 @@ const ZOO_WMAX = 1e4         # the standard chart window used everywhere
 # benchmark is plenty to place a method on the Pareto plot, and the point of
 # the plot is which method is on the front -- not a precise timing of a setting
 # nobody should use. This keeps the whole study to a few minutes.
-const ZOO_TIME_CAP = 1.0
+const ZOO_TIME_CAP = 3.0
 
 nZ = FAST[] ? 20 : 40
 Pz = LinRange(-2.0, 4.0, nZ)
@@ -66,7 +66,7 @@ end
 # while its worst error over the chart does not, because the peak of a root
 # near the line is arbitrarily narrow. Once that is visible there is nothing to
 # learn from spending minutes on step counts nobody would use.
-for steps in round.(Int, 10 .^ (1.5:0.25:4.0))
+for steps in round.(Int, 10 .^ (1.5:0.125:4.0))
     t = zoo_run!("fixed-step", Float64(steps), () ->
         calculate_unstable_roots_fixed_step_p_vec(D_fourth, params_zoo;
             ω_max = ZOO_WMAX, steps = steps)[2])
@@ -74,7 +74,7 @@ for steps in round.(Int, 10 .^ (1.5:0.25:4.0))
 end
 
 # adaptive methods: control = tolerance
-TOLS_ZOO = 10.0 .^ (-2:-1.0:-11)
+TOLS_ZOO = 10.0 .^ (-1:-0.5:-11)
 for tol in TOLS_ZOO
     t = zoo_run!("QuadGK", tol, () ->
         calculate_unstable_roots_quadgk_p_vec(D_fourth, params_zoo;

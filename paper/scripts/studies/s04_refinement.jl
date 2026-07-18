@@ -199,7 +199,7 @@ for m in REFINERS
         med(smask(tfields, tfields.resid, m)), med(smask(tfields, tfields.σerr, m)), costs[m], over))
     push!(rows_tex, [m, tex_sci(med(smask(sfields, sfields.σerr, m))),
         tex_sci(med(smask(tfields, tfields.σerr, m))),
-        tex_time(costs[m]), m == "raw" ? "--" : @sprintf("+%.0f\\%%", over)])
+        tex_time(costs[m]), m == "raw" ? "--" : @sprintf("%+.0f\\%%", over)])
 end
 write_csv("refinement",
     ["method", "show_resid_med", "show_dsig_med", "turn_resid_med", "turn_dsig_med",

@@ -54,8 +54,8 @@ function D_showcase_reduced(λ::T, p) where T
 end
 
 # Parameter window of the showcase chart (tuned for a bounded stable island)
-const SHOWCASE_PRANGE = (0.0, 4.0)
-const SHOWCASE_DRANGE = (-0.5, 3.0)
+const SHOWCASE_PRANGE = (0.5, 3.0)
+const SHOWCASE_DRANGE = (-0.5, 3.5)
 
 "First-order (A, B) matrices of the reduced showcase system, x'(t) = A x(t) + B x(t-tau)."
 function showcase_AB(p)
@@ -166,7 +166,9 @@ function mdbm_boundary(D_func, xrange, yrange; ngrid = 30, Niter = 4, σ = 0.0,
         return isfinite(g) ? g : sign_val * 1.0e3
     end
     prob = MDBM_Problem(wrapper, [LinRange(xrange..., ngrid), LinRange(yrange..., ngrid)])
-    t = @elapsed MDBM.solve!(prob, Niter, verbosity = 0)
+    t = @elapsed MDBM.solve!(prob, Niter, verbosity = 0,interpolationorder=0)
+    println("--------------------- interp 0-1 -----------------------------")
+    MDBM.interpolate!(prob,interpolationorder=1)
     xyz = getinterpolatedsolution(prob)
     DT1 = MDBM.connect(prob)
     edges = if isempty(DT1)

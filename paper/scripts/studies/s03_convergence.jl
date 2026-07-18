@@ -49,7 +49,7 @@ end
 @assert z_check == Z_EXACT "independent semi-discretization count is $(z_check), expected $(Z_EXACT)"
 @info "Z_EXACT verified by semi-discretization (dense eig, n=120, order 2)" z_check
 
-TOLS = 10.0 .^ (-2:-1.0:-10)   # starts in the order-one-error regime on purpose
+TOLS = 10.0 .^ (-2:-0.5:-10)   # half-decade steps; starts in the order-one-error regime on purpose
 METHODS = [
     ("Vern9 (default)", tol -> calculate_unstable_roots_direct(D_showcase_reduced, p_conv;
         n_roots_to_track = 0, ω_max = WMAX_CONV, reltol = tol, abstol = tol,
@@ -75,7 +75,7 @@ METHODS = [
 # end where the method becomes impractical, which is itself the information.
 const T_CAP = 1.0
 
-data = with_cache("s03_convergence_v5") do
+data = with_cache("s03_convergence_v6") do
     out = Dict{String, Vector{Tuple{Float64, Float64, Float64}}}()
     for (name, runner) in METHODS
         rows = Tuple{Float64, Float64, Float64}[]
@@ -167,15 +167,19 @@ end
 write_csv("convergence", ["method", "tol", "err", "time_s"], rows_csv)
 
 sel_tols = [1e-2, 1e-4, 1e-6, 1e-8]   # same ladder as the tolerance study (s02)
+# NB: compare tolerances approximately -- the sweep builds them as 10.0 .^ k,
+# which need not be bit-identical to the 1e-k literals (the 1e-2 row printed
+# as dashes before this fix).
+tol_idx(rows, tol) = findfirst(r -> isapprox(r[1], tol; rtol = 1e-6), rows)
 rows_tex = Vector{String}[]
 for tol in sel_tols
     row = ["\$10^{$(round(Int, log10(tol)))}\$"]
     for (name, _) in METHODS          # error block
-        idx = findfirst(r -> r[1] == tol, data[name])
+        idx = tol_idx(data[name], tol)
         push!(row, idx === nothing ? "--" : tex_sci(data[name][idx][2]))
     end
     for (name, _) in METHODS          # time block
-        idx = findfirst(r -> r[1] == tol, data[name])
+        idx = tol_idx(data[name], tol)
         push!(row, idx === nothing ? "--" : tex_time(data[name][idx][3]))
     end
     push!(rows_tex, row)

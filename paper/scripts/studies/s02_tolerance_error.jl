@@ -50,7 +50,12 @@ const D_TOL = D_showcase_reduced
 # ruled out: it is NOT the Newton polish (turning refinement off makes it far
 # worse, 300+ pixels, since sigma then carries the raw tolerance error), and the
 # count flips are a separate, tolerance-driven effect (peak skips).
-tol_grids = with_cache("s02_grids_v10_$(nP)x$(nD)") do
+
+
+kkey = string(hash((SHOWCASE_PRANGE, SHOWCASE_DRANGE)); base = 16)
+
+tol_grids = with_cache("s01_domgrid_h_$(kkey)_$(nP)x$(nD)") do
+#tol_grids = with_cache("s02_grids_v10_$(nP)x$(nD)") do
     map(TOLS) do tol
         g = sweep_grid_dominant(D_TOL, Pv, Dv; ω_max = WMAX_TOL,
             reltol = tol, abstol = tol)

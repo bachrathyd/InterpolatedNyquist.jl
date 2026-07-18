@@ -23,12 +23,16 @@ nP, nD = FAST[] ? (45, 35) : (90, 70)
 Pv = LinRange(SHOWCASE_PRANGE..., nP)
 Dv = LinRange(SHOWCASE_DRANGE..., nD)
 
-grid = with_cache("s01_domgrid_h_$(nP)x$(nD)") do
+kkey = string(hash((SHOWCASE_PRANGE, SHOWCASE_DRANGE)); base = 16)
+
+grid = with_cache("s01_domgrid_h_$(kkey)_$(nP)x$(nD)") do
+#grid = with_cache("s01_domgrid_h_$(nP)x$(nD)") do
     sweep_grid_dominant(D_showcase_reduced, Pv, Dv; ω_max = 1e4)
 end
-C = combined_metric(grid.Z, grid.sigma)
 
-bnd = with_cache("s01_mdbm_h") do
+C = combined_metric(grid.Z, grid.sigma)
+bnd  = with_cache("s01_mdbm_h_$(kkey)") do
+#bnd = with_cache("s01_mdbm_h") do
     mdbm_boundary(D_showcase_reduced, SHOWCASE_PRANGE, SHOWCASE_DRANGE;
         ngrid = 30, Niter = FAST[] ? 3 : 4, ω_max = 1e4)
 end
@@ -42,8 +46,23 @@ ell = generate_ellipse_points(circ.x, circ.y, circ.R_scaled; scale_x = ELL_SX, s
 # Pick a representative stable point (deep stable) and unstable point (Z = 2).
 # NaN (no finite tracked root) must map to Inf too, or argmin returns it.
 stable_idx = argmin(replace(x -> (isnan(x) || x >= 0) ? Inf : x, C))
+# For U, choose the Z = 2 pixel CLOSEST to the boundary: the smallest dominant
+# σ above a floor. Just outside a Hopf boundary a conjugate pair has crossed
+# (Z jumps 0 -> 2), so both roots sit just right of the axis -- giving the
+# genuinely SHARP, near-singular integrand peaks the walkthrough is meant to
+# show, at a point visually adjacent to the white boundary. The floor keeps it
+# off the boundary (finite peaks, unambiguously unstable) -- close but not too
+# close. Falls back to the middle Z = 2 pixel if the σ field is unavailable.
 iu = findall(grid.Z .== 2)
-unstable_idx = isempty(iu) ? argmax(grid.Z) : iu[cld(length(iu), 2)]
+const U_SIGMA_FLOOR = 0.05
+u_cand = [i for i in iu if isfinite(grid.sigma[i]) && grid.sigma[i] >= U_SIGMA_FLOOR]
+unstable_idx = if !isempty(u_cand)
+    u_cand[argmin(grid.sigma[u_cand])]      # nearest the boundary, above the floor
+elseif !isempty(iu)
+    iu[cld(length(iu), 2)]
+else
+    argmax(grid.Z)
+end
 p_stable = (Pv[stable_idx[1]], Dv[stable_idx[2]])
 p_unstable = (Pv[unstable_idx[1]], Dv[unstable_idx[2]])
 @info "walkthrough points" p_stable p_unstable

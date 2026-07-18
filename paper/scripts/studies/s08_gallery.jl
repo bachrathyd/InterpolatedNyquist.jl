@@ -243,31 +243,38 @@ end
 # panels whose D costs milliseconds (FEM bar, 50x50 determinant) -- spends
 # minutes resolving a boundary far beyond the resolution anyone will look at.
 half(n) = FAST[] ? max(12, n ÷ 2) : n
-const NBF = 100        # background grid, all panels
+const NBF = 75        # background grid, all panels
 const MDBM_N0_G = 7    # MDBM initial mesh per axis
-mdbm_levels(nx) = clamp(ceil(Int, log2(4 * nx / MDBM_N0_G)), 3, 6)
+mdbm_levels(nx) = clamp(ceil(Int, log2(4 * nx / MDBM_N0_G)), 3, 5)
 mdbm_equiv(nx) = MDBM_N0_G * 2^mdbm_levels(nx)
 SPECS = [
-    (id = "fourth",  D = D_fourth,     xl = "P",  yl = "D",  xr = (-2.0, 4.0), yr = (-2.0, 5.0),
+    # closed stable island (measured bbox x[-0.8,1.4] y[0.16,1.9]); range set to
+    # fill the frame with an 8% margin
+    (id = "fourth",  D = D_fourth,     xl = "P",  yl = "D",  xr = (-1.5, 2.0), yr = (-0.5, 2.5),
      nx = half(NBF), ny = half(NBF), ω = 1e4, tol = 1e-4, title = "4th-order + delayed PD"),
-    (id = "algebraic", D = D_algebraic, xl = "a", yl = "b", xr = (-1.0, 1.0), yr = (-1.0, 1.0),
+    (id = "algebraic", D = D_algebraic, xl = "a", yl = "b", xr = (-1.0, 10.0), yr = (-1.0, 10.0),
      nx = half(NBF), ny = half(NBF), ω = 1e4, tol = 1e-4, title = "delayed oscillator"),
-    (id = "distributed", D = D_distributed, xl = "a", yl = "b", xr = (0.0, 2.0), yr = (-1.0, 5.0),
+    (id = "distributed", D = D_distributed, xl = "a", yl = "b", xr = (-0.5, 2.0), yr = (-1.0, 5.0),
      nx = half(NBF), ny = half(NBF), ω = 1e4, tol = 1e-4, title = "distributed delay"),
     # NOTE: neutral integrands oscillate persistently up to infinite frequency,
     # so the truncation must stay moderate; the tail error is bounded by
     # asin(|a|)/pi < 1/2, hence the rounded count remains correct.
-    (id = "neutral", D = D_neutral, xl = "a", yl = "c", xr = (-0.9, 0.9), yr = (-2.0, 2.0),
+    # stable set is bounded by the |a| < 1 essential-instability limit on the
+    # sides; y tightened to the measured band (+-0.88) so the island fills
+    (id = "neutral", D = D_neutral, xl = "a", yl = "c", xr = (-1.2, 1.2), yr = (-1.2, 1.2),
      nx = half(NBF), ny = half(NBF), ω = 200.0, tol = 1e-4, npow = 2.0,
      title = "neutral DDE"),
-    (id = "neutral_hg", D = D_neutral_hg, xl = "a", yl = "c", xr = (-0.95, 0.95), yr = (-10.0, 10.0),
+    # same |a| < 1 side limit; y tightened to the measured band [0.34, 8.43]
+    (id = "neutral_hg", D = D_neutral_hg, xl = "a", yl = "c", xr = (-1.2, 1.2), yr = (-1.0, 10.0),
      nx = half(NBF), ny = half(NBF), ω = 200.0, tol = 1e-4, npow = 2.0,
      title = "high-gain neutral DDE"),
-    (id = "pda", D = D_pda, xl = "P", yl = "A", xr = (-1.5, 2.5), yr = (-1.6, 1.6),
+    # closed island (measured bbox x[-0.97,1.24] y[+-0.96]); range fills it and
+    # still shows the A = +-1 essential-instability lines
+    (id = "pda", D = D_pda, xl = "P", yl = "A", xr = (-1.1, 1.4), yr = (-1.15, 1.15),
      nx = half(NBF), ny = half(NBF), ω = 500.0, tol = 1e-4, npow = 2.0, cap = 10.0,
      hlines = [-1.0, 1.0], title = "PDA control (neutral, essential)"),
     # w starts slightly above 0: at w = 0 the rational D is constant (no roots)
-    (id = "turning", D = D_turning, xl = "Ω", yl = "w", xr = (0.08, 1.2), yr = (0.01, 1.2),
+    (id = "turning", D = D_turning, xl = "Ω", yl = "w", xr = (0.10, 1.2), yr = (0.01, 1.1),
      nx = half(NBF), ny = half(NBF), ω = 1e4, tol = 1e-4, title = "multi-DOF turning lobes"),
     # Reproduction of Zhang & Stepan (2016) Fig. 8: the exact axes and parameters
     # of the paper -- delay ratio tau/T against gain K, at eta_tilde = 0.01.
@@ -298,7 +305,7 @@ SPECS = [
     # 1e4 with a tightened tol = 1e-5. What remains is not alarming in context:
     # this chart counts up to Z ~ 240 roots, so a residual of ~0.02 is a
     # RELATIVE error of order 1e-4.
-    (id = "ccc", D = D_ccc, xl = "β [1/s]", yl = "α [1/s]", xr = (-10.0, 10.0), yr = (0.05, 16.0),
+    (id = "ccc", D = D_ccc, xl = "β [1/s]", yl = "α [1/s]", xr = (-5.0, 5.0), yr = (0.05, 10.0),
      nx = half(NBF), ny = half(NBF), ω = 1e4, tol = 1e-5, npow = 0.0,
      title = "$(CCC_N)-vehicle ring, CCC (Ge & Orosz Fig. 4d)"),
     (id = "bigmat", D = D_bigmat, xl = "gain", yl = "τ", xr = (-0.95, 1.0), yr = (0.05, 1.5),
@@ -400,20 +407,27 @@ end
 # return-difference form, and the determinant-lemma speed-up. Every number the
 # appendix states about this example is measured here.
 # ---------------------------------------------------------------------------
+# Both forms below must implement the SAME boundary feedback as the panel's
+# D_fem (minus sign from the clamped-end strain, damped modulus (1 + eta*lam));
+# D_fem returns 1 + c * (Q0^-1)[N,1], i.e. F = c * e_1 * e_N'.
+_fem_c(λ::T, r, K) where T =
+    -K * (one(T) + T(BEAM_ETA) * λ) / T(H_FEM) * exp(-r * λ)
 function D_fem_raw(λ::T, p) where T          # the naive formulation
-    Kp, τ = p
+    r, K = p
     Q = λ^2 .* T.(M_f) .+ λ .* T.(C_f) .+ T.(K_f)
-    Q[end, 1] += Kp / T(H_FEM) * exp(-λ * τ)
+    Q[1, N_FEM] += _fem_c(λ, r, K)
     return det(Q)
 end
-function D_fem_full(λ::T, p) where T         # return difference, full 29x29 solve
-    Kp, τ = p
+function D_fem_full(λ::T, p) where T         # return difference, full NxN solve
+    r, K = p
     Q0 = λ^2 .* T.(M_f) .+ λ .* T.(C_f) .+ T.(K_f)
-    F = zeros(T, size(Q0)); F[end, 1] = Kp / T(H_FEM) * exp(-λ * τ)
+    F = zeros(T, size(Q0)); F[1, N_FEM] = _fem_c(λ, r, K)
     return det(one(T) * I + (Q0 \ F))
 end
-fem_diag = with_cache("s08_fem_diag_v1") do
-    p_fd = (1.0, 1.0)
+fem_diag = with_cache("s08_fem_diag_v2") do
+    # interior point of the fem panel (tau/T = 1, K = 0.5): off every boundary,
+    # so the residuals measure the formulation, not a root on the contour
+    p_fd = (1.0, 0.5)
     λs = (0.3 + 2.0im, -0.1 + 15.0im, 0.05 - 40.0im)
     agree = maximum(abs(D_fem_full(λ, p_fd) - D_fem(λ, p_fd)) /
                     max(abs(D_fem_full(λ, p_fd)), 1e-300) for λ in λs)
@@ -502,6 +516,7 @@ save_fig(figa, "fig_gallery_a")
 
 figb = Figure(size = (W_FULL, W_FULL * 0.60))
 for (k, spec) in enumerate(SPECS[N_A+1:end])
+#for (k, spec) in enumerate(SPECS[[7,8,10]])
     r, c = fldmod1(k, 3)
     push!(timings, gallery_panel!(figb, r, c, spec))
 end
