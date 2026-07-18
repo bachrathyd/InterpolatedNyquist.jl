@@ -144,6 +144,42 @@ clone, `julia --project=benchmark/gpu -t auto benchmark/gpu/realtime_chart.jl --
 — the printed backend line must say GPU, and the 400×400 row gives the true
 frame time.
 
+## Round 4: running on THIS machine's GPU (AMD iGPU via OpenCL) — blocked by the driver
+
+The machine has no NVIDIA card but does have an **AMD Radeon iGPU (gfx90c,
+Vega, Ryzen APU)** exposed through OpenCL with FP64. OpenCL.jl v0.10 provides
+a KernelAbstractions backend for it, translating Julia kernels to SPIR-V and
+— because AMD's Windows driver cannot ingest SPIR-V — onward to OpenCL C via
+spirv2clc. `opencl_igpu_test.jl` attempts the validated march kernel there.
+Findings, in bisection order:
+
+1. **The toolchain and device work end-to-end for loop-free kernels**: saxpy
+   and a transcendental kernel (`exp`, `sin`, `cos` on Float32) compile
+   through the SPIR-V → OpenCL C path and run correctly on the iGPU.
+2. **Upstream Julia bug found**: the ForwardDiff dual-number path in the
+   march kernel produces LLVM IR that the SPIR-V backend mistranslates
+   ("Select values must have same type as select instruction", from
+   induction-variable shrinking). Workaround that fully fixes translation:
+   hand-derived analytic D′ instead of duals (plus intrinsic-friendly
+   `cexp`, `sqrt∘sqrt` step control, `floor(x+0.5)` rounding — kept in
+   `opencl_igpu_test.jl`). Worth reporting to JuliaGPU/GPUCompiler.
+3. **Hard blocker, vendor side**: this machine's AMD OpenCL compiler
+   (driver 30.0.13044, Adrenalin ~22.x, 2022) **segfaults
+   (`aclWriteToMem` access violation) on ANY kernel containing a loop** —
+   even a trivial counted for-loop summing `exp` — while loop-free kernels
+   compile fine. The march kernel therefore cannot run on this driver,
+   independent of anything on the Julia side.
+
+**Actionable**: updating the AMD Adrenalin driver to a current release (the
+OpenCL stack was rebuilt since 2022) has a good chance of unblocking the
+iGPU; after updating, rerun
+`julia --project=benchmark/gpu -t auto benchmark/gpu/opencl_igpu_test.jl`.
+Expectations should stay modest either way — gfx90c is a small integrated
+part (~1.8 FP32 TFLOP/s vs ~1 for the 16-thread CPU), so it would validate
+the *pipeline*, not deliver the 400×400 real-time target; that still calls
+for a discrete card (CUDA path already in place, or the same OpenCL path on
+a discrete AMD GPU with a current driver).
+
 ## Reproduce
 
 ```powershell
