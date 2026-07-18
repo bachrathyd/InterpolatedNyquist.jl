@@ -187,6 +187,15 @@ julia --project=benchmark/gpu -e "using Pkg; Pkg.develop(path=pwd()); Pkg.instan
 julia --project=benchmark/gpu -t auto benchmark/gpu/gpu_feasibility.jl
 ```
 
-On a machine with a CUDA GPU: add `CUDA` to the environment and replace
-`backend = CPU()` with `backend = CUDABackend()` in `run_kernel` (arrays move
-via the same KernelAbstractions API); nothing else changes.
+**On an NVIDIA machine — nothing to change.** CUDA.jl is already in this
+environment and `realtime_chart.jl` auto-detects it: clone the repo, run the
+two commands above, and the title bar reports `[GPU]` with the live
+ms/frame. Sanity sequence on the NVIDIA machine:
+
+```powershell
+julia --project=benchmark/gpu -t auto benchmark/gpu/realtime_chart.jl --bench   # frame times incl. 400x400
+julia --project=benchmark/gpu -t auto benchmark/gpu/realtime_chart.jl           # the live slider app
+```
+
+(The older validation scripts `gpu_feasibility.jl` / `two_system_validation.jl`
+pin `backend = CPU()` on purpose — they are the CPU-reference studies.)

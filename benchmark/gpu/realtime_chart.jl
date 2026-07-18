@@ -194,14 +194,14 @@ function gui()
     Base.invokelatest() do
         res_drag = pick_drag_res()
 
-        fig = Figure(size = (980, 720))
+        fig = Figure(size = (980, 760))
         ax = GLMakie.Axis(fig[1, 1], xlabel = "P", ylabel = "D",
-            title = "live stability chart -- move the sliders " *
-                    (ON_GPU ? "[GPU]" : "[CPU, $(Threads.nthreads()) threads]"))
+            title = "live stability chart")
         sg = GLMakie.SliderGrid(fig[2, 1],
             (label = "c1", range = 0.001:0.001:0.10, startvalue = 0.03),
             (label = "zeta", range = 0.0:0.002:0.20, startvalue = 0.02),
-            (label = "tau", range = 0.05:0.01:1.50, startvalue = 0.5))
+            (label = "tau", range = 0.05:0.01:1.50, startvalue = 0.5),
+            (label = "resolution", range = 100:50:800, startvalue = RES_IDLE))
         data = GLMakie.Observable(zeros(Float32, RES_IDLE, RES_IDLE))
         xs = GLMakie.Observable(buffers(RES_IDLE).Pz)
         ys = GLMakie.Observable(buffers(RES_IDLE).Dz)
@@ -213,7 +213,9 @@ function gui()
         last_move = Ref(time())
         refined = Ref(false)
         busy = Ref(false)
+        res_target = Ref(RES_IDLE)
 
+        backend_tag = ON_GPU ? "GPU" : "CPU, $(Threads.nthreads()) threads"
         function draw!(res)
             busy[] && return
             busy[] = true
@@ -222,35 +224,47 @@ function gui()
             t = @elapsed (m = frame!(res, c1, z, tau))
             b = buffers(res)
             xs[] = b.Pz; ys[] = b.Dz; data[] = copy(m)
-            status[] = @sprintf("%dx%d in %.0f ms (%.0f fps)   c1=%.3f  zeta=%.3f  tau=%.2f",
-                res, res, 1000t, 1 / t, c1, z, tau)
+            ax.title[] = @sprintf("%d x %d   |   %.0f ms/frame   (%.1f fps)   [%s]",
+                res, res, 1000t, 1 / t, backend_tag)
+            status[] = @sprintf("c1 = %.3f    zeta = %.3f    tau = %.2f", c1, z, tau)
             busy[] = false
         end
 
-        for s in sg.sliders
+        for s in sg.sliders[1:3]              # model parameters: drag redraw
             GLMakie.on(s.value) do _
-                last_move[] = time(); refined[] = res_drag == RES_IDLE
-                draw!(res_drag)
+                last_move[] = time(); refined[] = res_drag >= res_target[]
+                draw!(min(res_drag, res_target[]))
             end
         end
-        @async while true                     # CPU path: refine when sliders rest
+        GLMakie.on(sg.sliders[4].value) do r  # resolution: preview, then refine
+            res_target[] = r
+            last_move[] = time(); refined[] = res_drag >= r
+            draw!(min(res_drag, r))
+        end
+        @async while true                     # refine when the sliders rest
             sleep(0.1)
             if !refined[] && time() - last_move[] > REFINE_DELAY
                 refined[] = true
-                draw!(RES_IDLE)
+                draw!(res_target[])
             end
         end
 
         draw!(RES_IDLE)
-        display(fig)
-        return fig
+        scr = display(fig)
+        return scr
     end
 end
 
 if "--bench" in ARGS
     bench()
 else
-    gui()
-    println("Close the window (or Ctrl-C) to exit.")
-    wait(Condition())
+    scr = gui()
+    println("Window open -- move the sliders. Closing the window exits.")
+    try
+        while isopen(scr)
+            sleep(0.2)
+        end
+    catch
+        wait(Condition())              # fallback: run until the process is killed
+    end
 end
