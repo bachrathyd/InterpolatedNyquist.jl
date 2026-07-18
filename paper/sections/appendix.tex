@@ -11,56 +11,37 @@ package repository.
 and~\ref{sec:performance} make the accuracy case, with tolerances down to
 $10^{-8}$. The gallery answers the complementary question -- \emph{what does a
 chart cost when one simply wants to see the picture?} -- and so every panel
-here is computed at settings chosen for speed: a generous $100\times100$
-background grid, and a tolerance of $10^{-4}$, one decade looser than the
-package default. Each panel is annotated with the measured wall-clock cost of
-both stages. At these settings the count of a few boundary-adjacent pixels may
-be off by one (Section~\ref{sec:showcase-tolerance}); that is precisely the
-trade a first exploration should make, it is invisible at chart resolution,
-and the traced boundary -- which is built from $\sest$, not from the count --
-is unaffected. The MDBM traces start from a $7\times7$ mesh and refine until
-the boundary carries roughly four times the resolution of the background grid
-($448\times448$-equivalent on the $100\times100$ panels), from $49$ blanket
-evaluations.
+is computed at settings chosen for speed: a $100\times100$ background grid
+and a tolerance of $10^{-4}$, one decade looser than the package default. At
+these settings the count of a few boundary-adjacent pixels may be off by one
+(Section~\ref{sec:showcase-tolerance}); that is precisely the trade a first
+exploration should make, it is invisible at chart resolution, and the traced
+boundary -- built from $\sest$, not from the count -- is unaffected. The
+MDBM traces start from a $7\times7$ mesh and refine until the boundary
+carries roughly four times the resolution of the background grid.
+$\wmax=10^{4}$, the standard window of this paper, is used wherever it
+helps; five panels use less, for reasons of substance (the ripple of a
+neutral system, A.4--A.6, does not decay at all, so a wider window buys
+nothing, and for A.8--A.9 the Kelvin--Voigt damping extinguishes the
+integrand long before $\omega=200$). Each panel reports the measured integer
+residual of its own grid (\code{data/gallery\_timings.csv}): on every
+retarded panel the median residual is $\sim10^{-4}$, while on the neutral
+panels it is $\approx0.1$ -- the irreducible tail oscillation of
+Section~\ref{sec:integerness}, not a symptom of truncation.
 
-$\wmax=10^{4}$, the standard window of this paper, is used wherever it helps.
-Five panels use less, for reasons of substance: the phase ripple of a
-\emph{neutral} system (A.4--A.6) does not decay at all, so a wider window buys
-no accuracy whatsoever -- what bounds the error is $\arcsin|a|/\pi$, not
-$\wmax$ -- while for the beam and the finite element bar (A.8--A.9) the
-Kelvin--Voigt damping makes the integrand vanish like
-$\ee^{-\sqrt{\omega/2c}}$ long before $\omega=200$. Rather than assert that
-these choices are adequate, each panel reports the measured integer
-residual~\eqref{eq:eps} of its own grid
-(\code{data/gallery\_timings.csv}): on every \emph{retarded} panel the median
-residual is $\sim10^{-4}$ and at most a handful of the $10^4$ points are
-uncertain, which is what a well-chosen $\wmax$ looks like. On the neutral
-panels the median is $\approx0.1$ -- the irreducible tail oscillation
-discussed in Section~\ref{sec:integerness}, not a symptom of truncation.
-
-\paragraph{Reading the charts.} Every panel uses the same convention, the
-combined field $C$ of~\eqref{eq:coloring}: $\sest$ where $\Zint=0$, and
-$\Zint$ elsewhere. Outside
-the stable domain the colour encodes the \emph{integer} number of
-characteristic roots to the right of the imaginary axis, so those regions
-appear as flat plateaus with sharp steps between them. Inside the stable
-domain ($\Zint=0$) the same colour axis continues \emph{below zero} and
-encodes the estimated decay rate $\sest<0$, i.e.\ the spectral gap: the
-darker the shade, the faster every disturbance decays, and the colour varies
-smoothly because $\sest$ does. One map therefore answers three questions at
-once -- where the system is stable, how robustly, and how many roots must be
+\paragraph{Reading the charts.} Every panel uses the combined field $C$
+of~\eqref{eq:coloring}: outside the stable domain the colour encodes the
+integer number of unstable roots as flat plateaus; inside, the same colour
+axis continues below zero and encodes the estimated decay rate $\sest<0$,
+varying smoothly. One map therefore answers three questions at once --
+where the system is stable, how robustly, and how many roots must be
 stabilized elsewhere. Following Section~\ref{sec:tracking}, the shading uses
-the \emph{dominant} root -- five tracked minima, all refined, maximal real
-part -- rather than the single closest minimum, which would switch branch
-where another mode overtakes it and shade the deep stable domain with a
-non-dominant root. The black curve is the stability boundary traced by
-MDBM from the objective~\eqref{eq:objective}, not a contour of the coloured
-grid; the same dominant-root convention makes that objective continuous
-across a branch crossing, which matters more than it sounds -- a jump there
-lets MDBM's linear in-cell interpolation invent a spurious boundary point in
-the middle of the stable domain. Each panel is annotated with the wall-clock
-cost of both stages: the brute-force sweep that produces the colour, and the
-MDBM trace that produces the boundary.
+the \emph{dominant} root (five tracked minima, all refined, maximal real
+part) rather than the single closest minimum, and the same convention keeps
+the MDBM objective continuous across branch crossings. The black curve is
+the boundary traced by MDBM from~\eqref{eq:objective}, not a contour of the
+coloured grid, and each panel is annotated with the wall-clock cost of both
+stages.
 
 \begin{figure}[tb]
   \centering
@@ -76,7 +57,7 @@ MDBM trace that produces the boundary.
   \centering
   \maybefig{fig_gallery_b}{\linewidth}
   \caption{Case studies, part II: (top row) multi-mode turning lobes,
-  transcendental beam, 29-DOF finite element bar; (bottom row)
+  transcendental beam, 12-DOF finite element bar; (bottom row)
   $50\times50$ matrix determinant, fractional-order
   oscillator.}\label{fig:galleryb}
 \end{figure}
@@ -156,68 +137,62 @@ return difference
 \end{equation}
 cf.\ the exact analysis of Zhang and St\'ep\'an~\cite{zhang2016exact} and the
 finite-DOF hierarchy of Kidd and St\'ep\'an~\cite{kidd2014delayed}. Whether a
-finite count even exists is decided entirely by the damping model, and this is
-the instructive point of the example. With external (viscous) damping,
-$\gamma=\sqrt{\lam^2+c\lam}$, every mode is damped equally: the closed-loop
-roots accumulate along a vertical line $\Real\lam\to\mathrm{const}$, so the
-number of unstable roots is $0$ or $\infty$ -- the essential-spectrum
-obstruction of a neutral system (A.6) -- and $\operatorname{sech}(\gamma L)$
-does not decay on the imaginary axis. Real materials, however, dissipate
+finite count even exists is decided entirely by the damping model. With
+external (viscous) damping, $\gamma=\sqrt{\lam^2+c\lam}$, every mode is
+damped equally: the closed-loop roots accumulate along a vertical line, so
+the number of unstable roots is $0$ or $\infty$ -- the essential-spectrum
+obstruction of a neutral system (A.6). Real materials, however, dissipate
 through \emph{rate-dependent} (Kelvin--Voigt) internal damping,
-$\gamma=\lam/\sqrt{1+c\lam}$, for which $\gamma\sim\sqrt{\lam/c}$: the high
-modes are damped ever harder, $\Real\lam_k\to-\infty$, only finitely many
-roots sit near the axis, and $|\operatorname{sech}(\gamma L)|$ decays like
-$\ee^{-\sqrt{\omega/2c}}$. Note how little is needed: the chart uses
-$c=0.02$, a light damping that leaves the low modes essentially unaffected
-and the chart shape intact, yet it is what makes the count exist at all.
-The chart over $(K_p,\tau)$ in Fig.~\ref{fig:galleryb} shows the resulting
-stable bands (the physically wrong viscous model gives a nonsensical count
-for the same gains -- a diagnostic that the model, not the method, is at
-fault). The example thus doubles as a reminder that the right damping law is a
-modelling decision the method faithfully reflects rather than papers over.
+$\gamma=\lam/\sqrt{1+c\lam}$: the high modes are damped ever harder, only
+finitely many roots sit near the axis, and $|\operatorname{sech}(\gamma L)|$
+decays like $\ee^{-\sqrt{\omega/2c}}$. The chart uses $c=0.02$ -- a light
+damping that leaves the low modes and the chart shape essentially
+unaffected, yet is what makes the count exist at all. The chart over
+$(K_p,\tau)$ in Fig.~\ref{fig:galleryb} shows the resulting stable bands;
+the example doubles as a reminder that the right damping law is a modelling
+decision the method faithfully reflects rather than papers over.
 
-\paragraph{A.9 Finite element bar (29 DOF), and the return difference.}
-The same bar discretized by 29 linear finite elements, with stiffness-
-proportional (Kelvin--Voigt) damping $\mat C=c\mat K$. The naive formulation
-is the raw determinant $\det(\lam^2\mat M+\lam\mat C+\mat K + K_p\,h^{-1}
-\ee^{-\lam\tau}\,\vect e_{29}\vect e_1^{\!\top})$ ($h$ = element length), and
-it is a poor one: it grows like $\lam^{58}$, reaches $\sim\FemRawMag$ at the top of the
-integration range, and forces the counting formula onto an
-estimate of a very large leading order -- which leaves an integer residual of
-$\FemRawResid$, a rounded count barely better than a coin toss. Factoring out
-the open-loop dynamics,
+\paragraph{A.9 Finite element bar (12 DOF), and the return difference.}
+The same bar discretized by 12 linear finite elements, with stiffness-
+proportional (Kelvin--Voigt) damping $\mat C=\eta\mat K$. Writing the delayed
+boundary feedback as the rank-one matrix
+$\mat F(\lam)=c(\lam)\,\vect e_{1}\vect e_{N}^{\!\top}$, where the scalar
+$c(\lam)=-K h^{-1}(1+\eta\lam)\,\ee^{-\lam\tau}$ carries the damped modulus
+and the clamped-end strain sign ($h$ = element length, $N=12$), the naive
+formulation is the raw determinant
+$\det\bigl(\lam^2\mat M+\lam\mat C+\mat K+\mat F(\lam)\bigr)$, and it is a
+poor one: it grows like $\lam^{24}$, reaches $\sim\FemRawMag$ at the top of
+the integration range, and forces the counting formula onto the estimate of a
+large leading order -- which leaves an integer residual of $\FemRawResid$.
+Factoring out the open-loop dynamics,
 \begin{equation}\label{eq:returndiff}
   \Dfun(\lam) = \det\!\bigl(\mat I + \mat Q_0(\lam)^{-1}\mat F(\lam)\bigr),
   \qquad \mat Q_0 = \lam^2\mat M+\lam\mat C+\mat K,
 \end{equation}
-where $\mat F(\lam)=K_p h^{-1}\ee^{-\lam\tau}\vect e_{29}\vect e_1^{\!\top}$
-is the (rank-one) feedback matrix, leaves the zeros untouched, adds poles
-only at the open-loop roots -- all in the left half-plane, so the
-right-half-plane count is unaffected -- and yields $\Dfun\to1$ at infinity,
-hence $n=0$ exactly and a residual of $\FemRdResid$. Because the feedback
-here is a single collocated sensor--actuator pair, $\mat F$ is rank one, and
-the matrix determinant lemma collapses~\eqref{eq:returndiff} to the classical
-scalar return difference $1+L(\lam)$ of~\eqref{eq:beam},
+leaves the zeros untouched, adds poles only at the open-loop roots -- all in
+the left half-plane, so the right-half-plane count is unaffected -- and
+yields $\Dfun\to1$ at infinity, hence $n=0$ exactly and a residual of
+$\FemRdResid$. Because the feedback is a single sensor--actuator pair,
+$\mat F$ is rank one, and the matrix determinant lemma
+collapses~\eqref{eq:returndiff} to the classical scalar return difference
+$1+L(\lam)$ of~\eqref{eq:beam},
 \begin{equation}\label{eq:detlemma}
-  \Dfun(\lam) = 1 + K_p h^{-1}\ee^{-\lam\tau}\,
-                \vect e_1^{\!\top}\mat Q_0(\lam)^{-1}\vect e_{29},
+  \Dfun(\lam) = 1 + c(\lam)\,
+                \vect e_{N}^{\!\top}\mat Q_0(\lam)^{-1}\vect e_{1},
 \end{equation}
-which replaces a full $29\times29$ solve \emph{and} a $29\times29$
+which replaces a full $N\times N$ solve \emph{and} an $N\times N$
 determinant by one solve with a single right-hand side: it agrees with the
 determinant form to $\FemLemmaAgree$ relative and is $\FemLemmaSpeedup$ times
-cheaper per evaluation. For multi-input feedback of
-rank $r$ the same lemma leaves an $r\times r$ determinant. This is the
-large-system economy that Section~\ref{sec:conclusion} points to, and it is
-worth more than any tuning of the integrator. One caveat is inherited from classical loop analysis: an exact
-pole--zero cancellation between the open loop and the feedback (an
-unobservable or uncontrollable mode) would remove that root
-from~\eqref{eq:returndiff} -- as it does from every input--output method --
-so the split should only be applied when the open-loop model is stabilizable
-and detectable through the chosen loop. The finite element chart reproduces
-the continuum result of A.8 within the resolved frequency range: the two are
-consistency checks on each other. As Section~\ref{sec:phaseode} argues,
-where such an open-loop/feedback split exists it is worth more than any
-tuning of the integrator.
+cheaper per evaluation. For multi-input feedback of rank $r$ the same lemma
+leaves an $r\times r$ determinant. One caveat is inherited from classical
+loop analysis: an exact pole--zero cancellation between the open loop and
+the feedback would remove that root from~\eqref{eq:returndiff} -- as it does
+from every input--output method -- so the split should only be applied when
+the open-loop model is stabilizable and detectable through the chosen loop.
+The finite element chart reproduces the continuum result of A.8 within the
+resolved frequency range: the two are consistency checks on each other. As
+Section~\ref{sec:phaseode} argues, where such an open-loop/feedback split
+exists it is worth more than any tuning of the integrator.
 
 \paragraph{A.10 Large dense determinant.}
 A synthetic stress test: $\Dfun(\lam)=\det(\lam^2\mat M+\lam\mat C+\mat K+
@@ -242,12 +217,9 @@ half-line count applies with the non-integer effective order estimated
 by~\eqref{eq:npow}; the origin offset of Section~\ref{sec:phaseode}
 regularizes the branch point at $\lam=0$. For $\sigma=0$ the integration
 line stays right of the branch cut and the count is unambiguous; shifted
-lines with $\sigma<0$ cross the cut of the principal branch, so
-$\gamma$-stability contours of fractional systems refer to the roots of the
-principal-branch extension of $\Dfun$ (see Section~\ref{sec:counting}) --
-consistent with the convention of the fractional-systems
-literature~\cite{petras2011fractional,fioravanti2012numerical}, but worth
-keeping in mind when comparing against time-domain simulations.
+lines with $\sigma<0$ cross the cut of the principal branch and are
+\emph{not} admissible -- see the discussion at the end of this appendix
+(after A.12) for how the violation announces itself.
 
 \begin{figure}[tb]
   \centering
@@ -264,7 +236,7 @@ keeping in mind when comparing against time-domain simulations.
   class -- see the text.}\label{fig:fraccontroller}
 \end{figure}
 
-\paragraph{A.11 Fractional controller chart from the literature.}
+\paragraph{A.12 Fractional controller chart from the literature.}
 As an external validation of the fractional capability,
 Fig.~\ref{fig:fraccontroller} reproduces the stabilizing-region chart of
 Gao, Zhai and Liu~\cite{gao2017robust} (Example~1), computed there by
@@ -277,23 +249,15 @@ the classification of the published test points agree with the reference.
 
 \paragraph{Why only $\sigma=0$, and how the violation announces itself.}
 Section~\ref{sec:classes} sets out why the imaginary axis is admissible for
-this class while a shifted line is not: the cut of $s^{\mu}$ runs along the
-negative reals, outside the right half-plane, whereas
-$\Real\lam>-\sigma_{\deg}$ with $\sigma_{\deg}>0$ swallows the segment
-$[-\sigma_{\deg},0]$ of it and the argument principle no longer applies. What
-is worth recording here is how loudly the figure complains, because it is a
-useful thing to be able to recognize.
-
-Counts taken on a shifted line must obey a monotonicity that needs no theory
-to state: moving the line to the left can only ever \emph{add} roots to its
-right, so $\Zint(-\sigma)$ is non-decreasing in $\sigma$ and the
-$\gamma$-stable regions are \emph{nested}. On this system neither holds. A
-$15\times15$ scan of both charts returns $\Zint(-0.5)<\Zint(0)$ at $\FracViol$
-of $\FracViolTot$ points, and an earlier draft of this figure, drawn with
-several $\sigma_{\deg}$ levels, showed contours that \emph{crossed} -- which no
-nested family can do. The count failed silently; the geometry did not. This is
-why the stability chart reproduces the literature while the
-stability-\emph{degree} chart cannot be offered at all. Extending the criterion to fractional systems
-with a prescribed decay rate requires a contour that respects the cut -- a
-keyhole, or a formulation in the $w=s^{1/m}$ plane -- and is left for future
-work (Section~\ref{sec:conclusion}).
+this class while a shifted line is not: a shifted line encloses part of the
+branch cut of $s^{\mu}$ and the argument principle no longer applies. The
+violation is detectable without theory: moving the line to the left can only
+ever \emph{add} roots to its right, so the $\gamma$-stable regions must be
+\emph{nested} -- yet a $15\times15$ scan of both charts returns
+$\Zint(-0.5)<\Zint(0)$ at $\FracViol$ of $\FracViolTot$ points, and contours
+drawn at several $\sigma$ levels cross, which no nested family can do. This
+is why the stability chart reproduces the literature while a
+stability-\emph{degree} chart cannot be offered at all; extending the
+criterion to fractional systems with a prescribed decay rate requires a
+contour that respects the cut (a keyhole, or a formulation in the
+$w=s^{1/m}$ plane) and is left for future work.

@@ -46,13 +46,11 @@ boundary $\sest$ is an accurate estimate of the dominant root's real part
 (Section~\ref{sec:tracking}). MDBM can therefore interpolate the zero
 crossing within each bracketing cell to sub-cell accuracy. One detail is
 essential rather than incidental: $\sest$ here must be the \emph{dominant}
-root of Section~\ref{sec:tracking} (several tracked minima, maximal real
-part), not the single closest minimum. The latter jumps where one branch
-overtakes another, and a linear model fitted inside a cell straddling that
-jump interpolates a zero that does not exist -- a phantom boundary point in
-the interior of the stable domain, which is invisible in the traced curve but
-corrupts anything built on the point cloud, such as the inscribed circle of
-Section~\ref{sec:robust}. Note the contrast
+root of Section~\ref{sec:tracking}, not the single closest minimum -- the
+latter is discontinuous at branch crossings, and a linear model fitted
+inside a cell straddling the jump interpolates a phantom boundary point in
+the interior of the stable domain, corrupting anything built on the point
+cloud, such as the inscribed circle of Section~\ref{sec:robust}. Note the contrast
 with applying MDBM to the pair
 $\Real\Dfun=\Imag\Dfun=0$ in the parameter--frequency space: that approach
 traces \emph{all} root-crossing D-curves, most of which lie deep in the
@@ -64,9 +62,9 @@ equivalent resolution of an $n_0\times n_0$ initial mesh to
 $2^{k}n_0\times 2^{k}n_0$, while the number of function evaluations grows
 only in proportion to the boundary length. On the fourth-order benchmark of
 Section~\ref{sec:performance}, four refinement levels from a $20\times20$
-mesh trace the boundary at a $320\times320$-equivalent resolution from about
-$3500$ evaluations (Table~\ref{tab:mdbm}) -- some $30$ times fewer than the
-$10^{5}$ a brute-force grid of that density would need.
+mesh trace the boundary at a $320\times320$-equivalent resolution from
+under $2000$ evaluations (Table~\ref{tab:mdbm}) -- some $50$ times fewer
+than the $10^{5}$ a brute-force grid of that density would need.
 
 \subsection{The most robust parameter point}\label{sec:robust}
 

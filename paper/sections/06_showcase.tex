@@ -65,8 +65,10 @@ $\Dfun_{\mathrm{red}}$ is constant in $\lam$ to machine precision
 (deviation below $10^{-15}$ in the computed charts), which validates the
 mass-matrix extraction path end to end; the estimated leading
 order~\eqref{eq:npow} is $n\approx4.000$, as expected for two mechanical
-degrees of freedom. All results below were computed with the automatically
-extracted characteristic function.
+degrees of freedom. Having verified the two forms identical, the results
+below use the cheaper hand-derived form~\eqref{eq:showcasered}; what the
+automatic extraction costs instead is measured in
+Section~\ref{sec:extraction-cost}.
 
 \subsection{The chart and the phase integration at work}\label{sec:showcase-chart}
 
@@ -106,15 +108,15 @@ of this paper visible: the accepted steps of the adaptive solver concentrate
 at the sharp peaks of $\theta'$ near the lightly damped resonances --
 precisely the features a fixed frequency grid tends to miss. Panel~(c) shows
 the same march continuing over more than two further decades of frequency:
-since the delayed \emph{velocity} feedback of this system produces a phase
-ripple decaying only like $\omega^{-1}$ (Section~\ref{sec:phaseode}), the
-solver keeps taking moderate steps through the tail. This section is about
-accuracy, so the accuracy-critical studies below use the safe
-$\wmax=10^{6}$; $\wmax=10^{4}$ -- three decades above the resonances --
-leaves a truncated tail of $\approx0.2/\wmax\approx2\cdot10^{-5}$ in $\Zraw$,
-far below the rounding threshold, and is the economical choice for the charts
-themselves and for the gallery of Appendix~\ref{app:gallery}. Either way the
-truncation is exposed by the integer-residual diagnostic below, never hidden.
+the delayed \emph{velocity} feedback of this system produces a phase ripple
+decaying only like $\omega^{-1}$ (Section~\ref{sec:phaseode}), so the solver
+keeps taking moderate steps through the tail. The chart studies below use
+the standard window $\wmax=10^{4}$ -- its truncated tail,
+$\approx0.2/\wmax\approx2\cdot10^{-5}$, is far below the rounding threshold,
+and its role in the error budget is measured explicitly -- while the
+single-point convergence study of Section~\ref{sec:performance-convergence}
+removes even that floor by integrating to $\wmax=10^{6}$. Either way the
+truncation is exposed by the integer-residual diagnostic, never hidden.
 
 \subsection{Tolerance as a universal accuracy dial}\label{sec:showcase-tolerance}
 
@@ -122,21 +124,14 @@ truncation is exposed by the integer-residual diagnostic below, never hidden.
   \centering
   \maybefig{fig_tolerance_charts}{\linewidth}
   \caption{The showcase chart computed with solver tolerances
-  $10^{-2}$, $10^{-4}$, $10^{-6}$ and $10^{-8}$ (left to right); the
+  $10^{-2}$, $10^{-4}$ and $10^{-6}$ (left to right); the
   wall-clock time of each full sweep is given in the panel titles. The charts
   are visually near-identical even at $10^{-2}$, where the count is already
   uncertain: the tolerance buys certainty rather than appearance, cf.\
-  Fig.~\ref{fig:errorfield} and Table~\ref{tab:tolerance}. (The count
-  $\Zint$ is never refined -- the optional polish of
-  Section~\ref{sec:refinement} only touches the root estimate $\sest$ that
-  colours the stable interior, and these charts use the raw estimate anyway --
-  so the residuals and miscount columns measure the integrator alone.) To isolate the integrator, this study uses
-  $\wmax=10^{6}$ (rather than the $10^{4}$ that suffices for the chart) so
-  that the truncated tail does not mask the two tightest tolerances, and
-  evaluates the reduced form~\eqref{eq:showcasered} of the same
-  characteristic function, which is identical to the extracted one to machine
-  precision but avoids the $7\times7$ determinant; Table~\ref{tab:extraction}
-  gives the cost of the extracted form.}\label{fig:tolerance}
+  Fig.~\ref{fig:errorfield} and Table~\ref{tab:tolerance}. The study uses
+  the standard chart window $\wmax=10^{4}$ and the reduced
+  form~\eqref{eq:showcasered} of the characteristic
+  function.}\label{fig:tolerance}
 \end{figure}
 
 \begin{figure}[tb]
@@ -144,12 +139,13 @@ truncation is exposed by the integer-residual diagnostic below, never hidden.
   \maybefig{fig_error_field}{\linewidth}
   \caption{Self-validating error: fields and histograms of the integer
   residual $\varepsilon=|\Zraw-\operatorname{round}(\Zraw)|$,
-  cf.~\eqref{eq:eps}, for the four tolerances of
+  cf.~\eqref{eq:eps}, for the three tolerances of
   Fig.~\ref{fig:tolerance}. Dashed red line: the requested tolerance; dotted
   black line: the practical rule $\varepsilon\approx100\,\mathrm{tol}$. The
   residual scales with the tolerance uniformly over the parameter plane,
-  amplified by the accepted-step count of the frequency
-  march.}\label{fig:errorfield}
+  amplified by the accepted-step count of the frequency march, until the
+  tail truncated at $\wmax=10^{4}$ (of order $2\cdot10^{-5}$) becomes the
+  dominant error.}\label{fig:errorfield}
 \end{figure}
 
 \begin{table}[tb]
@@ -158,7 +154,7 @@ truncation is exposed by the integer-residual diagnostic below, never hidden.
   (grid as in Fig.~\ref{fig:tolerance}): sweep time, integer residual
   statistics, the number of grid points where the rounded count would be
   ambiguous ($\varepsilon\ge1/4$), the number whose $\Zint$ actually deviates
-  from the $10^{-8}$-tolerance reference, and the subset of those that flip
+  from the $10^{-6}$-tolerance reference, and the subset of those that flip
   the stable/unstable classification. The ``uncertain'' and ``wrong'' columns
   measure genuinely different things: a skipped peak shifts $\Zraw$ by
   exactly one and leaves it just as close to an integer, so a point can be
@@ -168,115 +164,73 @@ truncation is exposed by the integer-residual diagnostic below, never hidden.
 \end{table}
 
 Figure~\ref{fig:tolerance} shows the identical chart computed with
-tolerances $10^{-2}$, $10^{-4}$, $10^{-6}$ and $10^{-8}$, together with the
+tolerances $10^{-2}$, $10^{-4}$ and $10^{-6}$, together with the
 measured sweep times, and Fig.~\ref{fig:errorfield} shows the corresponding
-integer-residual fields~\eqref{eq:eps}. The ladder deliberately starts \emph{beyond} the safe range: at $10^{-2}$ the
-rule of thumb~\eqref{eq:rule} predicts residuals of order one, i.e.\ genuine
-miscounts. Three observations matter for practice. First, the tolerance buys
-\emph{certainty}, not appearance. The panels are visually near-identical, yet
-the loosest settings do miscount: measured against the $10^{-8}$ reference,
-the number of deviating grid points falls steeply with the tolerance
-(Table~\ref{tab:tolerance}, last two columns), and this is worth spelling out
-because it is the one error the diagnostic of Section~\ref{sec:integerness}
-cannot report. Every deviation is exactly $\pm1$, and the corresponding
-integer residual stays far below the rounding threshold $1/2$ -- the affected
-points look perfectly converged. They are skipped peaks, and they are the
-practical face of the caveat that Section~\ref{sec:integerness} states in
-principle: at the loosest setting the residual field of
-Fig.~\ref{fig:errorfield} is uniformly healthy while a handful of pixels are
-nevertheless wrong. What does report them is the
-cross-check~\eqref{eq:crosscheck}: of the miscounts that flip the
-stable/unstable classification -- the only ones a stability chart displays --
-it catches all, at the price of a few flagged pixels on a converged chart.
-Second -- and this is the most useful outcome for a user -- the integer
-residual tracks the requested tolerance across the whole parameter plane
-with a roughly constant factor, so that
+integer-residual fields~\eqref{eq:eps}; the ladder deliberately starts
+beyond the safe range. Three observations matter for practice. First, the
+tolerance buys \emph{certainty}, not appearance. The panels are visually
+near-identical, yet the loosest one is genuinely broken: measured against
+the $10^{-6}$ reference, $10^{-2}$ miscounts $349$ of the $8000$ points and
+flips the stable/unstable classification on $89$
+(Table~\ref{tab:tolerance}). That failure is anything but silent -- the
+residual field of Fig.~\ref{fig:errorfield} lights up across the whole
+chart, with $210$ points beyond the rounding threshold -- and one decade
+into the safe range the problem is essentially gone: at $10^{-4}$ a single
+count of the $8000$ deviates, by one and without flipping the
+classification, and at $10^{-6}$ none. Second, while the integrator
+dominates the error budget, the integer residual tracks the requested
+tolerance with a roughly constant factor,
 \begin{equation}\label{eq:rule}
   \varepsilon \;\approx\; 100 \cdot \mathrm{tol}
 \end{equation}
-holds to within an order of magnitude over six decades
-(Table~\ref{tab:tolerance}, last two columns). The factor is not universal
--- it is inherited from the number of accepted steps, and a march that
-resolves a slowly decaying ripple accumulates more of them -- but it is
-remarkably stable across the chart and across the systems studied here.
-Equation~\eqref{eq:rule} therefore lets the accuracy of $\Zint$ be
-\emph{prescribed} rather than discovered: a user who wants the count certain
-to $10^{-3}$ asks for $10^{-5}$, which is exactly the package default.
-Third, the CPU-time premium of tightening the tolerance by six decades is
-well below two orders of magnitude, because the extra effort is spent only
-near the integrand peaks -- and this asymmetry has a practical corollary
-worth stating plainly, since it runs against the instinct that a loose
-tolerance is dangerous.
+to within an order of magnitude; the factor is inherited from the
+accepted-step count of the march. At the standard window $\wmax=10^{4}$ the
+truncated tail of this velocity-feedback system, $\approx2\cdot10^{-5}$,
+takes over once the tolerance drops below $\sim10^{-6}$ -- the mean
+residual of the tightest panel settles exactly there -- and, because every
+error source surfaces in the same number, the diagnostic itself tells the
+user that the next decade of certainty must come from $\wmax$, not from the
+tolerance. The accuracy of $\Zint$ can therefore be \emph{prescribed}
+rather than discovered: a user who wants the count certain to $10^{-3}$
+asks for $10^{-5}$, which is exactly the package default. Third, the
+CPU-time premium of tightening by four decades is a factor of three
+(Table~\ref{tab:tolerance}), because the extra effort is spent only near
+the integrand peaks.
 
-A miscount is not the same kind of error as a displaced boundary, and for
-chart work it is the milder one. The two outputs of the sweep degrade
-completely differently with the tolerance: the count $\Zint$ is a
-\emph{rounded} quantity, so it fails discontinuously -- an accumulated phase
-error of $\pm\pi$ flips it by one -- whereas the tracked $\sest$ is a
-\emph{local} quantity read off the minimum of $|\Dfun|$, and it inherits the
-tolerance smoothly. The traced stability boundary is built from $\sest$
-alone through the objective~\eqref{eq:objective}, so it stays accurate even
-where the count does not: Table~\ref{tab:tolerance} lists the counts that
-flip, while the traced boundary of the same chart stays a small fraction of
-one grid pixel away from the reference trace at every tolerance studied
-(\code{data/boundary\_shift.csv}). The practical recipe follows:
-\emph{a loose tolerance is an appropriate tool for an initial search} --
-locating the stable island, its shape, and the robust operating point --
-after which the interesting region is recomputed at the default or tighter
-setting to certify the counts. What must not be done is to report a count
-from a loose sweep without the cross-check~\eqref{eq:crosscheck}, because
-that is the one number whose error the residual will not reveal.
+For chart work a miscount is a milder error than a displaced boundary, and
+the two degrade differently: the count is a rounded quantity and fails
+discontinuously, whereas the tracked $\sest$ inherits the tolerance
+smoothly. The traced boundary is built from $\sest$ alone through the
+objective~\eqref{eq:objective}, and it stays a small fraction of one grid
+pixel away from the reference trace at every tolerance studied
+(\code{data/boundary\_shift.csv}). The practical recipe follows: a
+moderately loose tolerance ($10^{-3}$--$10^{-4}$) is an appropriate tool
+for an initial search -- the residual field will announce if it was too
+loose -- after which the interesting region is recomputed at the default
+setting to certify the counts, with the cross-check~\eqref{eq:crosscheck}
+guarding the one error mode near the boundary that the residual cannot
+reveal.
 
 A flagged pixel need not be recomputed with a different backend: the march
-can repair itself (\code{peak\_repair=true} in the package). Where this
-matters must be stated first, because it is deliberately narrow: a peak
-can only be skipped where a root lies within roughly the march's step
-resolution of the integration line, so the repair changes nothing anywhere
-except in the immediate vicinity of the boundary. On a chart those are the
-few boundary-grazing pixels counted in Table~\ref{tab:tolerance}, and
-arming the repair for the whole sweep costs
-$\approx\RepairCostFactor\times$ the plain march (comparable to the
-quadrature backend at $\RepairGKFactor\times$; the cost is the per-step
-callback checks, not the repair quadrature itself). Doubling a chart to
-certify a handful of pixels that sit visually on the boundary anyway is
-rarely a good trade, which is why the option is off by default -- but it
-is a single keyword to arm, and the economical pattern is the one already
-implied: sweep plainly, flag with~\eqref{eq:crosscheck}, and re-evaluate
-only the flagged pixels with the repair on.
-
-Within that narrow regime, however, the repair is stronger than either
-backend, and the mechanism explains why. The skipped peak is easy to
-\emph{locate} even when it is far too narrow to \emph{integrate}: its
-center is a minimum of $|\Dfun(\sigma+\ii\omega)|^2$, and $|\Dfun|^2$ dips
-toward that minimum over an $O(1)$ frequency range no matter how narrow
-the peak itself is. A root-finding callback therefore stops the integrator
-at every such minimum; the phase increment of the step that crossed it is
-recomputed by quadrature whose subdivision is forced into the located peak
-by a geometric ladder of breakpoints (an adaptive quadrature left to its
-own error estimate is blind to a peak narrower than the spacing of its
-first rule -- the very blindness that skips peaks in the first place); and
-the march restarts exactly at the minimum, so that step control resolves
-the right half of the peak on its own. Measured across the Hopf point of
-this chart at default settings (\code{data/peak\_repair.csv}): the plain
-march loses one count from $\Delta P = \RepairPlainFailDP$ inward on both
-sides of the boundary, and the Gauss--Kronrod backend -- which must
-\emph{discover} the peak -- loses it silently at
+can repair itself (\code{peak\_repair=true}). The skipped peak is easy to
+\emph{locate} even when it is far too narrow to \emph{integrate}: its center
+is a minimum of $|\Dfun(\sigma+\ii\omega)|^2$, which dips toward that
+minimum over an $O(1)$ frequency range no matter how narrow the peak is. A
+root-finding callback stops the integrator at every such minimum,
+recomputes the phase increment of the crossing step by quadrature whose
+subdivision is forced into the located peak, and restarts the march at the
+minimum. Measured across the Hopf point of this chart
+(\code{data/peak\_repair.csv}): the plain march loses one count from
+$\Delta P = \RepairPlainFailDP$ inward, the Gauss--Kronrod backend -- which
+must \emph{discover} the peak -- loses it silently at
 $\Delta P = \RepairDeepDP$, whereas the repaired march, which \emph{knows}
-where the peak is, still counts correctly there. The mechanism has a floor
-of its own: within about $10^{3}$ floating-point ulps of the boundary the
-condition crossing can no longer be stepped past in double precision, and
-the callback disarms itself for the remainder of that march -- a parameter
-point that close to the boundary is numerically \emph{on} it.
+where the peak is, still counts correctly there. The repair matters only in
+the immediate vicinity of the boundary, and arming it for a whole sweep
+costs $\approx\RepairCostFactor\times$ the plain march, which is why it is
+off by default; the economical pattern is to sweep plainly, flag
+with~\eqref{eq:crosscheck}, and re-evaluate only the flagged pixels with
+the repair on.
 
-Two limits deserve mention, since both are visible in
-Fig.~\ref{fig:errorfield} if the settings are pushed. The rule~\eqref{eq:rule}
-holds only while the quadrature is the dominant error: below it lie the
-truncated tail (of order $0.2/\wmax$ for this velocity-feedback system,
-which is why $\wmax=10^{6}$ is used here rather than the $10^{4}$ that
-suffices for the chart itself) and the residual of the estimated leading
-order~\eqref{eq:npow}, of order $10^{-9}$. Whichever of the three is largest
-sets the observed $\varepsilon$ -- and because all three are visible in the
-same number, the diagnostic tells the user which dial to turn next.
 
 \subsection{Rightmost roots and their refinement}\label{sec:showcase-roots}
 
@@ -309,38 +263,33 @@ same number, the diagnostic tells the user which dial to turn next.
   \maybeinput{tables/tab_refinement.tex}
 \end{table}
 
-Figure~\ref{fig:refinement} quantifies the rightmost-root estimates, and it
-does so with a yardstick that favours no method: the residual
-$|\Dfun(\lam)|$, which measures distance to an actual root, and the deviation
-from an independent semi-discretization solve.\footnote{This matters for the
-verdict. A natural but circular way to rank the polishes is to measure each
-against many Newton iterations taken as ``truth'', which trivially makes a few
-Newton steps look best; the metrics used here avoid that trap.} Three facts
-follow. First, the raw tracked value $(\sest,\west)$ -- one Newton step at the
-integrand minimum -- already places the decay rate to
-$\RefShowRaw$ on the smooth system and $\RefTurnRaw$ on the rational one, and
-its sign, all a chart needs, is correct throughout; being a single closed-form
-expression per pixel, it is also the smoothest field, which is why it is the
-default. Second, when an accurate root is wanted, no single polish wins
-everywhere: on the smooth system Newton reaches machine precision
-($\RefShowNewton$), but on the rational system, where the plant response has
-poles near the imaginary axis, a Newton step can settle on a neighbouring root
-and its error \emph{worsens} to $\RefTurnNewton$ -- the patchiness visible in
-its field -- whereas the cubic Taylor polish stays consistent at
-$\RefTurnPolyThree$. The combined mode, which keeps the smallest-residual
-candidate per root, is the robust compromise ($\RefTurnComb$ on the rational
-system) and never speckles. Third, the choice is nearly free: refinement costs
-a handful of extra evaluations of $\Dfun$ against the thousands the march
-already spent, so even the combined mode adds only about $\RefCombOver\%$ to
-the complete solve (Table~\ref{tab:refinement}). For stability charts the
-practical hierarchy is therefore simple: leave refinement off -- the smooth
-default -- since deep inside the domains only the sign matters and on the
-boundary the raw estimate is already near-exact; turn on a polish (the cubic
-Taylor or the combined mode) when a specific rightmost root matters; and for a
-precise decay-rate \emph{map} use the $\sigma$-contours of
-Section~\ref{sec:showcase-sigma} rather than a per-pixel polish. Tracking
-$N_r>1$ minima returns several dominant roots at once, which is what the
-multi-root recipe of Section~\ref{sec:performance-sd} exploits.
+Figure~\ref{fig:refinement} quantifies the rightmost-root estimates with a
+yardstick that favours no method: the residual $|\Dfun(\lam)|$, which
+measures distance to an actual root, and the deviation from an independent
+semi-discretization solve.\footnote{A natural but circular way to rank the
+polishes is to measure each against many Newton iterations taken as
+``truth'', which trivially makes a few Newton steps look best; the metrics
+used here avoid that trap.} Three facts follow. First, the raw tracked value
+$(\sest,\west)$ already places the decay rate to $\RefShowRaw$ on the smooth
+system and $\RefTurnRaw$ on the rational one, its sign -- all a chart needs
+-- is correct throughout, and being a single closed-form expression per
+pixel it is also the smoothest field, which is why it is the default.
+Second, no single polish wins everywhere: on the smooth system Newton
+drives the residual $|\Dfun|$ to machine precision and saturates the
+accuracy of the semi-discretization reference ($\RefShowNewton$), but on
+the rational system,
+where the plant response has poles near the imaginary axis, a Newton step
+can settle on a neighbouring root and its error \emph{worsens} to
+$\RefTurnNewton$ -- the patchiness visible in its field -- whereas the cubic
+Taylor polish stays consistent at $\RefTurnPolyThree$, and the combined mode
+is the robust compromise ($\RefTurnComb$) that never speckles. Third, the
+choice is nearly free: even the combined mode adds only about
+$\RefCombOver\%$ to the complete solve (Table~\ref{tab:refinement}). The
+practical hierarchy of Section~\ref{sec:refinement} follows directly: raw
+for charts, a polish when a specific root matters, $\sigma$-contours
+(Section~\ref{sec:showcase-sigma}) for a precise decay-rate map. Tracking
+$N_r>1$ minima returns several dominant roots at once, which the multi-root
+recipe of Section~\ref{sec:performance-sd} exploits.
 
 \subsection{Decay-rate design: $\sigma$-contours}\label{sec:showcase-sigma}
 

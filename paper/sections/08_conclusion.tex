@@ -3,23 +3,25 @@
 The Nyquist/argument-principle criterion for linear autonomous time-delay
 systems was reformulated as a scalar ordinary differential equation for the
 phase of the characteristic function and marched by a high-order adaptive
-integrator with an exact, automatically differentiated integrand. This
-reformulation tames the practically unbounded frequency range and the
-near-singular integrand through the mature step-size control of modern ODE
-software, and it makes the accuracy self-validating through the integer
-residual of the computed winding number, a dimensionless error measure that
-scales with the requested tolerance -- empirically as
-$\varepsilon\approx100\,\mathrm{tol}$ -- so that the accuracy of the count
-can be prescribed rather than discovered. It should be said plainly that the
-phase ODE carries no stiffness: its right-hand side is independent of the
-state, so the formulation is a quadrature in disguise, and adaptive
-quadrature is fully competitive for the count alone. What the ordered march
-uniquely provides -- and what every chart in this paper is built from -- is
-the characteristic root obtained along the way. The location of the
-characteristic root closest to the integration line is obtained during the
-same sweep at negligible cost as a smooth first-order estimate, and -- when an
-accurate root is wanted -- is sharpened toward machine precision by an optional
-Taylor, Newton or combined polish built on the same automatic derivatives.
+integrator with an exact, automatically differentiated integrand. The
+outcome is a genuinely fast tool: complete stability charts of simpler
+systems are computed in fractions of a second on a desktop machine --
+near-real-time, fast enough for interactive exploration and for use inside
+optimization loops. The reformulation tames the practically unbounded
+frequency range and the near-singular integrand through the mature
+step-size control of modern ODE software, and it makes the accuracy
+self-validating through the integer residual of the computed winding
+number, a dimensionless error measure that scales with the requested
+tolerance -- empirically as $\varepsilon\approx100\,\mathrm{tol}$ -- so a
+single tolerance transfers between systems with no problem-specific tuning.
+It should be said plainly that the phase ODE carries no stiffness: its
+right-hand side is independent of the state, so the formulation is a
+quadrature in disguise, and adaptive quadrature is fully competitive for
+the count alone. What the ordered march uniquely provides -- and what every
+chart in this paper is built from -- is the characteristic root obtained
+along the way: a smooth first-order estimate at negligible cost, sharpened
+toward machine precision by an optional Taylor, Newton or combined polish
+when an accurate root is wanted.
 
 The root estimate transforms the integer-valued root-counting map into an
 interpolable chart: one coloring simultaneously shows the number of unstable
@@ -50,43 +52,33 @@ it and the astronomical magnitudes that a high-order determinant produces.
 The limitations delineate the outlook. First, the method is restricted to
 autonomous (time-invariant) linear systems: for time-periodic coefficients
 the characteristic function would have to be replaced by a Hill-type
-infinite determinant, whose robust truncation is an open issue, and
-time-domain discretization methods such as
+infinite determinant, and time-domain discretization methods such as
 semi-discretization~\cite{insperger2011semidiscretization,bachrathy2026multiplication}
 remain the more practical choice there. Second, away from the stability
 boundary the rightmost-root estimate is of first order unless refined, so
 the method complements rather than replaces full spectral solvers when the
-deep spectrum is needed. Third -- and this is intrinsic to the argument
-principle rather than to any implementation of it -- a peak that no sample
-lands on costs exactly $\pm\pi$ and shifts the count by one while leaving it
-an integer, so the residual cannot see it; sufficiently close to a boundary
-the marching solver does step over such peaks. The cross-check between the
-count and the independently tracked root detects this at no cost -- provided
-it is restricted to a neighbourhood of the integration line, since farther
-away the tracked root need not be the dominant one -- and the affected
-classification is confined to the crossing of the last unstable root; the
-optional detect-and-repair callback of Section~\ref{sec:showcase-tolerance}
-then mends the flagged pixels within the march. A formally guaranteed
-count would still require a different device -- interval arithmetic, or an
-a-priori bound on the peak locations. Fourth, for
-neutral systems beyond the essential
-instability threshold the root count diverges with the truncation frequency;
-the classification into stable and unstable domains nevertheless remains
-correct, as demonstrated in Appendix~\ref{app:gallery}. Finally, the fractional-order
-results are preliminary in the sense that the argument-principle counting on
-the principal branch was validated here numerically -- including the
-reproduction of a published fractional-controller design chart -- but a
-rigorous treatment of branch-cut effects, in particular for shifted
-integration lines, is left for future work. Finally, for large models the
-cost is dominated not by the method but by each evaluation of $\Dfun$: the
-gallery's scalar systems yield a $100\times100$ chart in a fraction of a
-second, whereas the finite element and dense-matrix cases spend their time
-inside a factorization per frequency. Where the feedback has low rank the
-matrix determinant lemma already removes most of that
-cost~\eqref{eq:detlemma}; caching or updating the factorization across
-frequencies, and exploiting sparsity, are the natural next steps. Extending
-the automatic extraction to neutral right-hand sides and coupling the
-interactive charts to formal optimization loops are further continuations.
+deep spectrum is needed. Third -- intrinsic to the argument principle
+itself -- a peak that no sample lands on shifts the count by one while
+leaving it an integer, so the residual cannot see it; the cross-check
+between the count and the independently tracked root detects this at no
+cost, and the optional detect-and-repair callback of
+Section~\ref{sec:showcase-tolerance} mends the flagged pixels within the
+march. A formally guaranteed count would still require a different device,
+such as interval arithmetic. Fourth, for neutral systems beyond the
+essential instability threshold the root count diverges with the truncation
+frequency; the classification into stable and unstable domains nevertheless
+remains correct (Appendix~\ref{app:gallery}). Fifth, the fractional-order
+results are preliminary: the counting on the principal branch was validated
+numerically -- including the reproduction of a published
+fractional-controller design chart -- but a rigorous treatment of
+branch-cut effects, in particular for shifted integration lines, is left
+for future work. Finally, for large models the cost is dominated by each
+evaluation of $\Dfun$ rather than by the method; where the feedback has low
+rank the matrix determinant lemma already removes most of that
+cost~\eqref{eq:detlemma}, and caching factorizations across frequencies,
+extending the automatic extraction to neutral right-hand sides, and
+coupling the interactive charts to formal optimization loops are natural
+continuations.
 
 \section*{Software and reproducibility}
 The method is implemented in the open-source Julia package

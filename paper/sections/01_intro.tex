@@ -75,17 +75,14 @@ yields the D-curves, i.e., the parameter combinations where a root crosses
 the imaginary axis. The multi-dimensional bisection method
 (MDBM)~\cite{bachrathy2012bisection,bachrathy2025mdbm} traces these
 one-dimensional solution manifolds very efficiently. The D-curves, however,
-are \emph{not} the stability boundaries: they merely mark root crossings, and
-the number of unstable roots on either side remains unknown. If the system is
-well understood, the stable side can be picked by inspection or by a few test
-computations, but automating this decision is surprisingly hard: the curves
-must be assembled into closed cells by triangulation, numerical noise
-generates many spurious slivers that must be filtered, and the bookkeeping
-often costs more than the curve tracing itself. The turning stability-lobe
-diagram illustrates a second, more fundamental inefficiency: towards low
-spindle speeds the lobe structure becomes infinitely dense, and almost all
-D-curves lie deep inside the unstable domain
-(cf.~\ref{app:gallery})~\cite{stepan2001modelling,insperger2003stability,bachrathy2013improved},
+are \emph{not} the stability boundaries: they merely mark root crossings,
+and the number of unstable roots on either side remains unknown -- and
+automating that decision is surprisingly hard (triangulation into closed
+cells, filtering of spurious slivers). The turning stability-lobe diagram
+illustrates a more fundamental inefficiency: towards low spindle speeds the
+lobe structure becomes infinitely dense, and almost all D-curves lie deep
+inside the unstable domain
+(cf.\ Appendix~\ref{app:gallery})~\cite{stepan2001modelling,insperger2003stability,bachrathy2013improved},
 so the method spends most of its effort on curves that never bound the
 stable region.
 
@@ -113,7 +110,9 @@ quadratures either miss the peak or need excessive refinement; the infinite
 frequency range poses an additional truncation problem.
 
 This paper revisits the integration-based Nyquist criterion and turns it into
-a fast and robust tool with \emph{interpolable} output. The contributions are the
+a fast and robust tool with \emph{interpolable} output -- fast enough that a
+complete chart of a simpler system regenerates in a fraction of a second,
+i.e., at near-real-time, interactive rates. The contributions are the
 following. (i)~The winding integral is reformulated as a scalar ordinary
 differential equation for the phase, marched by a high-order adaptive
 integrator~\cite{verner2010numerically,tsitouras2011runge,rackauckas2017differentialequations}
@@ -125,9 +124,9 @@ characteristic root closest to the integration line -- normally the rightmost
 root -- is estimated \emph{during the same sweep} at negligible extra cost; the
 first-order estimate is the smooth, sign-correct default, and an optional local
 polish (Taylor, Newton or a combined mode) sharpens it toward machine precision
-for a few percent of the cost when an accurate root is wanted. Tracking several
-local minima yields multiple roots at once. This ordered march, and not accuracy or speed, is what distinguishes
-the phase ODE from plain quadrature: a recursively subdividing quadrature
+for a modest fraction of the cost when an accurate root is wanted. Tracking
+several local minima yields multiple roots at once. This ordered march is what
+distinguishes the phase ODE from plain quadrature, whose recursive subdivision
 visits the frequencies out of order and cannot recognize the minima at all.
 (iii)~The root
 estimate makes the chart interpolable: a combined coloring shows the integer

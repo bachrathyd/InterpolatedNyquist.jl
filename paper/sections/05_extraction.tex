@@ -95,17 +95,13 @@ and no automatic differentiation. Table~\ref{tab:extraction} measures the
 difference on the identical chart: \ExtractHandT{} against \ExtractAutoT{}
 for $100\times100$ points, a factor of about $\ExtractRatio$.
 
-The trade is therefore explicit, and both sides of it are defensible. If the
-model exists only as a simulation right-hand side -- which is the normal
-situation early in a design study, and the situation in which deriving
-$\Dfun$ for a constrained multibody model is an afternoon of error-prone
-algebra -- the extracted form gives a correct chart in a minute with no
-derivation whatsoever. If the same chart is to be recomputed inside an
-optimization loop, or refreshed interactively while a slider moves, then the
-algebra is worth doing once: the hand-derived form turns the same chart into a
-sub-second one. The recommended workflow is exactly that order -- explore with
-the extracted form, and derive $\Dfun$ by hand only once the model has settled
-and speed starts to matter. Everything the method does is identical in either
-case; only the cost of one evaluation changes. All figures in this paper use
-the hand-derived form, having first verified it against the extracted one
-(Section~\ref{sec:showcase}).
+The trade is explicit, and both sides of it are defensible. If the model
+exists only as a simulation right-hand side -- the normal situation early in
+a design study -- the extracted form gives a correct chart in a minute with
+no derivation whatsoever. If the same chart is to be refreshed interactively
+or recomputed inside an optimization loop, the algebra is worth doing once:
+the hand-derived form turns the same chart into a sub-second one. The
+recommended workflow is exactly that order -- explore with the extracted
+form, derive $\Dfun$ by hand once the model has settled and speed starts to
+matter. All figures in this paper use the hand-derived form, having first
+verified it against the extracted one (Section~\ref{sec:showcase}).
