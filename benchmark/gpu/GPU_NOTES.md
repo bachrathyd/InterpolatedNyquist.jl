@@ -180,6 +180,42 @@ the *pipeline*, not deliver the 400×400 real-time target; that still calls
 for a discrete card (CUDA path already in place, or the same OpenCL path on
 a discrete AMD GPU with a current driver).
 
+## Aside: is `@fastmath` worth it? (`fastmath_probe.jl`) — no
+
+Showcase chart, 100×100, ω_max = 10⁴, tol = 10⁻⁵, 16 threads:
+
+| experiment | plain | `@fastmath` | result identical? |
+|---|---|---|---|
+| **A.** user's `D(λ)`, package solver | 3.478 s | 4.055 s (**+17 %**) | **bit-identical** (max abs ΔZ̃ = 0) |
+| **B.** whole march, flat real scalars (upper bound) | 0.871 s | 0.812 s (**−7 %**) | counts equal; ΔZ̃ up to 2.3·10⁻², residual max 0.498 → 0.499 |
+
+- **A is the realistic case and `@fastmath` is a pessimization there.** The
+  results are bit-identical, which *proves* the flags never reached the
+  arithmetic: `@fastmath` is syntactic and does not propagate into callees,
+  and with `λ::Complex{Dual}` every operator immediately dispatches into
+  Base/ForwardDiff methods whose instructions are emitted without fast flags
+  (inlining does not add them afterwards). The 17 % loss is the rewrite of
+  `exp` to `Base.FastMath.exp_fast`, which for `Complex{Dual}` hits the
+  generic fallback and inlines worse.
+- **B is the ceiling: ~7 %**, and only reachable by rewriting the solver in
+  flat scalar arithmetic — no duals, no `Complex`, analytic dD/dλ, i.e.
+  giving up the generic user-supplied `D(λ)` that the whole package is for.
+  Note what the same table shows for free: that rewrite is **4× faster**
+  (0.871 s vs 3.478 s) *before* any fast-math. The formulation is the lever;
+  `@fastmath` is noise on top of it.
+- **Correctness argument stands on its own**: `@fastmath` implies
+  `nnan`/`ninf`, but the package deliberately *uses* NaN/Inf as signals — the
+  invalid-count marker for a root on the contour, the overflow retreat of
+  the leading-order probe (|D| → Inf on purpose, A.10), `isfinite` filters
+  in the sweeps. Those guards may legally be deleted under fast-math. Even
+  in experiment B, where nothing broke, the max integer residual moved
+  0.498 → 0.499, i.e. the self-validating diagnostic is perturbed right at
+  the ½ rounding threshold.
+
+Verdict: do not add `@fastmath` to the package. The safe subset (FMA
+contraction, no NaN/Inf assumptions) is `@muladd`, which OrdinaryDiffEq
+already applies inside its Runge–Kutta steppers, so that benefit is present.
+
 ## Reproduce
 
 ```powershell
