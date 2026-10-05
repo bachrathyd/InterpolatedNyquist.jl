@@ -26,8 +26,7 @@ for (kind, Q) in cases, (T, TE) in ((Float32, Float32), (Float32, Float16))
         run!(g, D, c)
         ts = [timed(() -> run!(g, D, c)) for _ in 1:5]
         rr = fetch_result(g)
-        @printf("Q=%2d %-22s check: differs %4d/%d (failed %d) | %dx%d: kernel %8.2f ms (%7.1f Mpts/s, %6.1f fps), evals median %d
-",
+        @printf("Q=%2d %-22s check: differs %4d/%d (failed %d) | %dx%d: kernel %8.2f ms (%7.1f Mpts/s, %6.1f fps), evals median %d\n",
             Q, lab, count(Z .!= Zref), length(Zref), count(isnan, r.Zraw), nx, ny, 1e3 * median(ts),
             nx * ny / median(ts) / 1e6, 1 / median(ts), round(Int, median(rr.evals)))
     catch err
