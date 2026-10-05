@@ -168,6 +168,35 @@ def write(out, branch, extra_md=None, default_ex=None):
     print("written", path)
 
 
+
+
+def write_tour(out, branch):
+    "A short notebook: setup (cell 1 of the interactive notebook) + the GPU tour of the milling charts."
+    setup = next(c for c in cells if c["cell_type"] == "code")
+    cs = [
+        {"cell_type": "markdown", "metadata": {}, "source": [
+            "# GPU tour: milling stability charts (branch `hill-argument-principle`)\n",
+            "\n",
+            "Runs `hill/gpu_tour_milling.jl` on the GPU of this runtime: every milling model in every number\n",
+            "format (Float32; Float16 evaluation with a Float32 march; Float16 + a Float32 re-check of the\n",
+            "flagged points), timed at full HD and checked against a Float64 reference on a coarse grid.\n",
+            "Pick the GPU under *Runtime → Change runtime type*, then *Run all* (~10 min, mostly the Julia\n",
+            "setup). **Afterwards: *Runtime → Disconnect and delete runtime*.**\n"]},
+        json.loads(json.dumps(setup).replace("%BRANCH%", branch)),
+        {"cell_type": "code", "metadata": {}, "execution_count": None, "outputs": [], "source": [
+            "MODELS = 'mill2n,mill3d'   # see MODELS in hill/gpu_tour_milling.jl\n",
+            "sh(f\"cd {REPO_DIR} && julia --project=gpu/scripts hill/gpu_tour_milling.jl --models {MODELS} \"\n",
+            "   f\"--res 1920x1080 --check 192x108 --csv /content/gpu_tour.csv 2>&1\")\n"]},
+    ]
+    nb = {"cells": cs, "metadata": {"accelerator": "GPU", "colab": {"provenance": [], "gpuType": "T4"},
+                                    "kernelspec": {"display_name": "Python 3", "name": "python3"},
+                                    "language_info": {"name": "python"}},
+          "nbformat": 4, "nbformat_minor": 0}
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), out)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(nb, f, indent=1, ensure_ascii=False)
+    print("written", path)
+
 write("NyquistGPU_Interactive.ipynb", "gpu-cuda")
 write("NyquistGPU_Hill_Interactive.ipynb", "hill-argument-principle", r"""
 ## Time-periodic systems (branch `hill-argument-principle`)
@@ -197,3 +226,4 @@ from the phase of the row-scaled (pole-free) Hill determinant. The number of har
 point from one tolerance. The rightmost-root colouring uses the Newton-polished estimate. Float16 is
 offered for the fast example only.
 """, default_ex="mill2q")
+write_tour("NyquistGPU_Hill_Tour.ipynb", "hill-argument-principle")
