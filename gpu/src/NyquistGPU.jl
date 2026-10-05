@@ -61,7 +61,7 @@ import Atomix
 export LowFloat, Float8_E4M3, Float8_E5M2, Float4_E2M1, Float16_emu, BFloat16_emu, format_range
 export SweepPlan, plan_sweep, run!, fetch_result, sweep, grid_points, chart, recheck!,
        check_eltype, simulate_schedule, coprime_stride, colour_field,
-       plan_grid, regrid!, recheck_flagged!, set_march!
+       plan_grid, regrid!, recheck_flagged!, set_march!, WorkSlot
 
 include("lowfloat.jl")
 
@@ -459,7 +459,7 @@ end
 @inline function count_at(D::F, p, c, mp::MarchParams{T, TE}, meth, σ::T) where {F, T, TE}
     m = MarchParams{T, T}(σ, mp.ω0, mp.ωmax, mp.h0, mp.rtol, mp.atol, mp.hrel, mp.hmax,
         mp.ωband, mp.npow, mp.maxsteps, Int32(0), Int32(0), mp.σtol)
-    cT = map(T, c)
+    cT = conv_consts(T, c)
     st = seed(D, p, cT, m, Val(1))
     while st.status == Int8(0)
         st = march_step(D, st, cT, m, meth)
@@ -520,7 +520,7 @@ end
 
 # rightmost of the polished roots (NaN if none converged)
 @inline function refined_dominant(D::F, st::MarchState{T, N}, c, mp::MarchParams{T}) where {F, T, N}
-    cT = map(T, c)
+    cT = conv_consts(T, c)
     σd = T(-Inf)
     ωd = T(NaN)
     for j in 1:N
@@ -558,6 +558,26 @@ end
 end
 
 # ===========================================================================
+# Per-lane workspace (plan_sweep(...; workspace = (eltype, len))): characteristic
+# functions that need scratch memory -- e.g. a dense Hill matrix and its LU --
+# get a WorkSlot as the LAST entry of their constants tuple c. Element k of
+# lane l lives at ws[(k-1)·L + l] (interleaved: the lanes of a warp touch
+# consecutive addresses). Only for the lane schedules (:strided, :queue), where
+# a lane processes its points one after another.
+# ===========================================================================
+struct WorkSlot{A}
+    ws::A
+    l::Int
+    L::Int
+end
+@inline Base.getindex(s::WorkSlot, k::Int) = @inbounds s.ws[(k - 1) * s.L + s.l]
+@inline Base.setindex!(s::WorkSlot, v, k::Int) = (@inbounds s.ws[(k - 1) * s.L + s.l] = v)
+@inline with_slot(c, ::Nothing, l, L) = c
+@inline with_slot(c, ws, l, L) = (c..., WorkSlot(ws, Int(l), Int(L)))
+# convert the numeric constants to precision T, pass anything else (a WorkSlot) through
+@inline conv_consts(::Type{T}, c) where {T} = map(x -> x isa Number ? T(x) : x, c)
+
+# ===========================================================================
 # Kernels -- one per schedule. Pts is a device vector of NTuple{K,T}.
 # ===========================================================================
 @kernel function k_pixel!(Zr, Sg, Om, St, Fl, D, c, @Const(Pts), npts, mp, meth, nr)
@@ -574,8 +594,9 @@ end
 # scrambled index: j ↦ (j·P mod n) + 1 is a bijection for gcd(P, n) = 1
 @inline scramble(j, P, n) = Int32(mod(Int64(j) * Int64(P), Int64(n)) + 1)
 
-@kernel function k_strided!(Zr, Sg, Om, St, Fl, D, c, @Const(Pts), npts, mp, meth, nr, lanes, P)
+@kernel function k_strided!(Zr, Sg, Om, St, Fl, D, c0, @Const(Pts), npts, mp, meth, nr, lanes, P, ws)
     l = @index(Global, Linear)
+    c = with_slot(c0, ws, l, lanes)
     if l <= lanes
         j = Int32(l - 1)                       # this lane's k-th point: j = l-1 + k*lanes
         i = j < npts ? scramble(j, P, npts) : Int32(0)
@@ -601,7 +622,9 @@ end
 # atomic fetch-and-add; `+=` returns the NEW value = the next 1-based point
 @inline next_point!(counter) = Atomix.@atomic :monotonic counter[1] += Int32(1)
 
-@kernel function k_queue!(Zr, Sg, Om, St, Fl, D, c, @Const(Pts), npts, mp, meth, nr, counter)
+@kernel function k_queue!(Zr, Sg, Om, St, Fl, D, c0, @Const(Pts), npts, mp, meth, nr, counter, ws, lanes)
+    l = @index(Global, Linear)
+    c = with_slot(c0, ws, l, lanes)
     i = next_point!(counter)
     st = blank_state(@inbounds(Pts[1]), typeof(mp.σ), nr)
     if i <= npts
@@ -686,6 +709,8 @@ mutable struct SweepPlan{T, N, B, A, AI, AF, AP}
     steps::AI
     flags::AF
     counter::AI
+    ws::Any              # per-lane workspace (nothing, or a device vector of wlen × lanes)
+    wlen::Int
 end
 
 """
@@ -716,6 +741,10 @@ Keywords (defaults in brackets):
   (forces a minimum sampling density over the resonance band; see the notes on
   rational D in PLAN.md)
 - `maxsteps` [`200_000`]
+- `workspace` [`nothing`] -- `(eltype, len)`: `len` elements of scratch memory per lane,
+  passed to `D` as a `WorkSlot` (indexable 1..len) appended to its constants `c`; needs the
+  `:strided` or `:queue` schedule. For characteristic functions that need a matrix (e.g. a
+  dense Hill determinant) -- per-thread `MArray`s of that size do not compile on the GPU.
 - `refine` [`0`] -- Newton steps polishing each tracked root after the march (complex
   plane, march precision; one evaluation each). 0 keeps the first-order estimate of the
   paper; 3-5 remove its bias deep in the stable domain. A root whose Newton iteration does
@@ -739,6 +768,7 @@ function plan_sweep(points; backend = CPU(), T::Type = Float32, Teval::Union{Not
                     σ = 0.0, ω0 = 1e-9, ω_max = nothing, tol = nothing, h0 = 1e-2,
                     hrel = 1.0, hmax = Inf, ωband = 0.0, maxsteps::Integer = 200_000,
                     refine::Integer = 0, certify::Bool = false, σtol = 1e-3,
+                    workspace = nothing,
                     lanes::Union{Nothing, Integer} = nothing,
                     workgroup::Union{Nothing, Integer} = nothing)
     method in (:unwrap, :bs3) || error("method must be :unwrap or :bs3")
@@ -765,10 +795,21 @@ function plan_sweep(points; backend = CPU(), T::Type = Float32, Teval::Union{Not
     st = KernelAbstractions.zeros(backend, Int32, npts)
     fl = KernelAbstractions.zeros(backend, Int8, npts)
     ctr = KernelAbstractions.zeros(backend, Int32, 1)
-    return SweepPlan{T, Int(nroots), typeof(backend), typeof(Zraw), typeof(st), typeof(fl),
+    plan = SweepPlan{T, Int(nroots), typeof(backend), typeof(Zraw), typeof(st), typeof(fl),
                      typeof(dpts)}(
         backend, npts, length(hpts[1]), method, schedule, lanes, workgroup,
-        coprime_stride(npts), mp, dpts, Zraw, sig, om, st, fl, ctr)
+        coprime_stride(npts), mp, dpts, Zraw, sig, om, st, fl, ctr, nothing, 0)
+    if workspace !== nothing
+        schedule === :pixel && error("a workspace needs the :strided or :queue schedule")
+        alloc_workspace!(plan, workspace[1], workspace[2])
+    end
+    return plan
+end
+
+function alloc_workspace!(p::SweepPlan, ::Type{TW}, len::Integer) where {TW}
+    p.ws = KernelAbstractions.zeros(p.backend, TW, len * p.lanes)
+    p.wlen = len
+    return p
 end
 
 """
@@ -801,8 +842,9 @@ of constants passed to `D(λ, p, c)` (converted to the plan's `T`); changing
 function run!(p::SweepPlan{T, N}, D0::F, c = ()) where {T, N, F}
     be = p.backend
     D = D0 isa CharFn ? D0 : CharFn(D0)
-    cT = map(evaltype(p.mp), Tuple(c))
+    cT = conv_consts(evaltype(p.mp), Tuple(c))
     meth = Val(p.method)
+    p.ws === nothing || p.schedule !== :pixel || error("a workspace needs the :strided or :queue schedule")
     nr = Val(N)
     n = Int32(p.npts)
     if p.schedule === :pixel
@@ -812,12 +854,12 @@ function run!(p::SweepPlan{T, N}, D0::F, c = ()) where {T, N, F}
     elseif p.schedule === :strided
         k = k_strided!(be, p.workgroup)
         k(p.Zraw, p.sigma, p.omega, p.steps, p.flags, D, cT, p.points, n, p.mp, meth, nr,
-            Int32(p.lanes), Int32(p.stride); ndrange = p.lanes)
+            Int32(p.lanes), Int32(p.stride), p.ws; ndrange = p.lanes)
     else
         fill!(p.counter, Int32(0))
         k = k_queue!(be, p.workgroup)
-        k(p.Zraw, p.sigma, p.omega, p.steps, p.flags, D, cT, p.points, n, p.mp, meth, nr, p.counter;
-            ndrange = p.lanes)
+        k(p.Zraw, p.sigma, p.omega, p.steps, p.flags, D, cT, p.points, n, p.mp, meth, nr, p.counter,
+            p.ws, Int32(p.lanes); ndrange = p.lanes)
     end
     KernelAbstractions.synchronize(be)
     return p
@@ -851,7 +893,7 @@ time `t` of the compute (kernel + sync, excluding upload and download).
 function sweep(D, points; c = (), kw...)
     p = plan_sweep(points; kw...)
     T = evaltype(p.mp)
-    check_eltype(D, first(points), c, T) || @warn "D(λ, p, c) promotes $(T) to a wider " *
+    p.ws === nothing && !check_eltype(D, first(points), c, T) && @warn "D(λ, p, c) promotes $(T) to a wider " *
         "type -- use constants from `c` or $(T) literals (e.g. 0.5f0) for full GPU speed" maxlog = 1
     t = @elapsed run!(p, D, c)
     return merge(fetch_result(p), (t = t, plan = p))
@@ -903,6 +945,7 @@ function plan_grid(xr, yr, nx::Integer, ny::Integer; backend = CPU(), T::Type = 
     cpu = backend isa CPU
     p.lanes = min(something(lanes, cpu ? (p.schedule === :queue ? nt : 8 * nt) : 1 << 18), n)
     p.stride = coprime_stride(n)
+    p.ws === nothing || alloc_workspace!(p, eltype(p.ws), p.wlen)
     return regrid!(p, xr, yr, nx, ny)
 end
 

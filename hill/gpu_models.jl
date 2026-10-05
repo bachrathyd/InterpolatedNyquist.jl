@@ -16,8 +16,9 @@ const NM3 = 26          # max harmonics (spindle period, Test 3): matrix 53 x 53
 # compute sizes at run time -- dynamic calls that the GPU compiler rejects)
 const NN2 = 2NM2 + 1
 const NN3 = 2NM3 + 1
-const Mat2{T} = MMatrix{NN2, NN2, T, NN2 * NN2}
-const Mat3{T} = MMatrix{NN3, NN3, T, NN3 * NN3}
+# workspace per lane (plan_sweep(...; workspace = (eltype, len))): the matrix lives in the
+# WorkSlot appended to c by the kernel -- per-thread MArrays of this size do not compile on the GPU
+
 
 @inline _val(x::ForwardDiff.Dual) = ForwardDiff.value(x)
 @inline _val(x::Real) = x
@@ -34,15 +35,16 @@ const Mat3{T} = MMatrix{NN3, NN3, T, NN3 * NN3}
 end
 @inline cdiv(a, b) = a * cinv(b)
 
-# LU with partial pivoting on the leading n x n block of an MMatrix, returns det
+# LU with partial pivoting of the n x n matrix stored column-major in A[i + (j-1) n]
+# (A: the per-lane WorkSlot of the NyquistGPU workspace), returns det
 @inline function lu_det!(A, nn)
-    n = Int(nn)                      # Int indices: StaticArrays' fast path (Int32 -> Base's generic
-    d = one(eltype(A))               # indexing, dynamic calls that the GPU compiler rejects)
+    n = Int(nn)
+    d = one(A[1])
     for k in 1:n
         p = k
-        best = _mag2(@inbounds A[k, k])
+        best = _mag2(A[k + (k - 1) * n])
         for i in (k + 1):n
-            v = _mag2(@inbounds A[i, k])
+            v = _mag2(A[i + (k - 1) * n])
             if v > best
                 best = v
                 p = i
@@ -50,19 +52,19 @@ end
         end
         if p != k
             for j in k:n
-                @inbounds a = A[k, j]
-                @inbounds A[k, j] = A[p, j]
-                @inbounds A[p, j] = a
+                a = A[k + (j - 1) * n]
+                A[k + (j - 1) * n] = A[p + (j - 1) * n]
+                A[p + (j - 1) * n] = a
             end
             d = -d
         end
-        @inbounds piv = A[k, k]
+        piv = A[k + (k - 1) * n]
         d *= piv
         ip = cinv(piv)
         for i in (k + 1):n
-            @inbounds f = A[i, k] * ip
+            f = A[i + (k - 1) * n] * ip
             for j in (k + 1):n
-                @inbounds A[i, j] -= f * A[k, j]
+                A[i + (j - 1) * n] -= f * A[k + (j - 1) * n]
             end
         end
     end
@@ -124,7 +126,9 @@ mathieu_ωp(p, c) = one(p[1])
 
 mill2_ωp(p, c) = c[3] * p[1] * 1000 / (60 * c[7])
 
-function D_mill2(μ, p, c)
+function D_mill2(μ, p, cw)
+    c = Base.front(cw)               # numeric constants (homogeneous: dynamic indexing is fine)
+    A = cw[end]                      # WorkSlot: the Hill matrix
     rk, ap = p
     ζ, w1, z, cs, tol, Hmax = c[1], c[2], c[3], c[4], c[5], c[6]
     ωp = mill2_ωp(p, c)
@@ -134,14 +138,13 @@ function D_mill2(μ, p, c)
     n = 2N + 1
     E = 1 - exp(-(2 * oftype(ζ, 3.141592653589793) / ωp) * λ)
     B = 1 + w * _H(c, 0, 8, NM2) * E
-    A = Mat2{typeof(λ)}(undef)
     Ni = Int(N)
     for j in 1:Int(n), i in 1:Int(n)
         k = i - Ni - 1
         l = j - Ni - 1
         s = λ + Complex(zero(ζ), k * ωp)
         r = (s + cs)^2
-        @inbounds A[i, j] = cdiv(i == j ? s * s + 2ζ * s + B : w * _H(c, k - l, 8, NM2) * E, r)
+        A[i + (j - 1) * Int(n)] = cdiv(i == j ? s * s + 2ζ * s + B : w * _H(c, k - l, 8, NM2) * E, r)
     end
     dA = lu_det!(A, n)
     sq = sqrt(4ζ * ζ - 4 * B)
@@ -178,7 +181,9 @@ mill3_ωp(p, c) = p[1] * 1000 / (60 * c[6])
     return acc
 end
 
-function D_mill3(μ, p, c)
+function D_mill3(μ, p, cw)
+    c = Base.front(cw)
+    A = cw[end]
     rk, ap = p
     ζ, w1, cs, tol, Cmax, fn, tb1, tb2, R = c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[8], c[9]
     Ω = mill3_ωp(p, c)
@@ -188,7 +193,6 @@ function D_mill3(μ, p, c)
     L = ap
     N = min(unsafe_trunc(Int32, 2 * sqrt(1 + w * Cmax / sqrt(tol)) / ωp) + Int32(4), Int32(NM3))
     n = 2N + 1
-    A = Mat3{typeof(λ)}(undef)
     Ni = Int(N)
     for j in 1:Int(n), i in 1:Int(n)
         k = i - Ni - 1
@@ -196,7 +200,7 @@ function D_mill3(μ, p, c)
         s = λ + Complex(zero(ζ), k * ωp)
         sl = λ + Complex(zero(ζ), l * ωp)
         v = w * _H(c, k - l, 10, NM3) * kernel3(k - l, sl, Ω, L, tb1, tb2, R)
-        @inbounds A[i, j] = cdiv(i == j ? s * s + 2ζ * s + 1 + v : v, (s + cs)^2)
+        A[i + (j - 1) * Int(n)] = cdiv(i == j ? s * s + 2ζ * s + 1 + v : v, (s + cs)^2)
     end
     dA = lu_det!(A, n)
     Bt = 1 + w * real(_H(c, 0, 10, NM3)) * 2          # mean (non-delayed) part for the far tail
@@ -244,3 +248,6 @@ function mill3_consts(; ζ = 0.011, aD = 0.05, kr = 1 / 3, down = true, β1 = 30
     C = cut_fourier(aD, kr, down, 2NM3; q = 1)
     return (ζ, w1, cs, tol, maximum(abs, C), fn, tand(β1), tand(β2), R, real.(C)..., imag.(C)...)
 end
+
+ws_len(::typeof(D_mill2)) = NN2 * NN2
+ws_len(::typeof(D_mill3)) = NN3 * NN3

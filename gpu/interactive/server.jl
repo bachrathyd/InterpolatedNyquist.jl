@@ -198,6 +198,10 @@ function get_plan(e, fmt, nx, ny, xr, yr)
         release!()
         kw = (backend = BACKEND, T = T, Teval = TE, n_power = e.sys.npow, nroots = ishill(e) ? 1 : 4,
               ω_max = w16 ? e.ω16 : 1e5, lanes = default_lanes(), e.sys.kw...)
+        if ishill(e) && applicable(ws_len, e.sys.D)      # dense Hill matrix: per-lane workspace
+            kw = (kw..., schedule = :strided, lanes = min(default_lanes(), 1 << 16),
+                  workspace = (Complex{ForwardDiff.Dual{NyquistGPU.PhaseTag, T, 1}}, ws_len(e.sys.D)))
+        end
         S.plan = plan_grid(xr, yr, nx, ny; kw...)
         if rc
             S.rplan = plan_grid(xr, yr, nx, ny; backend = BACKEND, T = Float32, n_power = e.sys.npow,
