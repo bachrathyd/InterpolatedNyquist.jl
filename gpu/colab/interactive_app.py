@@ -112,7 +112,8 @@ APP = r'''
  META.refines.forEach(([k, l]) => $('ref').add(new Option(l, k)));
  const isF16 = () => $('fmt').value.startsWith('F16');
  const wmax = () => Math.pow(10, +$('wm').value);
- function showW() { const w = wmax(), cap = isF16() && w > META.w16;
+ function showW() { if (EX[$('ex').value].hill) { $('wmv').innerHTML = 'not used (period strip)'; return; }
+   const w = wmax(), cap = isF16() && w > META.w16;
    $('wmv').innerHTML = (cap ? META.w16 : +w.toPrecision(3)).toLocaleString() + (cap ? ' (Float16 cap)' : ''); }
  function defaultW() { $('wm').value = isF16() ? Math.log10(META.w16) : 5; showW(); }
  $('res').value = '1920x1080';
@@ -138,7 +139,7 @@ APP = r'''
                     // time-periodic (Hill) examples: Float32/Float64, Newton polish, no ω_max
                     if (e.hill) { if (isF16()) $('fmt').value = 'F32'; if ($('ref').value === 'count') $('ref').value = 'newton'; }
                     if (e.res) $('res').value = e.res;   // heavy examples start at a low resolution
-                    $('wm').disabled = !!e.hill; $('note').textContent = e.note || ''; go(); }
+                    $('wm').disabled = !!e.hill; showW(); $('note').textContent = e.note || ''; go(); }
  function params() {
   const e = EX[$('ex').value], c = e.c.slice();
   knobs.forEach(([i, r]) => c[i] = +r.value);
@@ -167,7 +168,8 @@ APP = r'''
     const al = r.t_plan > 2 ? ` | plan allocation ${r.t_plan.toFixed(0)} ms` : '';
     $('st').innerHTML = `${p.nx}&times;${p.ny} = ${(r.n / 1e6).toFixed(2)} Mpts | <b>GPU kernel ${r.t_kernel.toFixed(2)} ms</b> ` +
       `(${Math.round(r.mpts).toLocaleString()} Mpts/s)${re} | colour + downsample ${r.t_colour.toFixed(2)} ms | ` +
-      `read-back ${r.t_read.toFixed(2)} ms${al} | flagged ${r.flagged_pct.toFixed(3)} % | &omega;<sub>max</sub> = ${(+r.wmax.toPrecision(3)).toLocaleString()}<br>` +
+      `read-back ${r.t_read.toFixed(2)} ms${al} | flagged ${r.flagged_pct.toFixed(3)} %` +
+      (r.wmax === null ? ' | one period strip (Hill)' : ` | &omega;<sub>max</sub> = ${(+r.wmax.toPrecision(3)).toLocaleString()}`) + `<br>` +
       `frame round trip ${rt.toFixed(0)} ms (GPU + PNG + transfer to the browser) on ${META.device}`;
     $('cap').innerHTML = `<b>${e.title}</b> &mdash; horizontal: ${e.xl} &isin; [${fmt(p.x0)}, ${fmt(p.x1)}], vertical: ` +
       `${e.yl} &isin; [${fmt(p.y0)}, ${fmt(p.y1)}] &mdash; red: number of unstable roots (darker = more), ` +
