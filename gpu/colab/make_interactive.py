@@ -126,11 +126,17 @@ print(f"server up in {time.time() - t0:.0f} s on {META['device']}")
 md("""
 ## 3. The interactive chart
 Move a slider, pick another example / format / resolution, zoom or pan: the chart is recomputed on
-the GPU. The page always shows the newest request (intermediate slider positions are skipped while
-a frame is in flight). The status line gives the GPU times; the frame round trip adds the image
-encoding and the transfer to your browser, which, not the GPU, limits the frame rate of the fast
-examples. The live view is therefore sent as JPEG, about 5× smaller than PNG; choose *PNG* for exact
-pixels. *save full-resolution PNG* always writes the exact chart.
+the GPU. The status line gives the GPU and server times, the latency from a slider move to the new
+picture, and the display rate while the picture keeps changing. *benchmark* measures the kernel and
+the frame rate in your browser. *save full-resolution PNG* writes the exact chart.
+
+How frames reach the browser: the chart is shown through Colab's port proxy. A small HTTP server in
+this notebook receives every new slider state and **streams** the frames back on one open
+connection. The GPU always renders the newest state as soon as the previous frame is out, so the
+frame rate is set by the GPU and the image encoding, not by the ~50 ms round trip of a request. The
+live view is sent as JPEG, about 5× smaller than PNG; choose *PNG* for exact pixels. If the chart
+below stays empty (port proxy blocked), add `TRANSPORT = 'kernel'` at the top of the cell and run it
+again. That uses Colab's kernel channel instead, with one request per frame and two in flight.
 """)
 code(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "interactive_app.py"),
           encoding="utf-8").read())
