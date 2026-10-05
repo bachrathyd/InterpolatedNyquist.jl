@@ -201,9 +201,10 @@ APP = r'''
    `(${Math.round(r.n / r.med / 1e3).toLocaleString()} Mpts/s)`);
  $('save').onclick = () => extra('nyq.save', 'saving the full-resolution image&hellip;', r =>
    `saved <tt>${r.file}</tt> (${r.mb.toFixed(1)} MB): Files panel on the left`);
+ if (META.default && EX[META.default]) $('ex').value = META.default;   // DEFAULT_EX in Python
  defaultW();
  reset();
 })();
 </script>
 '''
-display(HTML(APP.replace('%META%', json.dumps(META))))
+display(HTML(APP.replace('%META%', json.dumps(dict(META, default=globals().get('DEFAULT_EX'))))))
