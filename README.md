@@ -25,6 +25,9 @@
 
 Near a stability boundary the integrand peak narrows in proportion to `|Re λ|`; no pointwise method can guarantee it is sampled. The integer residual cannot detect a skipped peak (it costs exactly ±π), but `sign(σ_est)` disagreeing with `Z == 0` does — this cross-check is free and is the recommended safeguard.
 
+### GPU brute-force sweeps (branch `gpu-cuda`, experimental)
+[`gpu/`](gpu/README.md) holds **NyquistGPU**, a separate small package that sweeps one scalar characteristic equation `D(λ, p, c)` over an arbitrary list of parameter points (any dimension) on NVIDIA GPUs, or on the CPU with the same kernels. Its `:unwrap` march needs 30–130 evaluations per point instead of thousands, and is 60–400× faster than the default solver on the CPU alone. Findings and roadmap: [gpu/PLAN.md](gpu/PLAN.md). Colab notebook: [gpu/colab/NyquistGPU_Colab.ipynb](gpu/colab/NyquistGPU_Colab.ipynb).
+
 ## Usage Example
 
 The following example demonstrates how to perform a stability sweep over a parameter grid for a 4th-order delayed system.

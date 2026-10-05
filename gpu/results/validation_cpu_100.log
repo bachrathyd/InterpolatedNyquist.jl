@@ -1,0 +1,32 @@
+
+=== 4th-order delayed oscillator: 100x100, 12 CPU threads ===
+  package Vern9 tol 1e-7 (reference):        0.945 s  (  94.5 us/pt)
+  package Vern9 default (tol 1e-5, 1 root):   0.370 s  (  37.0 us/pt)
+  unwrap  Float64    0.007 s (   0.7 us/pt)  evals med    31 p90    39 max     71  wrong   0 (  0 at boundary)  resid med 2.6e-10 max 5.8e-08  σ: sign 85.9%, |Δσ| med 9.3e-04
+  unwrap  Float32    0.006 s (   0.6 us/pt)  evals med    31 p90    39 max     69  wrong   0 (  0 at boundary)  resid med 0.0e+00 max 7.2e-07  σ: sign 85.9%, |Δσ| med 9.3e-04
+    SIMT efficiency (warp 32) from these step counts: one-per-pixel row-major 86%, random 67% | strided 87% | queue 93%  (lanes = 1024)
+    + Float64 recheck of 0 flagged points (0.315 s): wrong 0 (0 at boundary)
+  bs3     Float64    0.099 s (   9.9 us/pt)  evals med   658 p90   835 max   1048  wrong   0 (  0 at boundary)  resid med 2.2e-05 max 6.7e-04  σ: sign 89.3%, |Δσ| med 9.0e-04
+  bs3     Float32    0.090 s (   9.0 us/pt)  evals med   658 p90   835 max   1099  wrong   0 (  0 at boundary)  resid med 2.2e-05 max 1.0e-03  σ: sign 89.3%, |Δσ| med 9.0e-04
+
+=== showcase 2-DOF DAE (delayed PD): 100x100, 12 CPU threads ===
+  package Vern9 tol 1e-7 (reference):        4.292 s  ( 429.2 us/pt)
+  package Vern9 default (tol 1e-5, 1 root):   2.776 s  ( 277.6 us/pt)
+  unwrap  Float64    0.015 s (   1.5 us/pt)  evals med    52 p90    71 max     99  wrong   0 (  0 at boundary)  resid med 5.5e-07 max 6.8e-07  σ: sign 90.6%, |Δσ| med 1.2e-03
+  unwrap  Float32    0.011 s (   1.1 us/pt)  evals med    53 p90    70 max     99  wrong   0 (  0 at boundary)  resid med 4.8e-07 max 1.5e-06  σ: sign 90.6%, |Δσ| med 1.2e-03
+    SIMT efficiency (warp 32) from these step counts: one-per-pixel row-major 81%, random 67% | strided 85% | queue 91%  (lanes = 1024)
+    + Float64 recheck of 0 flagged points (0.179 s): wrong 0 (0 at boundary)
+  bs3     Float64    2.401 s ( 240.1 us/pt)  evals med 12362 p90 27424 max  28717  wrong   0 (  0 at boundary)  resid med 3.6e-04 max 3.3e-02  σ: sign 93.0%, |Δσ| med 1.1e-03
+  bs3     Float32    2.158 s ( 215.8 us/pt)  evals med 12370 p90 27412 max  28702  wrong   1 (  1 at boundary)  resid med 3.6e-04 max 3.4e-02  σ: sign 93.0%, |Δσ| med 1.1e-03
+
+=== two-mode turning lobes: 100x100, 12 CPU threads ===
+  package Vern9 tol 1e-7 (reference):       36.505 s  (3650.5 us/pt)
+  package Vern9 default (tol 1e-5, 1 root):  10.377 s  (1037.7 us/pt)
+  unwrap  Float64    0.030 s (   3.0 us/pt)  evals med   129 p90   167 max    402  wrong   0 (  0 at boundary)  resid med 5.9e-07 max 6.1e-07  σ: sign 100.0%, |Δσ| med 9.7e-03
+  unwrap  Float32    0.026 s (   2.6 us/pt)  evals med   129 p90   167 max    407  wrong   0 (  0 at boundary)  resid med 6.0e-07 max 1.3e-05  σ: sign 100.0%, |Δσ| med 9.7e-03
+    SIMT efficiency (warp 32) from these step counts: one-per-pixel row-major 72%, random 54% | strided 88% | queue 88%  (lanes = 1024)
+    + Float64 recheck of 1 flagged points (0.201 s): wrong 0 (0 at boundary)
+  bs3     Float64    1.054 s ( 105.4 us/pt)  evals med  6570 p90 12136 max  33241  wrong   1 (  1 at boundary)  resid med 6.1e-04 max 1.1e-01  σ: sign 100.0%, |Δσ| med 9.7e-03
+  bs3     Float32    0.947 s (  94.7 us/pt)  evals med  6580 p90 12073 max  33340  wrong  14 ( 14 at boundary)  resid med 6.1e-04 max 1.1e-01  σ: sign 100.0%, |Δσ| med 9.7e-03
+
+written: C:\Users\Bacharthy\Documents\GitHub\InterpolatedNyquist.jl\gpu\validate\..\results\validation_cpu_100.csv

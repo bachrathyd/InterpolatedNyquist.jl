@@ -1,0 +1,119 @@
+# NyquistGPU unit tests: self-contained (analytic references only), CPU backend.
+# Run:  julia --project=gpu -t auto -e "using Pkg; Pkg.test()"
+# (the same kernels run on CUDABackend(); see gpu/scripts/gpu_check.jl)
+
+using NyquistGPU, Test
+
+# --- analytic references ----------------------------------------------------
+# Hayes: x'(t) = a x(t) + b x(t-1), D(λ) = λ - a - b e^{-λ}, n = 1.
+# Asymptotically stable iff a < 1, a + b < 0 and b > -sqrt(a² + ν²), where
+# ν ∈ (0, π) solves ν = a tan(ν) (ν = π/2 for a = 0).
+function hayes_stable(a, b)
+    (a < 1 && a + b < 0) || return false
+    abs(a) < 1e-14 && return b > -π / 2
+    f(v) = v - a * tan(v)
+    lo, hi = a > 0 ? (1e-12, π / 2 - 1e-12) : (π / 2 + 1e-12, π - 1e-12)
+    for _ in 1:200
+        m = (lo + hi) / 2
+        (f(lo) * f(m) <= 0) ? (hi = m) : (lo = m)
+    end
+    ν = (lo + hi) / 2
+    return b > -sqrt(a^2 + ν^2)
+end
+# true if the analytic answer does not change within ±d (skip boundary-grazing points)
+hayes_safe(a, b; d = 0.03) =
+    all(hayes_stable(a + da, b + db) == hayes_stable(a, b) for da in (-d, 0, d), db in (-d, 0, d))
+
+D_hayes(λ, p, c) = λ - p[1] - p[2] * exp(-λ)
+D_hayes_tau(λ, p, c) = λ - p[1] - p[2] * exp(-p[3] * λ)           # 3-D parameter point
+# cubic with known roots p1 ± i p2 and -1:  Z = 2 for p1 > 0, 0 for p1 < 0
+D_cubic(λ, p, c) = (λ^2 - 2 * p[1] * λ + p[1]^2 + p[2]^2) * (λ + 1)
+D_promoting(λ, p, c) = λ^2 + 0.5 * λ + p[1]                        # Float64 literal!
+
+@testset "NyquistGPU" begin
+
+    @testset "Hayes equation, analytic region ($T, $meth)" for T in (Float64, Float32),
+                                                                 meth in (:unwrap, :bs3)
+        as = range(-3.0, 0.95; length = 41)
+        bs = range(-3.0, 3.0; length = 41)
+        pts = grid_points(as, bs)
+        r = sweep(D_hayes, pts; n_power = 1, T = T, method = meth,
+            (meth === :bs3 ? (ω_max = 1e4, tol = 1e-6) : (;))...)
+        ok = [hayes_safe(p...) for p in pts]
+        expect = [hayes_stable(p...) for p in pts]
+        @test all((r.Z .== 0)[ok] .== expect[ok])
+        @test count(ok) > 0.9 * length(pts)
+        @test all(>=(0), r.Z)                       # no failed marches
+    end
+
+    @testset "3-D point list (Hayes with delay τ as 3rd parameter)" begin
+        # λ' = λτ maps the τ-delay problem onto Hayes with (aτ, bτ)
+        as = range(-2.0, 0.9; length = 9)
+        bs = range(-2.5, 2.5; length = 9)
+        τs = (0.5, 1.0, 2.0)
+        pts = grid_points(as, bs, τs)
+        @test length(pts) == 9 * 9 * 3 && length(first(pts)) == 3
+        r = sweep(D_hayes_tau, pts; n_power = 1)
+        Z3 = reshape(r.Z, length(as), length(bs), length(τs))
+        for (k, τ) in enumerate(τs), (j, b) in enumerate(bs), (i, a) in enumerate(as)
+            hayes_safe(a * τ, b * τ) || continue
+            @test (Z3[i, j, k] == 0) == hayes_stable(a * τ, b * τ)
+        end
+    end
+
+    @testset "scattered points + root tracking (known cubic)" begin
+        # an arbitrary point cloud -- no grid at all
+        pts = [(0.8 * sin(1.3k), 0.5 + abs(cos(0.7k))) for k in 1:300]
+        for T in (Float64, Float32)
+            r = sweep(D_cubic, pts; n_power = 3, T = T, nroots = 4)
+            @test r.Z == [p[1] > 0 ? 2 : 0 for p in pts]
+            # dominant tracked root: σ = max(p1, -1); one Newton step from the
+            # |D| minimum -> first-order accurate near the line
+            near = [abs(p[1]) < 0.05 for p in pts]
+            σtrue = [max(p[1], -1.0) for p in pts]
+            @test maximum(abs.(r.sigma[near] .- σtrue[near])) < 5e-3
+        end
+    end
+
+    @testset "schedules are bit-identical" begin
+        pts = grid_points(range(-3.0, 0.9; length = 23), range(-3.0, 3.0; length = 19))
+        rs = [sweep(D_hayes, pts; n_power = 1, schedule = s) for s in (:pixel, :strided, :queue)]
+        for r in rs[2:end]
+            @test r.Zraw == rs[1].Zraw
+            @test isequal(r.sigma, rs[1].sigma)
+            @test r.steps == rs[1].steps
+        end
+    end
+
+    @testset "chart() = 2-D special case" begin
+        r = chart(D_hayes, (-3.0, 0.9), (-3.0, 3.0), 17, 13; n_power = 1)
+        @test size(r.Z) == (17, 13)
+        @test r.Z[17, 1] >= 1        # a = 0.9, b = -3: unstable
+        @test r.Z[1, 7] == 0         # a = -3, b = 0: stable
+    end
+
+    @testset "boundary-grazing points are flagged, Float64 recheck fixes them" begin
+        # a = 0: Hopf boundary at b = -π/2 (root crosses at ω = π/2)
+        pts = [(0.0, -π / 2 - 1e-9), (0.0, -π / 2 + 1e-9), (0.0, -1.0), (0.0, -2.0)]
+        r32 = sweep(D_hayes, pts; n_power = 1, T = Float32)
+        @test r32.flags[3] == 0 && r32.flags[4] == 0
+        @test r32.Z[3] == 0 && r32.Z[4] == 2
+        @test all(r32.flags[1:2] .!= 0)                       # sub-resolution in Float32
+        r64 = sweep(D_hayes, pts; n_power = 1, T = Float64)
+        @test r64.Z == [2, 0, 0, 2]                           # resolved in Float64
+        n = recheck!(r32, D_hayes, pts; n_power = 1)
+        @test n == 2 && r32.Z == [2, 0, 0, 2]
+    end
+
+    @testset "precision check" begin
+        @test check_eltype(D_hayes, (0.0, 0.0), (), Float32)
+        @test !check_eltype(D_promoting, (0.0,), (), Float32)
+    end
+
+    @testset "schedule simulator" begin
+        @test simulate_schedule(fill(10, 4096); schedule = :pixel_rowmajor) ≈ 1
+        s = [isodd(i) ? 10 : 100 for i in 1:4096]
+        @test simulate_schedule(s; schedule = :pixel_rowmajor) < 0.6
+        @test simulate_schedule(s; schedule = :queue, lanes = 256) > 0.9
+    end
+end

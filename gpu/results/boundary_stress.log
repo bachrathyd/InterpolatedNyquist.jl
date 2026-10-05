@@ -1,0 +1,18 @@
+Hopf boundary of the showcase at D = 1.50: P_b = 2.9864002145543491
+
+        dP      σ (pkg) | pkg Vern9 | unwrap F64       | unwrap F32       | bs3 F64 1e-8     | bs3 F32 1e-5    
+    -1e-02   -6.635e-04 |        2 | Z= 2    72 ev      | Z= 2    71 ev      | Z= 2 160459 ev      | Z= 2 22450 ev        (stable side)
+    -1e-04   -6.596e-06 |        2 | Z= 2   102 ev      | Z= 2    97 ev      | Z= 2 160945 ev      | Z=-1   346 ev FAIL   (stable side)
+    -1e-06   -6.596e-08 |        2 | Z= 2   118 ev      | Z= 2    98 ev side | Z= 2 161176 ev      | Z= 3 13798 ev        (stable side)
+    -1e-08   -6.596e-10 |        2 | Z= 2   131 ev      | Z= 4    98 ev side | Z= 2 161263 ev      | Z= 3 13795 ev        (stable side)
+    -1e-10    2.084e-06 |        3 | Z= 2   146 ev      | Z= 4    98 ev side | Z= 3 104920 ev      | Z= 3 13795 ev        (stable side)
+    -1e-12    3.726e-08 |        3 | Z= 2   165 ev      | Z= 4    98 ev side | Z= 3 104923 ev      | Z= 3 13795 ev        (stable side)
+     1e-02    6.556e-04 |        4 | Z= 4    73 ev      | Z= 4    70 ev      | Z= 4 92656 ev      | Z= 4 11014 ev        (unstable side)
+     1e-04    6.595e-06 |        4 | Z= 4    92 ev      | Z= 4    87 ev      | Z= 4 93067 ev      | Z=-1   343 ev FAIL   (unstable side)
+     1e-06    6.596e-08 |        4 | Z= 4   106 ev      | Z= 4   102 ev side | Z= 4 93316 ev      | Z= 3 13714 ev        (unstable side)
+     1e-08    4.276e-07 |        3 | Z= 4   137 ev      | Z= 4    98 ev side | Z= 4 93448 ev      | Z= 3 13795 ev        (unstable side)
+     1e-10    2.985e-06 |        3 | Z= 4   156 ev      | Z= 4    98 ev side | Z= 3 104908 ev      | Z= 3 13795 ev        (unstable side)
+     1e-12    1.044e-07 |        3 | Z= 4   157 ev      | Z= 4    98 ev side | Z= 3 104914 ev      | Z= 3 13795 ev        (unstable side)
+ev = D evaluations; 'side' = the critical transition was narrower than the
+precision's smallest step and its branch was decided by the root side
+(flags bit 2); 'FAIL' = march aborted (Z reported as -1).
