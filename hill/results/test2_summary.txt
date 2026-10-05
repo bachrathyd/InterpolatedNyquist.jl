@@ -1,5 +1,5 @@
 grid 200x100, rpm 5000..25000, a_p 0.02..5 mm, tol 1e-03
-Hill+AP 22.39 s on 12 threads; reference (RK4 monodromy, 160 steps/period) 287.66 s
+Hill+AP 18.70 s on 12 threads; reference (RK4 monodromy, 160 steps/period) 126.96 s
 count differs 16 / 20000 (stability 15)
 N 3..40 (median 6); error estimate max 3.2e-03; evals median 28 max 116
 boundary pixels: μ=+1 20, flip 419, Neimark-Sacker 562

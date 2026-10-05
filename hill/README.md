@@ -61,7 +61,10 @@ determinant is an LU of the row-scaled (pole-free) (2N+1)² block times the clos
   delay τ = T, delay factor (1 − e^{−λT}) common to all harmonics → closed-form tail exact.
   Reference: RK4 monodromy on a grid aligned with the cutting window.
   - 200×100 chart: **16 of 20 000 counts differ** from the reference (15 in stability), all on boundary
-    pixels; 19.9 s (12 threads) vs 160 s for the reference
+    pixels; 18.7 s (12 threads) vs 127 s for the reference. All 16 are barely stable points
+    (ρ = 0.9994–0.99996 by a finer reference); with N + 10 harmonics 15 of them become right, so they
+    are truncation errors that the one-ring estimate (2–8× optimistic) let through; the 16th sits at
+    the N = 40 cap (5900 rpm), where the coarse reference was also wrong (`test2_log.txt`)
   - flip (period-doubling, 419 boundary px) and Neimark–Sacker (562 px) lobes both reproduced
   - N chosen 3…40 (median 6): grows with the lobe number, i.e. ∝ 1/(spindle speed) — `test2_N.png`
   - convergence (`test2_convergence.csv`): determinant error ~N⁻³ once N is past the resonant

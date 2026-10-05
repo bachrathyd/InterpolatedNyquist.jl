@@ -42,7 +42,7 @@ for I in findall(Z .!= ZR)[1:min(end, 16)]
     i, j = Tuple(I)
     Ω = Ωof(rpms[i])
     zf, ρf = ref_tooth(m, Ω, aps[j]; m1 = 160, m2 = 160)
-    zN = mill_count(m, Ω, aps[j]; N = NN[i, j] + 10).Z
+    zN = mill_count(m, Ω, aps[j]; N = NN[i, j] + 10, Nmax = NN[i, j] + 10).Z
     @printf("   rpm %6.0f ap %.3f: Hill %d (N %d; N+10: %d), reference %d, finer reference %d (rho %.5f)
 ",
         rpms[i], aps[j], Z[i, j], NN[i, j], zN, ZR[i, j], zf, ρf)
