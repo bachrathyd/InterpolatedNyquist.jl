@@ -49,11 +49,12 @@ if isfile(HILL_MODELS)
     const HKWQ = (ω0 = 1e-9, ω_max = 0.5, h0 = 1e-3, hrel = 0.05)    # half circle |z| = 1
     push!(EXAMPLES,
         (key = "mill2q", ω16 = 0.0, smin = -0.04, hill = true, zdiv = 1, f16 = true, ωp = mill2q_ωp,
-         cfun = c -> memo(() -> mill2q_consts(ζ = c[1], aD = c[2], kr = c[3], Q = 8), (:m2q, c)), res = "1920x1080",
-         note = "1-DOF milling, straight flutes, z = 2, down milling, f_n = 922 Hz: Hill determinant compressed to " *
-                "8 x 8 (cutting-window quadrature + matrix determinant lemma, all harmonics in closed form), " *
-                "counted along the unit circle of the Floquet multiplier",
-         sys = (title = "milling, straight flutes (Test 2, compressed Hill, fast)", D = D_mill2q,
+         cfun = c -> memo(() -> mill2m_consts(ζ = c[1], aD = c[2], kr = c[3], Q = 16), (:m2q, c)), res = "1920x1080",
+         note = "1-DOF milling, straight flutes, z = 2, down milling, f_n = 922 Hz. Infinite Hill determinant (all harmonics, " *
+                "closed form) compressed by the matrix determinant lemma to the 16 quadrature nodes of the cutting window; " *
+                "its semiseparable structure gives the 16 x 16 determinant in O(16) operations. Counted along the unit circle " *
+                "of the Floquet multiplier (half circle by symmetry).",
+         sys = (title = "milling, straight flutes (Test 2, compressed Hill, fast)", D = D_mill2r,
                 c = (0.011, 0.05, 1 / 3), npow = 0, xr = (5.0, 25.0), yr = (0.0, 5.0), xl = "rpm/1000",
                 yl = "a_p [mm]", kw = HKWQ),
          knobs = [(i = 1, name = "damping ζ", lo = 0.002, hi = 0.05), (i = 2, name = "immersion a/D", lo = 0.02, hi = 1.0),
@@ -67,7 +68,7 @@ if isfile(HILL_MODELS)
         (key = "mill2", ω16 = 0.0, smin = -0.04, hill = true, ωp = mill2_ωp,
          cfun = c -> memo(() -> mill2_consts(ζ = c[1], aD = c[2], kr = c[3], tol = 1e-2), (:m2, c)), res = "480x270",
          note = "1-DOF milling, straight flutes, z = 2, down milling, f_n = 922 Hz; axes: spindle speed [1000 rpm], depth of cut [mm]",
-         sys = (title = "milling, straight flutes (Test 2, Hill)", D = D_mill2, c = (0.011, 0.05, 1 / 3), npow = 0,
+         sys = (title = "milling, straight flutes (Test 2, dense Hill, slow)", D = D_mill2, c = (0.011, 0.05, 1 / 3), npow = 0,
                 xr = (5.0, 25.0), yr = (0.0, 5.0), xl = "rpm/1000", yl = "a_p [mm]", kw = HKWM),
          knobs = [(i = 1, name = "damping ζ", lo = 0.002, hi = 0.05), (i = 2, name = "immersion a/D", lo = 0.02, hi = 1.0),
                   (i = 3, name = "K_n/K_t", lo = 0.0, hi = 1.0)]),
