@@ -17,6 +17,10 @@ const STRIP = (n_power = 0, ω0 = A_STRIP, ω_max = A_STRIP + 1, h0 = 1e-3, hrel
 # name => (title, D, c, reference D and c (evaluated in Float64), axes, march, formats, resolution
 #          override, workspace, count divisor)
 const MODELS = Dict{String, Any}(
+    "mill2g" => (title = "Test 2: straight flutes, compressed Hill, Gauss + kink (D_mill2g, Q = 8)", D = D_mill2g,
+                 c = mill2g_consts(Q = 8), Dref = D_mill2g, cref = mill2g_consts(Q = 32),
+                 xr = (5.0, 25.0), yr = (0.0, 5.0), kw = CIRCLE, formats = ("F32", "F16", "F16+"),
+                 res = nothing, ws = false, wslen = nothing, zdiv = 1),
     "mill2p" => (title = "Test 2: straight flutes, compressed Hill, pole-free (D_mill2p, Q = 16)", D = D_mill2p,
                  c = mill2m_consts(Q = 16), Dref = D_mill2s, cref = mill2q_consts(Q = 64),
                  xr = (5.0, 25.0), yr = (0.0, 5.0), kw = CIRCLE, formats = ("F32", "F16", "F16+"),
@@ -112,7 +116,7 @@ end
 
 if abspath(PROGRAM_FILE) == @__FILE__
     print_device()
-    tour(String.(split(arg("models", "mill2p,mill3h,mill3c,mill3d"), ','));
+    tour(String.(split(arg("models", "mill2g,mill3h,mill3d"), ','));
          res = parse_res(arg("res", "1920x1080")), chk = parse_res(arg("check", "192x108")),
          csv = arg("csv", nothing))
 end

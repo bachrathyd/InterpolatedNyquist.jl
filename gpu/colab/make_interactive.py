@@ -184,7 +184,7 @@ def write_tour(out, branch):
             "setup). **Afterwards: *Runtime → Disconnect and delete runtime*.**\n"]},
         json.loads(json.dumps(setup).replace("%BRANCH%", branch)),
         {"cell_type": "code", "metadata": {}, "execution_count": None, "outputs": [], "source": [
-            "MODELS = 'mill2p,mill3d'   # see MODELS in hill/gpu_tour_milling.jl\n",
+            "MODELS = 'mill2g,mill3h,mill3d'   # see MODELS in hill/gpu_tour_milling.jl\n",
             "sh(f\"cd {REPO_DIR} && julia --project=gpu/scripts hill/gpu_tour_milling.jl --models {MODELS} \"\n",
             "   f\"--res 1920x1080 --check 192x108 --csv /content/gpu_tour.csv 2>&1\")\n"]},
     ]

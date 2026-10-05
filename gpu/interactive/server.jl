@@ -57,12 +57,12 @@ if isfile(HILL_MODELS)
     const HKWQ = (ω0 = 1e-9, ω_max = 0.5, h0 = 0.05, hrel = 0.25)
     push!(EXAMPLES,
         (key = "mill2q", ω16 = 0.0, smin = -0.04, hill = true, zdiv = 1, f16 = true, ωp = mill2q_ωp,
-         cfun = c -> memo(() -> mill2m_consts(ζ = c[1], aD = c[2], kr = c[3], Q = 16), (:m2q, c)), res = "1920x1080",
+         cfun = c -> memo(() -> mill2g_consts(ζ = c[1], aD = c[2], kr = c[3], Q = 8), (:m2g, c)), res = "1920x1080",
          note = "1-DOF milling, straight flutes, z = 2, down milling, f_n = 922 Hz. Infinite Hill determinant (all harmonics, " *
                 "closed form) compressed by the matrix determinant lemma to the 16 quadrature nodes of the cutting window; " *
                 "its semiseparable structure gives the 16 x 16 determinant in O(16) operations. Counted along the unit circle " *
                 "of the Floquet multiplier (half circle by symmetry).",
-         sys = (title = "milling, straight flutes (Test 2, compressed Hill, fast)", D = D_mill2p,
+         sys = (title = "milling, straight flutes (Test 2, compressed Hill, fast)", D = D_mill2g,
                 c = (0.011, 0.05, 1 / 3), npow = 0, xr = (5.0, 25.0), yr = (0.0, 5.0), xl = "rpm/1000",
                 yl = "a_p [mm]", kw = HKWQ),
          knobs = [(i = 1, name = "damping ζ", lo = 0.002, hi = 0.05), (i = 2, name = "immersion a/D", lo = 0.02, hi = 1.0),

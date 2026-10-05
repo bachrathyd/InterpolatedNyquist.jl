@@ -461,3 +461,114 @@ function D_mill2p(μ, q, c::NTuple{L, TT}) where {L, TT}
     return (1 - W1 * β11) * (1 + W2 * β22) - W1 * W2 * (B12 * B21)
 end
 @isdefined(NyquistGPU) && (NyquistGPU.prepare(::typeof(D_mill2p), p, c) = mill2p_prepare(p, c))
+
+# ---------------------------------------------------------------------------------------------
+# D_mill2g -- Test 2 in the pole-free prepared form of D_mill2p, with GAUSS nodes on the cutting
+# window and the DIAGONAL KINK CORRECTION, 4th order in Q instead of 2nd (code review round 2,
+# mathematics). Q = 6-8 is as accurate as D_mill2p at Q = 64.
+#
+# Why: every row of the compressed operator has a slope kink at its own node (the free Green's
+# function: S'(0+) - S'(0-) = 2π/ω²). A rule integrates the ramp (ψ - ψ_i)_+ with the error
+#   E_i = (Lw - ψ_i)²/2 - Σ_{q>i} W_q (ψ_q - ψ_i)        (λ-free, host constant)
+# and adding  ε_i = f(φ_i) E_i / ω²  to the diagonal of the compressed matrix M (I + αM, α = w(1 - E))
+# removes that error. For Gauss nodes (no endpoint error) the determinant then converges like Q⁻⁴.
+# In the recursion of D_mill2p the diagonal is the pivot of the causal (unit lower triangular) part:
+# it becomes d_i = 1 + α ε_i = 1 + u g_i  (u = 1 - E, g_i = w ε_i), i.e. the node weight
+#   h_i = G C_i / d_i      (G = T w/(r1 - r2) (1 - E), C_i = W_i f(φ_i)/2π)
+# and the determinant is taken WITHOUT the factor Π d_i (that factor only adds an O(1/Q) smooth
+# error to |F|; it has no zeros outside |z| < 1). Extra poles: d_i = 0 at z = g_i/(1 + g_i), inside
+# the unit circle iff g_i > -1/2 (host check: mill2g_polecheck).
+# Gauss nodes are not equidistant: the node-to-node rotation ϱ_i = e^{-2i sζ (ψ_{i+1} - ψ_i)/ω} is
+# prepared per point (spacings are symmetric, so only Q÷2 distinct values).
+# Cost per node vs D_mill2p: + ~30 real multiplications (dual numbers) and one REAL reciprocal
+# (1/|d_i|², no complex division); per evaluation + 3 multiplications.
+#
+# c = (ζ, w1, z, f_n, ψ_1..ψ_Q, C_1..C_Q, ê_1..ê_Q)   (L = 4 + 3Q),  ê_i = f(φ_i) E_i
+# q = prepare = (Re e^{r1 T}, Im e^{r1 T}, -T w/(2 sζ), w/ω², ϱ_1, ..., ϱ_{Q÷2})  (4 + 2(Q÷2) reals)
+
+function mill2g_consts(; ζ = 0.011, aD = 0.05, kr = 1 / 3, down = true, z = 2, w1 = 0.4478,
+                       fn = 922.0, Q = 8)
+    φen, φex = down ? (acos(2aD - 1), Float64(π)) : (0.0, acos(1 - 2aD))
+    Lw = z * (φex - φen)
+    Lw <= 2π + 1e-12 || error("mill2g: the cutting window exceeds one tooth period")
+    x, wq = gl(Q)                                   # Gauss-Legendre on [-1, 1], ascending
+    ψ = Lw / 2 .* (x .+ 1)
+    W = Lw / 2 .* wq
+    f = [sin(φ) * (cos(φ) + kr * sin(φ)) for φ in φen .+ ψ ./ z]
+    C = W .* f ./ 2π
+    E = [(Lw - ψ[i])^2 / 2 - sum((W[k] * (ψ[k] - ψ[i]) for k in (i + 1):Q); init = 0.0) for i in 1:Q]
+    return (ζ, w1, Float64(z), fn, ψ..., C..., (f .* E)...)
+end
+
+function mill2g_prepare(p, c::NTuple{L, TT}) where {L, TT}
+    Q = (L - 4) ÷ 3
+    H = Q ÷ 2
+    rk, ap = p
+    ζ, w1, z, fn = c[1], c[2], c[3], c[4]
+    ω = z * rk * (TT(1000) / (60 * fn))
+    T = TT(6.283185307179586) / ω
+    sζ = sqrt(1 - ζ * ζ)
+    er1 = exp(Complex(-ζ, sζ) * T)
+    s2 = -2 * sζ / ω
+    return ntuple(Val(4 + 2H)) do k
+        if k == 1
+            real(er1)
+        elseif k == 2
+            imag(er1)
+        elseif k == 3
+            -T * w1 * ap / (2 * sζ)                 # T w/(r1 - r2) = i·(this)
+        elseif k == 4
+            w1 * ap / (ω * ω)                       # g_i = (w/ω²) ê_i
+        else
+            j = (k - 3) ÷ 2                         # spacing j = ψ_{j+1} - ψ_j (= spacing Q - j)
+            sn, cs = sincos(s2 * (c[4 + j + 1] - c[4 + j]))
+            isodd(k) ? cs : sn
+        end
+    end
+end
+
+function D_mill2g(μ, q, c::NTuple{L, TT}) where {L, TT}
+    Q = (L - 4) ÷ 3
+    er1 = Complex(q[1], q[2])
+    Tw = Complex(zero(TT), q[3])
+    κω = q[4]
+    E = exp(-TT(6.283185307179586) * μ)            # 1/z
+    W1 = er1 * E
+    W2 = conj(er1) * E
+    u = 1 - E
+    G = Tw * u
+    ur2 = 2 * real(u)
+    uu = real(u) * real(u) + imag(u) * imag(u)
+    β11 = one(E); β22 = -one(E); B21 = zero(E); B12 = zero(E)
+    i = 1
+    while true
+        g = κω * @inbounds(c[4 + 2Q + i])
+        d = 1 + u * g                               # pivot 1 + α ε_i
+        s = @inbounds(c[4 + Q + i]) * inv(1 + g * (ur2 + g * uu))   # C_i/|d|²
+        h = (G * conj(d)) * s                       # G C_i / d
+        y1 = h * (β11 + B21)
+        y2 = h * (β22 - B12)
+        β11 -= y1; β22 += y2
+        B21 += y1; B12 += y2
+        i == Q && break
+        j = min(i, Q - i)                           # Gauss spacings are symmetric
+        ϱ = Complex(@inbounds(q[3 + 2j]), @inbounds(q[4 + 2j]))
+        B21 = ϱ * B21; B12 = conj(ϱ) * B12
+        i += 1
+    end
+    return (1 - W1 * β11) * (1 + W2 * β22) - W1 * W2 * (B12 * B21)
+end
+@isdefined(NyquistGPU) && (NyquistGPU.prepare(::typeof(D_mill2g), p, c) = mill2g_prepare(p, c))
+
+"host check: the extra poles z = g_i/(1 + g_i) lie inside |z| < 1 iff min_i g_i > -1/2 (worst point of a chart)"
+function mill2g_polecheck(c, rks, aps)
+    Q = (length(c) - 4) ÷ 3
+    ê = c[4 + 2Q + 1:4 + 3Q]
+    gmin = Inf; gmax = -Inf
+    for rk in rks, ap in aps
+        ω = c[3] * rk * 1000 / (60 * c[4])
+        κ = c[2] * ap / ω^2
+        gmin = min(gmin, κ * minimum(ê)); gmax = max(gmax, κ * maximum(ê))
+    end
+    return (gmin = gmin, gmax = gmax, ok = gmin > -0.5, zmax = maximum(abs(g / (1 + g)) for g in (gmin, gmax)))
+end
