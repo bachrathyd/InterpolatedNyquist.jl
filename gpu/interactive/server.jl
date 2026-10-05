@@ -42,6 +42,8 @@ const HILL_MODELS = joinpath(@__DIR__, "..", "..", "hill", "gpu_models.jl")
 if isfile(HILL_MODELS)
     include(HILL_MODELS)
     include(joinpath(@__DIR__, "..", "..", "hill", "gpu_fast.jl"))
+    include(joinpath(@__DIR__, "..", "..", "hill", "gpu_helix.jl"))
+    ws_len(::typeof(D_mill3c)) = mill3c_wslen(8, 4, 42)
     const HKW = (ω0 = A_STRIP, ω_max = A_STRIP + 1, h0 = 1e-3, hrel = 0.05)
     const HKWM = (ω0 = A_STRIP, ω_max = A_STRIP + 1, h0 = 1e-3, hrel = 0.1)   # milling: fewer samples
     const MEMO = Dict{Any, Any}()
@@ -64,6 +66,18 @@ if isfile(HILL_MODELS)
                 yl = "a_p [mm]", kw = HKWQ),
          knobs = [(i = 1, name = "damping ζ", lo = 0.002, hi = 0.05), (i = 2, name = "immersion a/D", lo = 0.02, hi = 1.0),
                   (i = 3, name = "K_n/K_t", lo = 0.0, hi = 1.0)]),
+        (key = "mill3c", ω16 = 0.0, smin = -0.03, hill = true, zdiv = 1, f16 = true, ωp = mill3c_ωp,
+         cfun = c -> memo(() -> mill3c_consts(ζ = c[1], aD = c[2], β2 = c[3], Q = 8, ns = 4), (:m3c, c)),
+         res = "960x540",
+         note = "1-DOF milling, two flutes with helix 30° and β₂ (R = 8 mm), delays distributed over the axial depth, " *
+                "spindle period. Compressed Hill determinant on 2 x 4 x 8 Gauss nodes in the workpiece frame (all harmonics " *
+                "in closed form); the regenerative term of every node is the same material node on the previous tooth. " *
+                "Reduced once per point to a 34 x 34 determinant; counted along the unit circle of the Floquet multiplier.",
+         sys = (title = "milling, different helix angles (Test 3, compressed Hill, fast)", D = D_mill3c,
+                c = (0.011, 0.05, 45.0), npow = 0, xr = (8.0, 30.0), yr = (0.0, 10.0), xl = "rpm/1000",
+                yl = "a_p [mm]", kw = HKWQ),
+         knobs = [(i = 1, name = "damping ζ", lo = 0.002, hi = 0.05), (i = 2, name = "immersion a/D", lo = 0.02, hi = 1.0),
+                  (i = 3, name = "helix β₂ [°]", lo = 0.0, hi = 60.0)]),
         (key = "mathieu", ω16 = 0.0, smin = -0.3, hill = true, ωp = mathieu_ωp,
          cfun = c -> mathieu_consts(c[1], c[2]),
          note = "x'' + κx' + (δ + ε cos t)x = b x(t - 2π); Hill determinant, harmonics derived per point",
@@ -226,6 +240,10 @@ function get_plan(e, fmt, nx, ny, xr, yr)
             rkw = (kw..., T = Float32, Teval = Float32)
             ishill(e) || (rkw = (rkw..., nroots = 4, schedule = :pixel))
             S.rplan = plan_grid(xr, yr, nx, ny; rkw...)
+        end
+        if haskey(kw, :workspace)    # neighbouring lanes take neighbouring points (coalesced workspace)
+            S.plan.stride = 1
+            S.rplan === nothing || (S.rplan.stride = 1)
         end
         S.key = key
         S.grid = (xr, yr)

@@ -2,12 +2,13 @@
 # accuracy of each format against a Float64 reference on a coarse check grid.
 #   formats: F32 (Float32), F16 (D evaluated in Float16, march in Float32),
 #            F16+ (F16, then the flagged points again in Float32 on the device)
-#   julia --project=gpu/scripts hill/gpu_tour_milling.jl [--models mill2p,mill3d] [--res 1920x1080]
+#   julia --project=gpu/scripts hill/gpu_tour_milling.jl [--models mill2p,mill3c,mill3d] [--res 1920x1080]
 #         [--check 192x108] [--csv out.csv]
 # Counts: the circle models (mill2n, ...) return Z_raw = Z, the strip models (mill3d) 2Z.
 include(joinpath(@__DIR__, "..", "gpu", "scripts", "common.jl"))
 include(joinpath(@__DIR__, "gpu_models.jl"))
 include(joinpath(@__DIR__, "gpu_fast.jl"))
+include(joinpath(@__DIR__, "gpu_helix.jl"))
 const NG = NyquistGPU
 
 const CIRCLE = (n_power = 0, ω0 = 1e-9, ω_max = 0.5, h0 = 0.05, hrel = 0.25, nroots = 1)
@@ -19,27 +20,37 @@ const MODELS = Dict{String, Any}(
     "mill2p" => (title = "Test 2: straight flutes, compressed Hill, pole-free (D_mill2p, Q = 16)", D = D_mill2p,
                  c = mill2m_consts(Q = 16), Dref = D_mill2s, cref = mill2q_consts(Q = 64),
                  xr = (5.0, 25.0), yr = (0.0, 5.0), kw = CIRCLE, formats = ("F32", "F16", "F16+"),
-                 res = nothing, ws = false, zdiv = 1),
+                 res = nothing, ws = false, wslen = nothing, zdiv = 1),
     "mill2n" => (title = "Test 2: straight flutes, compressed Hill (D_mill2n, Q = 16)", D = D_mill2n,
                  c = mill2m_consts(Q = 16), Dref = D_mill2s, cref = mill2q_consts(Q = 64),
                  xr = (5.0, 25.0), yr = (0.0, 5.0), kw = CIRCLE, formats = ("F32", "F16", "F16+"),
-                 res = nothing, ws = false, zdiv = 1),
+                 res = nothing, ws = false, wslen = nothing, zdiv = 1),
     "mill3d" => (title = "Test 3: helix 30/45 deg, dense Hill (D_mill3, tol 1e-2)", D = D_mill3,
                  c = mill3_consts(tol = 1e-2), Dref = D_mill3, cref = mill3_consts(tol = 1e-4),
                  xr = (8.0, 30.0), yr = (0.0, 10.0), kw = STRIP, formats = ("F32",),
-                 res = (480, 270), ws = true, zdiv = 2),
+                 res = (480, 270), ws = true, wslen = c -> ws_len(D_mill3), zdiv = 2),
+    "mill3c" => (title = "Test 3: helix 30/45 deg, compressed Hill (D_mill3c, Q = 8, n_s = 4)", D = D_mill3c,
+                 c = mill3c_consts(Q = 8, ns = 4), Dref = D_mill3c, cref = mill3c_consts(Q = 10, ns = 5),
+                 xr = (8.0, 30.0), yr = (0.0, 10.0), kw = CIRCLE, formats = ("F32", "F16", "F16+"),
+                 res = nothing, ws = true, wslen = mill3c_wslen, zdiv = 1),
 )
 @isdefined(EXTRA_MODELS) && merge!(MODELS, EXTRA_MODELS)
 
 fmt_types(f) = f == "F32" ? (Float32, Float32) : (Float32, Float16)
 
-function plan_for(m, xr, yr, nx, ny, T, TE)
+# workspace models: lanes within a memory budget, and stride 1 (neighbouring lanes take
+# neighbouring points: coherent work and coalesced workspace access)
+function plan_for(m, c, xr, yr, nx, ny, T, TE; budget = 3e9)
     kw = (backend = BACKEND, T = T, Teval = TE, m.kw...)
     if m.ws
-        kw = (kw..., schedule = :strided, lanes = min(default_lanes(), 1 << 16),
-              workspace = (Complex{ForwardDiff.Dual{NG.PhaseTag, T, 1}}, ws_len(m.D)))
+        E = Complex{ForwardDiff.Dual{NG.PhaseTag, T, 1}}
+        wl = m.wslen(c)
+        lanes = clamp(floor(Int, budget / (wl * sizeof(E))), 1024, min(default_lanes(), 1 << 16))
+        kw = (kw..., schedule = :strided, lanes = lanes, workspace = (E, wl))
     end
-    return plan_grid(xr, yr, nx, ny; kw...)
+    p = plan_grid(xr, yr, nx, ny; kw...)
+    m.ws && (p.stride = 1)
+    return p
 end
 
 counts(Zraw, zdiv) = map(z -> isfinite(z) ? round(Int, z / zdiv) : -1, Zraw)
@@ -53,24 +64,24 @@ function tour(names; res, chk, csv)
         cx, cy = chk
         println("\n== $(m.title): $(nx)x$(ny), check grid $(cx)x$(cy)")
         # Float64 reference on the check grid (same engine, reference form)
-        rp = plan_for((m..., D = m.Dref), m.xr, m.yr, cx, cy, Float64, Float64)
+        rp = plan_for((m..., D = m.Dref), m.cref, m.xr, m.yr, cx, cy, Float64, Float64)
         tref = @elapsed run!(rp, m.Dref, m.cref)
         Zref = counts(Array(rp.Zraw), m.zdiv)
         @printf("   reference (Float64): %.1f s, unstable %.1f %%\n", tref, 100count(>(0), Zref) / length(Zref))
         for f in m.formats
             T, TE = fmt_types(f)
             # accuracy on the check grid
-            cp = plan_for(m, m.xr, m.yr, cx, cy, T, TE)
+            cp = plan_for(m, m.c, m.xr, m.yr, cx, cy, T, TE)
             run!(cp, m.D, m.c)
             if f == "F16+"
-                crp = plan_for(m, m.xr, m.yr, cx, cy, Float32, Float32)
+                crp = plan_for(m, m.c, m.xr, m.yr, cx, cy, Float32, Float32)
                 recheck_flagged!(cp, crp, m.D, m.c)
             end
             Zc = counts(Array(cp.Zraw), m.zdiv)
             ndiff, nfail = count(Zc .!= Zref), count(<(0), Zc)
             # timing at the chart resolution
-            p = plan_for(m, m.xr, m.yr, nx, ny, T, TE)
-            rplan = f == "F16+" ? plan_for(m, m.xr, m.yr, nx, ny, Float32, Float32) : nothing
+            p = plan_for(m, m.c, m.xr, m.yr, nx, ny, T, TE)
+            rplan = f == "F16+" ? plan_for(m, m.c, m.xr, m.yr, nx, ny, Float32, Float32) : nothing
             frame() = begin
                 tk = timed(() -> run!(p, m.D, m.c))
                 tr = rplan === nothing ? 0.0 : timed(() -> recheck_flagged!(p, rplan, m.D, m.c))
@@ -97,7 +108,7 @@ end
 
 if abspath(PROGRAM_FILE) == @__FILE__
     print_device()
-    tour(String.(split(arg("models", "mill2p,mill3d"), ','));
+    tour(String.(split(arg("models", "mill2p,mill3c,mill3d"), ','));
          res = parse_res(arg("res", "1920x1080")), chk = parse_res(arg("check", "192x108")),
          csv = arg("csv", nothing))
 end

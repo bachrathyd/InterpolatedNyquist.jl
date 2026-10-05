@@ -39,14 +39,15 @@ end
 
 # LU with partial pivoting of the n x n matrix stored column-major in A[i + (j-1) n]
 # (A: the per-lane WorkSlot of the NyquistGPU workspace), returns det
-@inline function lu_det!(A, nn)
+@inline function lu_det!(A, nn, ld = nn)
     n = Int(nn)
+    LD = Int(ld)
     d = one(A[1])
     for k in 1:n
         p = k
-        best = _mag2(A[k + (k - 1) * n])
+        best = _mag2(A[k + (k - 1) * LD])
         for i in (k + 1):n
-            v = _mag2(A[i + (k - 1) * n])
+            v = _mag2(A[i + (k - 1) * LD])
             if v > best
                 best = v
                 p = i
@@ -54,19 +55,19 @@ end
         end
         if p != k
             for j in k:n
-                a = A[k + (j - 1) * n]
-                A[k + (j - 1) * n] = A[p + (j - 1) * n]
-                A[p + (j - 1) * n] = a
+                a = A[k + (j - 1) * LD]
+                A[k + (j - 1) * LD] = A[p + (j - 1) * LD]
+                A[p + (j - 1) * LD] = a
             end
             d = -d
         end
-        piv = A[k + (k - 1) * n]
+        piv = A[k + (k - 1) * LD]
         d *= piv
         ip = cinv(piv)
         for i in (k + 1):n
-            f = A[i + (k - 1) * n] * ip
+            f = A[i + (k - 1) * LD] * ip
             for j in (k + 1):n
-                A[i + (j - 1) * n] -= f * A[k + (j - 1) * n]
+                A[i + (j - 1) * LD] -= f * A[k + (j - 1) * LD]
             end
         end
     end
@@ -145,9 +146,9 @@ function D_mill2(μ, p, cw)
         l = j - Ni - 1
         s = λ + Complex(zero(ζ), k * ωp)
         r = (s + cs)^2
-        A[i + (j - 1) * Int(n)] = cdiv(i == j ? s * s + 2ζ * s + B : w * _H(c, k - l, 8, NM2) * E, r)
+        A[i + (j - 1) * NN2] = cdiv(i == j ? s * s + 2ζ * s + B : w * _H(c, k - l, 8, NM2) * E, r)
     end
-    dA = lu_det!(A, n)
+    dA = lu_det!(A, n, NN2)
     sq = sqrt(4ζ * ζ - 4 * B)
     z1 = (-2ζ + sq) / 2
     z2 = (-2ζ - sq) / 2
@@ -165,7 +166,10 @@ end
 # ---------------------------------------------------------------------------------------
 mill3_ωp(p, c) = p[1] * 1000 / (60 * c[6])
 
-@inline phi1(x) = _mag2(x) < 1e-6 ? 1 + x / 2 + x * x / 6 + x * x * x / 24 : cdiv(exp(x) - 1, x)
+# (e^x - 1)/x: series for |x| < 0.1 (Horner, integer divisors -- a Float64 literal here compiled
+# to Float64 instructions in every GPU evaluation), else the closed form
+@inline phi1(x) = 100 * _mag2(x) < 1 ? 1 + x / 2 * (1 + x / 3 * (1 + x / 4 * (1 + x / 5 * (1 + x / 6)))) :
+                  cdiv(exp(x) - 1, x)
 
 # K_m(s) = (1/L) Σ_j e^{imθ_j} ∫_0^L e^{-im b_j ζ} (1 - e^{-s τ_j(ζ)}) dζ, closed form
 @inline function kernel3(m, s, Ω, L, tb1, tb2, R)
@@ -200,9 +204,9 @@ function D_mill3(μ, p, cw)
         s = λ + Complex(zero(ζ), k * ωp)
         sl = λ + Complex(zero(ζ), l * ωp)
         v = w * _H(c, k - l, 10, NM3) * kernel3(k - l, sl, Ω, L, tb1, tb2, R)
-        A[i + (j - 1) * Int(n)] = cdiv(i == j ? s * s + 2ζ * s + 1 + v : v, (s + cs)^2)
+        A[i + (j - 1) * NN3] = cdiv(i == j ? s * s + 2ζ * s + 1 + v : v, (s + cs)^2)
     end
-    dA = lu_det!(A, n)
+    dA = lu_det!(A, n, NN3)
     Bt = 1 + w * real(_H(c, 0, 10, NM3)) * 2          # mean (non-delayed) part for the far tail
     sq = sqrt(Complex(4ζ * ζ - 4 * Bt, zero(ζ)))
     z1 = (-2ζ + sq) / 2
