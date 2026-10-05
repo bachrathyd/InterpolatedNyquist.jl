@@ -175,6 +175,15 @@ D_promoting(λ, p, c) = λ^2 + 0.5 * λ + p[1]                        # Float64 
         @test fetch_result(h2).Z == fetch_result(h).Z
         @test fetch_result(h2).steps == fetch_result(h).steps
         @test (rs.npts, rs.stride, rs.lanes) == (23 * 17, st0, 7)
+        # full charts run one warp per 4 x 8 pixel tile (k_tile!): same results as a point list,
+        # also for sizes that are not multiples of the tile
+        for (nx, ny) in ((23, 17), (8, 8), (5, 3))
+            gt = plan_grid((-3.0, 0.9), (-3.0, 3.0), nx, ny; n_power = 1, T = Float64, schedule = :pixel)
+            rt = fetch_result(run!(gt, D_hayes))
+            # the same (device-generated) points as a list: bit-identical results
+            rl = sweep(D_hayes, Array(gt.points); n_power = 1, T = Float64, schedule = :pixel)
+            @test rt.Z == rl.Z && rt.steps == rl.steps && isequal(rt.sigma, rl.sigma)
+        end
     end
 
     @testset "root refinement: Newton polish and certification by counting" begin

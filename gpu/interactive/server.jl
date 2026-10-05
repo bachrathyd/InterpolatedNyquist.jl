@@ -59,7 +59,7 @@ if isfile(HILL_MODELS)
                 "closed form) compressed by the matrix determinant lemma to the 16 quadrature nodes of the cutting window; " *
                 "its semiseparable structure gives the 16 x 16 determinant in O(16) operations. Counted along the unit circle " *
                 "of the Floquet multiplier (half circle by symmetry).",
-         sys = (title = "milling, straight flutes (Test 2, compressed Hill, fast)", D = D_mill2n,
+         sys = (title = "milling, straight flutes (Test 2, compressed Hill, fast)", D = D_mill2p,
                 c = (0.011, 0.05, 1 / 3), npow = 0, xr = (5.0, 25.0), yr = (0.0, 5.0), xl = "rpm/1000",
                 yl = "a_p [mm]", kw = HKWQ),
          knobs = [(i = 1, name = "damping ζ", lo = 0.002, hi = 0.05), (i = 2, name = "immersion a/D", lo = 0.02, hi = 1.0),

@@ -20,9 +20,9 @@ if !@isdefined(cinv)        # shared with gpu_models.jl
     @inline _mag2(z) = _val(real(z))^2 + _val(imag(z))^2
     @inline function cinv(b)
         sc = max(abs(_val(real(b))), abs(_val(imag(b))))
-        sc = ifelse(sc > 0, sc, one(sc))
-        bs = b / sc
-        return conj(bs) * inv(real(bs) * real(bs) + imag(bs) * imag(bs)) / sc
+        isc = inv(ifelse(sc > 0, sc, one(sc)))          # one division instead of nine
+        bs = b * isc
+        return conj(bs) * (inv(real(bs) * real(bs) + imag(bs) * imag(bs)) * isc)
     end
 end
 
@@ -408,3 +408,56 @@ function D_mill2n(μ, p, c::NTuple{L, TT}) where {L, TT}
     v1 = W1 * iTr; v2 = W2 * iTr
     return (1 + v1 * B11) * (1 + v2 * B22) - v1 * B12 * v2 * B21
 end
+
+# ---------------------------------------------------------------------------------------------
+# Fastest form: D_mill2p -- pole-free, with the per-point constants prepared once (found in the
+# code review; NyquistGPU.prepare). From D_mill2n:
+#  * C21 = κB21, C12 = κ̄B12: |κ| = 1 and only the product B12 B21 enters F, so κ drops out and
+#    only the node-to-node rotation ϱ = e^{-2i sζ δψ/ω} is left;
+#  * B11, C21 ∝ k1 and B22, C12 ∝ k2, with v_s k_s = W_s/(1 - W_s): multiplying F by
+#    (1 - W1)(1 - W2) removes k_s, every division and the poles at the free-oscillator multipliers
+#    e^{r_s T}. The factor has no zeros or poles outside |z| < 1 (zero winding on |z| = 1) and is
+#    real positive at z = ±1, so the count and the parity rule are unchanged; the values have
+#    ~100x less dynamic range (no Float16 overflow at light damping, fewer march steps).
+#   y1 = h (β11 + B21),  y2 = h (β22 - B12),  β11 -= y1,  β22 += y2,
+#   B21 = ϱ (B21 + y1),  B12 = ϱ̄ (B12 + y2),       h = T w/(r1 - r2) (1 - E) c_i,  E = e^{-2πμ}
+#   F̃ = (1 - W1 β11)(1 + W2 β22) - W1 W2 B12 B21,  W1 = e^{r1 T} E,  W2 = conj(e^{r1 T}) E
+# Per point (march precision, once): ϱ, e^{r1 T}, T w/(r1 - r2) -- in Float32 also when D runs in
+# Float16 (the point and ω are never rounded to Float16: no overflow, no merged chart columns).
+# Per evaluation: one exponential, no division; per node ~44 real multiplications (dual numbers).
+# ---------------------------------------------------------------------------------------------
+function mill2p_prepare(p, c)
+    rk, ap = p
+    ζ, w1, z, fn, δψ = c[1], c[2], c[3], c[4], c[5]
+    TT = typeof(ζ)
+    ω = z * rk * (TT(1000) / (60 * fn))
+    T = TT(6.283185307179586) / ω
+    sζ = sqrt(1 - ζ * ζ)
+    er1 = exp(Complex(-ζ, sζ) * T)
+    ϱ = cis(-2 * sζ * δψ / ω)
+    return (real(ϱ), imag(ϱ), real(er1), imag(er1), zero(TT), -T * w1 * ap / (2 * sζ))
+end
+
+function D_mill2p(μ, q, c::NTuple{L, TT}) where {L, TT}
+    Q = L - 6
+    ϱ = Complex(q[1], q[2])
+    er1 = Complex(q[3], q[4])
+    Tw = Complex(q[5], q[6])                       # T w/(r1 - r2)
+    E = exp(-TT(6.283185307179586) * μ)            # 1/z
+    W1 = er1 * E
+    W2 = conj(er1) * E
+    G = Tw * (1 - E)
+    β11 = one(E); β22 = -one(E); B21 = zero(E); B12 = zero(E)
+    i = 1
+    while true
+        h = G * @inbounds(c[6 + i])
+        y1 = h * (β11 + B21)
+        y2 = h * (β22 - B12)
+        β11 -= y1; β22 += y2
+        B21 = ϱ * (B21 + y1); B12 = conj(ϱ) * (B12 + y2)
+        i == Q && break
+        i += 1
+    end
+    return (1 - W1 * β11) * (1 + W2 * β22) - W1 * W2 * (B12 * B21)
+end
+@isdefined(NyquistGPU) && (NyquistGPU.prepare(::typeof(D_mill2p), p, c) = mill2p_prepare(p, c))

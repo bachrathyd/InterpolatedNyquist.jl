@@ -30,9 +30,9 @@ if !@isdefined(cinv)        # shared with gpu_fast.jl (defined once, whatever th
     # (scaled by the primal magnitude first, so neither |b|² nor its derivative underflows in Float32)
     @inline function cinv(b)
         sc = max(abs(_val(real(b))), abs(_val(imag(b))))
-        sc = ifelse(sc > 0, sc, one(sc))
-        bs = b / sc
-        return conj(bs) * inv(real(bs) * real(bs) + imag(bs) * imag(bs)) / sc
+        isc = inv(ifelse(sc > 0, sc, one(sc)))          # one division instead of nine
+        bs = b * isc
+        return conj(bs) * (inv(real(bs) * real(bs) + imag(bs) * imag(bs)) * isc)
     end
 end
 @inline cdiv(a, b) = a * cinv(b)

@@ -78,6 +78,19 @@ struct CharFn{F}
 end
 @inline (m::CharFn)(λ, p, c) = m.f(λ, p, c)
 
+"""
+    prepare(D, p, c) -> q
+
+Per-point preparation, run once per point in the march precision before the first
+evaluation; the march then calls `D(λ, q, c)` instead of `D(λ, p, c)`. Default: `q = p`.
+Extend it for a characteristic function with point-dependent constants that are expensive,
+or that must not be formed in a narrow evaluation format (Float16 rounds the point itself
+and overflows easily): `NyquistGPU.prepare(::typeof(myD), p, c) = (...)`. With a workspace,
+`c = (constants, slot)` and `prepare` may fill the slot.
+"""
+@inline prepare(f, p, c) = p
+@inline prepare(D::CharFn, p, c) = prepare(D.f, p, c)
+
 # Literal integer powers of the dual-number λ (λ^4 in a user's D): unrolled
 # products instead of Base's generic power_by_squaring loop, which is not
 # inlined (2.5x slower on the CPU, a loop + call on the GPU). Only our own
@@ -280,7 +293,11 @@ end
         ntuple(_ -> T(Inf), Val(N)), nan, nan)
 end
 
-@inline function seed(D::F, p::P, c, mp::MarchParams{T}, ::Val{N}) where {F, P, T, N}
+# p: the point, cM: constants in the march precision, cE: in the evaluation precision
+@inline seed(D::F, p, cM, cE, mp::MarchParams, nr) where {F} = seed_q(D, prepare(D, p, cM), cE, mp, nr)
+
+# q: an already prepared point
+@inline function seed_q(D::F, p::P, c, mp::MarchParams{T}, ::Val{N}) where {F, P, T, N}
     ω = mp.ω0
     Dv, Dw = eval_line(D, p, c, mp, ω)
     u, th, g, s = sample_data(Dv, Dw)
@@ -460,7 +477,7 @@ end
     m = MarchParams{T, T}(σ, mp.ω0, mp.ωmax, mp.h0, mp.rtol, mp.atol, mp.hrel, mp.hmax,
         mp.ωband, mp.npow, mp.maxsteps, Int32(0), Int32(0), mp.σtol)
     cT = conv_consts(T, c)
-    st = seed(D, p, cT, m, Val(1))
+    st = seed_q(D, p, cT, m, Val(1))                      # p: the prepared point of the march
     while st.status == Int8(0)
         st = march_step(D, st, cT, m, meth)
     end
@@ -595,12 +612,40 @@ end
 # ===========================================================================
 # Kernels -- one per schedule. Pts is a device vector of NTuple{K,T}.
 # ===========================================================================
+# The kernels get the constants c in the march precision (prepare, refinement and
+# certification use them as they are) and convert them to the evaluation precision once.
+@inline evalconsts(::MarchParams{T, TE}, c) where {T, TE} = conv_consts(TE, c)
+
 @kernel function k_pixel!(Zr, Sg, Om, St, Fl, D, c, @Const(Pts), npts, mp, meth, nr, rm)
     i = @index(Global, Linear)
     if i <= npts
-        st = seed(D, @inbounds(Pts[i]), c, mp, nr)
+        cE = evalconsts(mp, c)
+        st = seed(D, @inbounds(Pts[i]), c, cE, mp, nr)
         while st.status == Int8(0)
-            st = march_step(D, st, c, mp, meth)
+            st = march_step(D, st, cE, mp, meth)
+        end
+        store!(Zr, Sg, Om, St, Fl, i, st, mp, D, c, meth, rm)
+    end
+end
+
+# A full chart (plan_grid): each warp of 32 threads takes a TILE_W x TILE_H tile of pixels.
+# Neighbouring pixels need similar step counts, and the count varies less along the second
+# axis (depth of cut) than along the first (speed): a tile wastes fewer lane-steps waiting for
+# the slowest lane than 32 pixels of a row (simulated SIMT efficiency ~0.87 against ~0.73).
+const TILE_W = 4
+const TILE_H = 8
+@kernel function k_tile!(Zr, Sg, Om, St, Fl, D, c, @Const(Pts), nx, ny, ntx, mp, meth, nr, rm)
+    I = @index(Global, Linear)
+    w = (I - 1) ÷ (TILE_W * TILE_H)
+    l = (I - 1) % (TILE_W * TILE_H)
+    x = (w % ntx) * TILE_W + l % TILE_W
+    y = (w ÷ ntx) * TILE_H + l ÷ TILE_W
+    if (x < nx) & (y < ny)
+        i = y * nx + x + 1
+        cE = evalconsts(mp, c)
+        st = seed(D, @inbounds(Pts[i]), c, cE, mp, nr)
+        while st.status == Int8(0)
+            st = march_step(D, st, cE, mp, meth)
         end
         store!(Zr, Sg, Om, St, Fl, i, st, mp, D, c, meth, rm)
     end
@@ -613,21 +658,22 @@ end
     l = @index(Global, Linear)
     c = with_slot(c0, ws, l, lanes)
     if l <= lanes
+        cE = evalconsts(mp, c)
         j = Int32(l - 1)                       # this lane's k-th point: j = l-1 + k*lanes
         i = j < npts ? scramble(j, P, npts) : Int32(0)
-        st = blank_state(@inbounds(Pts[1]), typeof(mp.σ), nr)
+        st = blank_state(prepare(D, @inbounds(Pts[1]), c), typeof(mp.σ), nr)
         if i > 0
-            st = seed(D, @inbounds(Pts[i]), c, mp, nr)
+            st = seed(D, @inbounds(Pts[i]), c, cE, mp, nr)
         end
         while i > 0
             if st.status == Int8(0)
-                st = march_step(D, st, c, mp, meth)
+                st = march_step(D, st, cE, mp, meth)
             else                                # finished: store and refill the lane
                 store!(Zr, Sg, Om, St, Fl, i, st, mp, D, c, meth, rm)
                 j += lanes
                 i = j < npts ? scramble(j, P, npts) : Int32(0)
                 if i > 0
-                    st = seed(D, @inbounds(Pts[i]), c, mp, nr)
+                    st = seed(D, @inbounds(Pts[i]), c, cE, mp, nr)
                 end
             end
         end
@@ -640,19 +686,20 @@ end
 @kernel function k_queue!(Zr, Sg, Om, St, Fl, D, c0, @Const(Pts), npts, mp, meth, nr, counter, ws, lanes, rm)
     l = @index(Global, Linear)
     c = with_slot(c0, ws, l, lanes)
+    cE = evalconsts(mp, c)
     i = next_point!(counter)
-    st = blank_state(@inbounds(Pts[1]), typeof(mp.σ), nr)
+    st = blank_state(prepare(D, @inbounds(Pts[1]), c), typeof(mp.σ), nr)
     if i <= npts
-        st = seed(D, @inbounds(Pts[i]), c, mp, nr)
+        st = seed(D, @inbounds(Pts[i]), c, cE, mp, nr)
     end
     while i <= npts
         if st.status == Int8(0)
-            st = march_step(D, st, c, mp, meth)
+            st = march_step(D, st, cE, mp, meth)
         else
             store!(Zr, Sg, Om, St, Fl, i, st, mp, D, c, meth, rm)
             i = next_point!(counter)
             if i <= npts
-                st = seed(D, @inbounds(Pts[i]), c, mp, nr)
+                st = seed(D, @inbounds(Pts[i]), c, cE, mp, nr)
             end
         end
     end
@@ -703,7 +750,11 @@ constants in `c`, or write `0.5f0`, `T(0.5)`, or integers.
 """
 function check_eltype(D, p, c, ::Type{T}) where {T}
     d = ForwardDiff.Dual{PhaseTag}(T(1), one(T))
-    v = D(Complex(d, d), map(T, Tuple(p)), map(T, Tuple(c)))
+    cc = map(T, Tuple(c))
+    # prepared in Float64, as the kernels prepare in the march precision (a narrow T such as
+    # Float16 may overflow in the per-point setup -- which is the point of `prepare`)
+    q = prepare(D, map(Float64, Tuple(p)), map(Float64, Tuple(c)))
+    v = D(Complex(d, d), map(T, q), cc)
     return ForwardDiff.valtype(real(v)) === T
 end
 
@@ -726,6 +777,8 @@ mutable struct SweepPlan{T, N, B, A, AI, AF, AP}
     counter::AI
     ws::Any              # per-lane workspace (nothing, or a device vector of wlen × lanes)
     wlen::Int
+    gridnx::Int          # plan_grid: the chart size (0 for a point list) -- full charts run one
+    gridny::Int          # warp per TILE_W x TILE_H pixel tile instead of 32 pixels of a row
 end
 
 """
@@ -813,7 +866,7 @@ function plan_sweep(points; backend = CPU(), T::Type = Float32, Teval::Union{Not
     plan = SweepPlan{T, Int(nroots), typeof(backend), typeof(Zraw), typeof(st), typeof(fl),
                      typeof(dpts)}(
         backend, npts, length(hpts[1]), method, schedule, lanes, workgroup,
-        coprime_stride(npts), mp, dpts, Zraw, sig, om, st, fl, ctr, nothing, 0)
+        coprime_stride(npts), mp, dpts, Zraw, sig, om, st, fl, ctr, nothing, 0, 0, 0)
     if workspace !== nothing
         schedule === :pixel && error("a workspace needs the :strided or :queue schedule")
         alloc_workspace!(plan, workspace[1], workspace[2])
@@ -857,13 +910,18 @@ of constants passed to `D(λ, p, c)` (converted to the plan's `T`); changing
 function run!(p::SweepPlan{T, N}, D0::F, c = ()) where {T, N, F}
     be = p.backend
     D = D0 isa CharFn ? D0 : CharFn(D0)
-    cT = conv_consts(evaltype(p.mp), Tuple(c))
+    cT = conv_consts(T, Tuple(c))              # march precision; the kernels convert for D
     meth = Val(p.method)
     p.ws === nothing || p.schedule !== :pixel || error("a workspace needs the :strided or :queue schedule")
     rm = (p.mp.newton == 0 && p.mp.bisect == 0) ? Val(:none) : Val(:refine)
     nr = Val(N)
     n = Int32(p.npts)
-    if p.schedule === :pixel
+    if p.schedule === :pixel && p.gridnx > 0 && p.npts == p.gridnx * p.gridny
+        ntx, nty = cld(p.gridnx, TILE_W), cld(p.gridny, TILE_H)
+        k = k_tile!(be, p.workgroup)
+        k(p.Zraw, p.sigma, p.omega, p.steps, p.flags, D, cT, p.points, Int32(p.gridnx),
+            Int32(p.gridny), Int32(ntx), p.mp, meth, nr, rm; ndrange = ntx * nty * TILE_W * TILE_H)
+    elseif p.schedule === :pixel
         k = k_pixel!(be, p.workgroup)
         k(p.Zraw, p.sigma, p.omega, p.steps, p.flags, D, cT, p.points, n, p.mp, meth, nr, rm;
             ndrange = p.npts)
@@ -974,6 +1032,7 @@ Refill the points of a [`plan_grid`](@ref) plan with the `nx × ny` grid over
 function regrid!(p::SweepPlan{T}, xr, yr, nx::Integer, ny::Integer) where {T}
     nx * ny == length(p.points) || error("regrid!: the plan holds $(length(p.points)) points")
     p.npts = nx * ny
+    p.gridnx, p.gridny = nx, ny
     dx = nx > 1 ? T((xr[2] - xr[1]) / (nx - 1)) : zero(T)
     dy = ny > 1 ? T((yr[2] - yr[1]) / (ny - 1)) : zero(T)
     k_grid!(p.backend, 256)(p.points, T(xr[1]), dx, T(yr[1]), dy, Int32(nx); ndrange = p.npts)
