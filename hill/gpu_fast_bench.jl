@@ -11,20 +11,23 @@ kwq(T, TE = T) = (n_power = 0, ω0 = 1e-9, ω_max = 0.5, h0 = 1e-3, hrel = 0.05,
                   Teval = TE)
 
 cpts = grid_points(range(xr...; length = cx), range(yr...; length = cy))
-ref = sweep(D_mill2q, cpts; c = mill2q_consts(Q = 12), backend = CPU(), kwq(Float64)...)
+ref = sweep(D_mill2s, cpts; c = mill2q_consts(Q = 64), backend = CPU(), kwq(Float64)...)
 Zref = round.(Int, ref.Zraw)
-println("reference: CPU, Float64, Q = 12, $(cx)x$(cy) points, unstable $(round(100count(>(0), Zref) / length(Zref); digits = 1)) %")
-for Q in (4, 6, 8), (T, TE) in ((Float32, Float32), (Float32, Float16), (Float64, Float64))
+println("reference: CPU, Float64, semiseparable Q = 64, $(cx)x$(cy) points, unstable $(round(100count(>(0), Zref) / length(Zref); digits = 1)) %")
+cases = [(:semi, 8), (:semi, 16), (:semi, 32), (:dense, 4)]
+for (kind, Q) in cases, (T, TE) in ((Float32, Float32), (Float32, Float16))
+    D = kind === :semi ? D_mill2s : D_mill2q
     c = mill2q_consts(Q = Q)
-    lab = TE === T ? string(T) : "$(T)/$(TE)"
+    lab = (kind === :semi ? "O(Q) " : "LU   ") * (TE === T ? string(T) : "$(T)/$(TE)")
     try
-        r = sweep(D_mill2q, cpts; c = c, backend = BACKEND, lanes = default_lanes(), kwq(T, TE)...)
+        r = sweep(D, cpts; c = c, backend = BACKEND, lanes = default_lanes(), kwq(T, TE)...)
         Z = round.(Int, r.Zraw)
         g = plan_grid(xr, yr, nx, ny; backend = BACKEND, lanes = default_lanes(), kwq(T, TE)...)
-        run!(g, D_mill2q, c)
-        ts = [timed(() -> run!(g, D_mill2q, c)) for _ in 1:5]
+        run!(g, D, c)
+        ts = [timed(() -> run!(g, D, c)) for _ in 1:5]
         rr = fetch_result(g)
-        @printf("Q=%2d %-16s check: differs %4d/%d (failed %d) | %dx%d: kernel %8.2f ms (%7.1f Mpts/s, %5.1f fps), evals median %d\n",
+        @printf("Q=%2d %-22s check: differs %4d/%d (failed %d) | %dx%d: kernel %8.2f ms (%7.1f Mpts/s, %6.1f fps), evals median %d
+",
             Q, lab, count(Z .!= Zref), length(Zref), count(isnan, r.Zraw), nx, ny, 1e3 * median(ts),
             nx * ny / median(ts) / 1e6, 1 / median(ts), round(Int, median(rr.evals)))
     catch err

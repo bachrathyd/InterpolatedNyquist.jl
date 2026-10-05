@@ -174,3 +174,64 @@ function mill2q_consts(; ζ = 0.011, aD = 0.05, kr = 1 / 3, down = true, z = 2, 
     o = sortperm(ψ)
     return (ζ, w1, Float64(z), fn, ψ[o]..., cc[o]...)
 end
+
+# ---------------------------------------------------------------------------------------------
+# The same Q x Q determinant in O(Q): M is semiseparable.
+#   M_ij = δ_ij + Σ_{s=1,2} a_s(i) b_s(j) · (ψ_i ≥ ψ_j ? 1 : W_s),
+#   a_1 = k1 u1, a_2 = -k2 u2, b_s = α c_j v_s,  u_s = e^{-a_s ψ/ω}, v_s = 1/u_s,  W_s = e^{-a_s T}.
+# Split M = T + A W Bᵀ with T = I + lower∘(A (I - W) Bᵀ). Since k_s (1 - W_s) = T/(r1 - r2) for
+# both roots, the diagonal of the lower part cancels: T is UNIT lower triangular (det T = 1,
+# the causal free-oscillator response), and by the determinant lemma
+#   det M = det(I_2 + W Bᵀ T⁻¹ A),
+# where Bᵀ T⁻¹ A (2 x 2) is accumulated by one division-free forward sweep over the nodes with
+# four running sums P_st = Σ_{j<i} b_s(j) Y_j[t],  Y_i[t] = a_t(i) - Σ_s a_s(i)(1 - W_s) P_st.
+# Identical value to D_mill2q, O(Q) work, O(1) state: Q = 16 ... 32 is cheap.
+# ---------------------------------------------------------------------------------------------
+@generated function D_mill2s(μ, p, c::NTuple{L, TT}) where {L, TT}
+    Q = (L - 4) ÷ 2
+    ex = Any[quote
+        rk, ap = p
+        ζ, w1 = c[1], c[2]
+        twoπ = TT(6.283185307179586)
+        ω = mill2q_ωp(p, c)
+        T = twoπ / ω
+        λ = μ * ω
+        w = w1 * ap
+        sζ = sqrt(1 - ζ * ζ)
+        r1 = Complex(-ζ, sζ)
+        E = exp(-λ * T)
+        α = w * (1 - E)
+        er1 = exp(r1 * T)
+        W1 = er1 * E
+        W2 = conj(er1) * E
+        Tr = T * Complex(zero(TT), -1 / (2 * sζ))         # T/(r1 - r2)
+        k1 = Tr * cinv(1 - W1)
+        k2 = Tr * cinv(1 - W2)
+        iω = 1 / ω
+        u1 = one(λ); u2 = one(λ); v1 = one(λ); v2 = one(λ)
+        P11 = zero(λ); P12 = zero(λ); P21 = zero(λ); P22 = zero(λ)
+        ψp = zero(TT)
+    end]
+    for i in 1:Q
+        push!(ex, quote
+            δ = (c[$(4 + i)] - ψp) * iω
+            ψp = c[$(4 + i)]
+            el = exp(-λ * δ)
+            er = exp(r1 * δ)
+            ρ1 = el * er
+            ρ2 = el * conj(er)
+            u1 *= ρ1; u2 *= ρ2
+            v1 *= cinv(ρ1); v2 *= cinv(ρ2)
+            g = α * c[$(4 + Q + i)]
+            a1 = k1 * u1; a2 = -k2 * u2
+            b1 = g * v1;  b2 = g * v2
+            s1 = Tr * u1; s2 = -Tr * u2                    # a_s (1 - W_s)
+            Y1 = a1 - (s1 * P11 + s2 * P21)
+            Y2 = a2 - (s1 * P12 + s2 * P22)
+            P11 += b1 * Y1; P12 += b1 * Y2
+            P21 += b2 * Y1; P22 += b2 * Y2
+        end)
+    end
+    push!(ex, :(return (1 + W1 * P11) * (1 + W2 * P22) - W1 * P12 * W2 * P21))
+    return Expr(:block, ex...)
+end
