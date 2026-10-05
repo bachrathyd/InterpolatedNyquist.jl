@@ -452,13 +452,17 @@ end
     return (conv ? s : T(NaN)), (conv ? w : T(NaN))
 end
 
-# the count on the shifted line Re λ = σ (a full march; -1 if it failed)
+# the count on the shifted line Re λ = σ (a full march; -1 if it failed). Always in the
+# march precision T: with a narrow evaluation format (Float16) a root near the shifted
+# line is below its resolution, and the counts -- unlike the main sweep, whose doubtful
+# points are flagged -- would scatter the certified σ.
 @inline function count_at(D::F, p, c, mp::MarchParams{T, TE}, meth, σ::T) where {F, T, TE}
-    m = MarchParams{T, TE}(σ, mp.ω0, mp.ωmax, mp.h0, mp.rtol, mp.atol, mp.hrel, mp.hmax,
+    m = MarchParams{T, T}(σ, mp.ω0, mp.ωmax, mp.h0, mp.rtol, mp.atol, mp.hrel, mp.hmax,
         mp.ωband, mp.npow, mp.maxsteps, Int32(0), Int32(0), mp.σtol)
-    st = seed(D, p, c, m, Val(1))
+    cT = map(T, c)
+    st = seed(D, p, cT, m, Val(1))
     while st.status == Int8(0)
-        st = march_step(D, st, c, m, meth)
+        st = march_step(D, st, cT, m, meth)
     end
     st.status == Int8(1) || return Int32(-1)
     return round(Int32, m.npow / 2 - st.Φ / T(π))
