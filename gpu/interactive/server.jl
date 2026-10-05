@@ -42,6 +42,7 @@ const HILL_MODELS = joinpath(@__DIR__, "..", "..", "hill", "gpu_models.jl")
 if isfile(HILL_MODELS)
     include(HILL_MODELS)
     const HKW = (ω0 = A_STRIP, ω_max = A_STRIP + 1, h0 = 1e-3, hrel = 0.05)
+    const HKWM = (ω0 = A_STRIP, ω_max = A_STRIP + 1, h0 = 1e-3, hrel = 0.1)   # milling: fewer samples
     const MEMO = Dict{Any, Any}()
     memo(f, k) = get!(() -> f(), MEMO, k)
     push!(EXAMPLES,
@@ -52,17 +53,17 @@ if isfile(HILL_MODELS)
                 xr = (-1.0, 5.0), yr = (-1.5, 1.5), xl = "δ", yl = "b", kw = HKW),
          knobs = [(i = 1, name = "damping κ", lo = 0.0, hi = 0.5), (i = 2, name = "excitation ε", lo = 0.0, hi = 3.0)]),
         (key = "mill2", ω16 = 0.0, smin = -0.04, hill = true, ωp = mill2_ωp,
-         cfun = c -> memo(() -> mill2_consts(ζ = c[1], aD = c[2], kr = c[3]), (:m2, c)),
+         cfun = c -> memo(() -> mill2_consts(ζ = c[1], aD = c[2], kr = c[3], tol = 1e-2), (:m2, c)), res = "480x270",
          note = "1-DOF milling, straight flutes, z = 2, down milling, f_n = 922 Hz; axes: spindle speed [1000 rpm], depth of cut [mm]",
          sys = (title = "milling, straight flutes (Test 2, Hill)", D = D_mill2, c = (0.011, 0.05, 1 / 3), npow = 0,
-                xr = (5.0, 25.0), yr = (0.0, 5.0), xl = "rpm/1000", yl = "a_p [mm]", kw = HKW),
+                xr = (5.0, 25.0), yr = (0.0, 5.0), xl = "rpm/1000", yl = "a_p [mm]", kw = HKWM),
          knobs = [(i = 1, name = "damping ζ", lo = 0.002, hi = 0.05), (i = 2, name = "immersion a/D", lo = 0.02, hi = 1.0),
                   (i = 3, name = "K_n/K_t", lo = 0.0, hi = 1.0)]),
         (key = "mill3", ω16 = 0.0, smin = -0.03, hill = true, ωp = mill3_ωp,
-         cfun = c -> memo(() -> mill3_consts(ζ = c[1], aD = c[2], β2 = c[3]), (:m3, c)),
+         cfun = c -> memo(() -> mill3_consts(ζ = c[1], aD = c[2], β2 = c[3], tol = 1e-2), (:m3, c)), res = "320x180",
          note = "1-DOF milling, two flutes with helix 30° and β₂ (R = 8 mm): distributed delays, spindle period; heavier (dense 53x53 LU per point)",
          sys = (title = "milling, different helix angles (Test 3, Hill)", D = D_mill3, c = (0.011, 0.05, 45.0), npow = 0,
-                xr = (8.0, 30.0), yr = (0.0, 10.0), xl = "rpm/1000", yl = "a_p [mm]", kw = HKW),
+                xr = (8.0, 30.0), yr = (0.0, 10.0), xl = "rpm/1000", yl = "a_p [mm]", kw = HKWM),
          knobs = [(i = 1, name = "damping ζ", lo = 0.002, hi = 0.05), (i = 2, name = "immersion a/D", lo = 0.02, hi = 1.0),
                   (i = 3, name = "helix β₂ [°]", lo = 0.0, hi = 60.0)]))
 end
@@ -93,7 +94,7 @@ function meta_json()
         "{\"key\":$(jstr(e.key)),\"title\":$(jstr(s.title)),\"xr\":$(jvec(collect(s.xr)))," *
         "\"yr\":$(jvec(collect(s.yr))),\"xl\":$(jstr(s.xl)),\"yl\":$(jstr(s.yl))," *
         "\"c\":$(jvec(collect(s.c))),\"smin\":$(e.smin),\"knobs\":[$knobs]," *
-        "\"hill\":$(ishill(e)),\"note\":$(jstr(ishill(e) ? e.note : ""))}"
+        "\"hill\":$(ishill(e)),\"note\":$(jstr(ishill(e) ? e.note : "")),\"res\":$(jstr(hasproperty(e, :res) ? e.res : ""))}"
     end
     fmts = join(["[$(jstr(k)),$(jstr(l))]" for (k, l) in FORMAT_LABELS], ",")
     refs = join(["[$(jstr(k)),$(jstr(l))]" for (k, l) in REFINES], ",")

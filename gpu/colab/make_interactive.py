@@ -166,8 +166,11 @@ systems, decided by a **Hill determinant + argument principle** (no time integra
 * *milling, straight flutes* (Test 2): 1-DOF, z = 2, down milling, f_n = 922 Hz, cutting-force
   coefficient with a jump at tooth entry (axes: spindle speed [1000 rpm], depth of cut [mm]);
 * *milling, different helix angles* (Test 3): helix 30° and β₂, the delay of every tooth distributed
-  linearly over the axial depth, spindle period (heavier: a dense 53×53 LU per point and frequency
-  sample -- start with 960×540).
+  linearly over the axial depth, spindle period.
+
+The milling examples are heavy (a dense Hill matrix and its LU per point and frequency sample,
+stored in GPU memory): they start at 480×270 / 320×180 (about a second per frame); higher resolutions
+work but take proportionally longer.
 
 Counting: unstable Floquet exponents in one period strip of the imaginary axis, from the phase of the
 row-scaled (pole-free) Hill determinant; the number of harmonics is derived per point from one

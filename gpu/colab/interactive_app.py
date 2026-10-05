@@ -102,7 +102,7 @@ APP = r'''
 <script>
 (() => {
  const META = %META%;
- const RES = [['960x540 (qHD)',960,540],['1280x720 (HD)',1280,720],['1920x1080 (full HD)',1920,1080],
+ const RES = [['320x180',320,180],['480x270',480,270],['640x360 (nHD)',640,360],['960x540 (qHD)',960,540],['1280x720 (HD)',1280,720],['1920x1080 (full HD)',1920,1080],
               ['2560x1440 (QHD)',2560,1440],['3840x2160 (4K UHD)',3840,2160],['7680x4320 (8K UHD)',7680,4320]];
  const $ = id => document.getElementById(id);
  const EX = {}; META.examples.forEach(e => EX[e.key] = e);
@@ -137,6 +137,7 @@ APP = r'''
                     $('smin').value = e.smin; $('sminv').textContent = e.smin;
                     // time-periodic (Hill) examples: Float32/Float64, Newton polish, no ω_max
                     if (e.hill) { if (isF16()) $('fmt').value = 'F32'; if ($('ref').value === 'count') $('ref').value = 'newton'; }
+                    if (e.res) $('res').value = e.res;   // heavy examples start at a low resolution
                     $('wm').disabled = !!e.hill; $('note').textContent = e.note || ''; go(); }
  function params() {
   const e = EX[$('ex').value], c = e.c.slice();
