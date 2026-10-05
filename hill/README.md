@@ -6,7 +6,8 @@ imaginary axis, its phase unwrapped by the discrete march of the package, and th
 argument principle on one period strip of the Floquet exponents. For straight-fluted
 milling the infinite Hill determinant is also available in a **compressed form** (all
 harmonics in closed form, a 16-node determinant counted along the unit circle of the
-Floquet multiplier): full HD charts in 18 ms (Float16) / 70 ms (Float32) on one GPU, see
+Floquet multiplier): full HD charts in 5 ms (Float16) / 16 ms (Float32) on one GPU and ~100
+frames per second in the browser, see
 [Fast milling](#fast-milling-the-compressed-hill-determinant).
 
 ## Method (delayed Mathieu, `hill_core.jl`)
@@ -122,12 +123,22 @@ domain, but without truncating the harmonics:
 * **O(Q) evaluation.** S(Δ) is a sum of two exponentials in Δ, with an extra factor e^{−a_iT} when
   ψ_p < ψ_q. M is therefore a unit-lower-triangular semiseparable matrix plus a rank-2 term, and
   det(I_Q + αM) = det(I₂ + W·R), with R from one forward recursion over the nodes. With equispaced
-  (midpoint) nodes the node-to-node factors are constant, so one evaluation needs 2 complex
-  exponentials for the window plus about 14 complex FMAs per node, and no division inside the loop
+  (midpoint) nodes the node-to-node factors are constant, so there is no division inside the loop
   (`D_mill2r`, a rolled loop).
   - Read as an algorithm, this recursion is a quadrature of the free oscillator's response over the
     cutting window. It never integrates the delayed system and builds no monodromy matrix.
   - The dense Q×Q LU of the same M (`D_mill2q`) gives the same numbers.
+* **Normalized recursion** (`D_mill2n`, the fastest form).
+  - In the recursion, row s of the running sums appears only divided by u_s = e^{−a_sψ/ω}, and both
+    are scaled by the same propagator. With A_st = P_st/u_s the per-node scalings drop out, and with
+    them every λ-dependent exponential except E = e^{−λT} = 1/z: F is visibly a function of the
+    Floquet multiplier.
+  - Of the node position only κ = u₂/u₁ = e^{−2i√(1−ζ²)ψ/ω} is left. It is a unit rotation that does
+    not depend on λ, so it needs no dual numbers.
+  - Cost per node: about 64 real multiplications instead of about 140. Per evaluation: 1 dual
+    exponential instead of 3.
+  - The values agree with `D_mill2r` to 6e−16 and the derivatives to 1e−12. Its sweeps give the same
+    counts: 11 differences from the Q = 64 reference in Float64 and Float32, 33 in Float16.
 
 **Accuracy.**
 * CPU prototype: 30 of 30 test points agree with the RK4 monodromy reference.
@@ -136,48 +147,52 @@ domain, but without truncating the harmonics:
 
 | Q = 16 | differing counts | flagged |
 |---|---|---|
-| Float32 | 11 | 0 |
-| Float16 evaluation (march in Float32) | 38 | 376 (2.9 %) |
+| Float32 | 11 (the same 11 in Float64: quadrature, not rounding) | 0 |
+| Float16 evaluation (march in Float32) | 33–38 | 376–400 (~3 %) |
 | Float16 + Float32 re-check of the flagged points | 17 | — |
 
-In Float16, 32 of the 38 differing points are flagged. Almost all flags mean that a multiplier lies
+In Float16, almost all differing points are flagged. Almost all flags mean that a multiplier lies
 closer to |z| = 1 than Float16 resolves, so the count was decided from the root's side; 270 of the
 376 flagged points lie on the stability boundary. The re-check repeats exactly these points in Float32.
 
-**Speed** (RTX PRO 6000 Blackwell, Colab G4; 1920×1080 = 2.07 M points; `gpu_fast_bench.jl`,
-`fast_kernel_info.jl`):
+**Speed** (RTX PRO 6000 Blackwell, Colab G4; 1920×1080 = 2.07 M points; one thread per point, which
+beat the persistent-lane schedules in `fast_schedule_bench.jl`; `fast_kernel_info.jl`):
 
-| | Q = 8 | Q = 16 | registers / spill (Q = 16) |
+| kernel | Q = 8 | Q = 16 | registers / local memory (Q = 16) |
 |---|---|---|---|
-| Float32 | 36.9 ms (56 Mpts/s) | 69.6 ms (30 Mpts/s) | 167 / 0.9 KB |
-| Float16 evaluation | 10.1 ms (206 Mpts/s) | 17.4 ms (119 Mpts/s) | 120 / 0.3 KB |
+| `D_mill2r`, Float32 | 30.1 ms (69 Mpts/s) | 56.6 ms (37 Mpts/s) | 167 / 944 B |
+| `D_mill2r`, Float16 evaluation | 8.6 ms (241 Mpts/s) | 15.0 ms (138 Mpts/s) | 120 / 336 B |
+| **`D_mill2n`, Float32** | 9.4 ms (220 Mpts/s) | **15.9 ms (131 Mpts/s)** | 136 / 576 B |
+| **`D_mill2n`, Float16 evaluation** | 3.3 ms (634 Mpts/s) | **5.0 ms (415 Mpts/s)** | 104 / 248 B |
 
-The unrolled forms (`D_mill2m`, `D_mill2s`) hit the 255-register limit and spill. The rolled loop does
+These timings use the march steps of the interactive example (h0 = 0.05, hrel = 0.25 instead of 1e−3
+and 0.05). The cap of the strip examples is not needed on the circle: same counts on the 12 800 test
+points, with 13.9 instead of 18.3 evaluations per point.
+
+The unrolled forms (`D_mill2m`, `D_mill2s`) hit the 255-register limit and spill; the rolled loops do
 not. When no root refinement is requested, the kernels are compiled without the refinement code
-(`Val(:none)`), which removes its extra inlined copies of D. The interactive server, Q = 16,
-first-order estimate, measured as a whole frame (kernel, colouring and the device-to-host copy of the
-display image):
+(`Val(:none)`), which removes its extra inlined copies of D.
+
+The interactive server (`D_mill2n`, Q = 16, first-order estimate), measured as a whole frame: kernel,
+colouring, device-to-host copy and JPEG encoding of the display image:
 
 | | full HD | 4K | 8K |
 |---|---|---|---|
-| Float16 | 19–22 ms (46–53 fps) | 64.5 ms (15 fps) | 243 ms (4 fps) |
-| Float16 + Float32 re-check | 25.6 ms (39 fps; 63 k points re-checked in 6.5 ms) | 85.4 ms (12 fps) | 315 ms (3 fps) |
-| Float32 | 70.0 ms (14 fps) | 248 ms (4 fps) | — |
+| Float16 | 7.8 ms (128 fps) | 23.8 ms (42 fps) | 75 ms (13 fps) |
+| Float16 + Float32 re-check | 10.1 ms (99 fps) | 28.9 ms (35 fps) | — |
+| Float32 | 18.9 ms (53 fps) | 64.8 ms (15 fps) | 220 ms (4.5 fps) |
 
-The interactive example takes larger march steps on the circle (h0 = 0.05, hrel = 0.25 instead of
-1e−3 and 0.05). The counts are the same on the 12 800 test points, with 13.9 instead of 18.3
-evaluations per point, and the Float16 full HD kernel drops to 15.4 ms (134 Mpts/s).
-
-In the browser (the Colab page; full HD Float16 chart shown as a 960×540 image), the transfer,
-not the GPU, decided the frame rate. Each request through Colab, via the kernel channel or the
-port proxy alike, costs a ~55 ms round trip:
+In the browser (the Colab page; full HD Float16 chart shown as a 960×540 image), the transfer, not
+the GPU, first decided the frame rate. Each request through Colab, via the kernel channel or the port
+proxy alike, costs a ~55 ms round trip:
 
 | frames sent to the browser | time per frame |
 |---|---|
-| PNG through the kernel channel, one request per frame | 117 ms (8.5 fps) |
-| JPEG (114 KB, 2.4 ms to encode), one request per frame | 77 ms (13 fps) |
-| JPEG, two requests in flight | 41 ms (24 fps) |
-| **JPEG streamed through the port proxy** (now the default) | **17.9 ms (56 fps)** |
+| `D_mill2r`, PNG through the kernel channel, one request per frame | 117 ms (8.5 fps) |
+| `D_mill2r`, JPEG (114 KB, 2.4 ms to encode), one request per frame | 77 ms (13 fps) |
+| `D_mill2r`, JPEG, two requests in flight | 41 ms (24 fps) |
+| `D_mill2r`, JPEG streamed through the port proxy | 17.9 ms (56 fps) |
+| **`D_mill2n`, JPEG streamed through the port proxy** (now the default) | **10.1 ms (99 fps)** |
 
 In the stream mode, the page posts each new state, and a small HTTP server in the notebook renders the
 newest state as soon as the previous frame is out. It writes the frames into one open response, which
@@ -202,9 +217,10 @@ Model constants are sliders: κ, ε for Mathieu; ζ, a/D, K_n/K_t for Test 2; ζ
 * The compressed determinant for Test 3 (helix: nodes over the window × the axial slices, a
   distributed delay per node, spindle period) and for multi-DOF models (S becomes a matrix sum of 2n
   exponentials, so the semiseparable rank grows to 2n).
-* The F32 kernel runs at a few per cent of the GPU's FMA peak: it is bound by latency and occupancy
-  (one serial recursion per thread, 167 registers). Splitting the nodes over 2–4 threads per point,
-  or evaluating two frequency samples per pass, would give the scheduler independent work.
+* The kernels still run far below the GPU's FMA peak: they are bound by latency and occupancy, with
+  one serial recursion per thread. Splitting the two independent columns of the recursion over two
+  threads per point, or evaluating two frequency samples per pass, would give the scheduler
+  independent work.
 * Banded/shifted truncation and Schur-complement ring growth (not needed for Mathieu: N = 9
   everywhere; becomes relevant for milling with many harmonics).
 * Schur-complement ring growth (N is re-factorized per ring in the a-posteriori check) and the banded

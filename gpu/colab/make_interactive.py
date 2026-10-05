@@ -180,8 +180,8 @@ systems, decided by a **Hill determinant + argument principle** (no time integra
     lemma reduces it to the 16 quadrature nodes of the cutting window, and its semiseparable
     structure gives that 16×16 determinant in O(16) operations.
   - The count runs along the unit circle of the Floquet multiplier.
-  - On a G4, a full HD chart takes **18 ms in Float16**, 25 ms with the Float32 re-check of the
-    flagged points, and 70 ms in Float32.
+  - On a G4, a full HD chart takes **5 ms on the GPU in Float16** (about 100 frames per second in
+    the browser), 7 ms with the Float32 re-check of the flagged points, and 16 ms in Float32.
 * *delayed Mathieu* x'' + κx' + (δ + ε cos t)x = b x(t − 2π); axes δ and b.
 * *milling, straight flutes (Test 2, dense Hill, slow)*: the same chart from the truncated dense Hill
   matrix, the reference implementation.
