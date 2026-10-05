@@ -92,30 +92,96 @@ measured step counts (`simulate_schedule`):
 
 Random assignment *alone* hurts, because neighbouring pixels have similar work.
 Random assignment *with in-loop refill* (`:strided`) and the queue both recover it.
-The real GPU numbers come from the Colab benchmark (it times all three).
+**On the real T4, however, the simple one-thread-per-point `:pixel` schedule was
+the fastest** (the queue 1.3–1.6×, strided ~2× slower): the persistent-lane loop
+carries the larger state through every iteration (more registers, less
+occupancy), and the 64-bit index arithmetic of the scramble is expensive on a
+GPU. The idealized SIMT gain (≤ 15 %) is smaller than these costs -- the default
+is now `:pixel` on the GPU in the scripts; the lane schedules stay for experiments.
 
-## Projection for the GPU (to be measured on Colab)
-Rough cost model: ~300–500 FP32 instructions per evaluation (complex-dual D,
-sincos/exp, march bookkeeping), ~40 % of peak issue rate.
+## Measured on a Colab T4 (2026-10-05)
+`gpu_check.jl`: the CUDA kernels reproduce the CPU backend on **every** unflagged
+point (3 systems × Float32/64 × 3 schedules, 128×128). Full-HD charts (1920×1080 =
+2.07 M points), Float32, one thread per point (`:pixel`, the fastest schedule on
+the GPU; the persistent-lane schedules were 1.3–2× slower here):
 
-| chart | evaluations | T4 | L4 | A100 | RTX PRO 6000 (G4) | this CPU (measured) |
-|---|---|---|---|---|---|---|
-| showcase 100×100 | 0.5 M | < 1 ms | < 1 ms | < 1 ms | < 1 ms | 11 ms |
-| showcase 1920×1080 | 110 M | ~20–40 ms | ~5–10 ms | ~8–15 ms | ~2–4 ms | ~2 s |
-| turning 1920×1080 | 270 M | ~50–100 ms | ~15–25 ms | ~20–35 ms | ~5–10 ms | ~5 s |
+| chart | T4 Float32 | T4 Float64 | this CPU (i5, 12 thr) |
+|---|---|---|---|
+| 4th-order 1920×1080 | **30 ms** (69 Mpts/s) | 203 ms | 0.86 s |
+| showcase 1920×1080 | 95–107 ms | 450–585 ms | ~2 s |
+| turning 1920×1080 | 213–245 ms | 1.3–1.5 s | 4.2 s |
+| showcase 100×100 (paper resolution) | **1.1 ms** | 11 ms | 11 ms |
 
-These are projections (±3×), to be replaced by measurements. If they hold,
-**goal 2 (full HD in 0.25 s) is met even on the free T4**, and full HD runs at
-interactive frame rates on L4 / RTX PRO 6000. Float64 needs the A100: consumer and
-RTX-PRO cards run FP64 at 1/32–1/64 rate. Float32 + flagged Float64 recheck is the
-intended mode.
+**Both goals are met on the cheapest GPU**: the paper-resolution chart in ~1 ms
+(goal: 10 ms) and full HD in 30–245 ms (goal: 250 ms). The 4th-order number
+needed one fix found on the GPU: Julia's generic `λ^4` (a non-inlined
+power-by-squaring loop) cost 4.6×; literal powers of our dual numbers are now
+unrolled. Kernel diagnostics (`kernel_info.jl`): no Float64 instructions in the
+Float32 kernels, 83–119 registers/thread (55–75 % occupancy), 230–310 B of
+local memory; 2, 4 or 8 root slots cost the same.
+
+## Which GPU?
+The kernel is scalar FP32 arithmetic (no tensor cores, almost no memory traffic),
+so what counts is FP32 CUDA-core throughput (cores × clock) and the SM count.
+
+| GPU (Colab) | FP32 vs T4 | FP64 | ≈ CU/h | predicted 4th-order full HD (T4: 30 ms) |
+|---|---|---|---|---|
+| T4 (free tier) | 1× | 1/32 rate | ~1.2 | 30 ms (measured) |
+| L4 | ~3.7× | 1/64 | ~1.7 | ~8–10 ms -- **best value** |
+| A100 40/80 GB | ~2.4× | **1/2 rate** | ~5.4–7.5 | ~12–15 ms; the Float64 card |
+| H100 (if offered) | ~6–8× | 1/2 rate | ? | ~4–6 ms |
+| RTX PRO 6000 Blackwell (G4) | **~15×** | 1/64 | ~8.7 | **~2–3 ms -- fastest for Float32** |
+
+Predictions scale the measured T4 numbers by FP32 throughput (±2×). Float64 on
+the GPU is only needed for re-checking flagged points, which are few, so the
+consumer/workstation FP64 rate does not matter. Your own 5-year-old NVIDIA card
+(an RTX 30-series has ~13–35 TFLOPS FP32, 2–4× a T4) runs the same scripts.
+
+## Lower precision: Float16 / Float8
+Measured on the T4 (`precision_test.jl`, 4th-order full HD): Float16 runs in
+**15.4 ms vs 33.5 ms** for Float32 (2.2×); 236 counts wrong (0.011 %), **all of
+them flagged**, 41 239 points (2 %) flagged in total -> Float64 re-check ≈ 3 ms,
+net gain ≈ 1.8×. But Float16 ends at 65504: λ⁴ overflows above ω = 16, so the
+march must stop at ω_max ≈ 15 -- model-specific, not a general setting (a
+generic version would need D rescaled by λⁿ inside the user's expression). On
+L4 / RTX-PRO (Ada/Blackwell) non-tensor FP16 runs at the FP32 rate, so even this
+gain disappears there; A100/H100 keep 2–4×. **Float8 does not exist as scalar
+arithmetic on any GPU** (only inside tensor-core matrix multiplies). Verdict:
+no 10× from precision. Side finding: the march to ω_max = 15 is enough for this
+model and still exact in Float32 (17 instead of 31 evaluations) -- a
+model-aware ω_max is a free knob.
+
+## MDBM: adaptive refinement with your Multi-Dimensional Bisection Method
+MDBM.jl already evaluates each stage (initial grid, every refinement, every
+neighbour check) as ONE batch of new points (`MemF(::Vector)`). Branch
+`vectorized-eval` of MDBM.jl adds `MDBM_Problem(f, axes; vectorized = fv)`: the
+batch goes to `fv(points)` in a single call -- one NyquistGPU sweep, one GPU
+launch, only the new points and their values cross the bus (a few MB). Also no
+threads inside MDBM, so the data race seen with threaded scalar `f` cannot
+occur (that race needs a non-thread-safe `f`; MDBM's own threaded loop writes
+disjoint slots). `gpu/mdbm/mdbm_chart.jl`, 4th-order model, objective
+g = (Z == 0 ? 1 : -1)·|σ_dom|, bracketing by a true sign change
+(`interpolationorder = 0`, then `interpolate!` order 1 -- order 1 during
+`solve!` also keeps cubes where g only touches zero, which gave spurious curves):
+
+| | evaluated points | stability boundary vs brute force | wall time (CPU) |
+|---|---|---|---|
+| brute force 1921×1081 | 2 076 601 | -- | 1.17 s |
+| MDBM 241×136 + 3 levels | **40 555 (2.0 %)** | **0 px off, 100 % covered** | 1.31 s |
+
+51× fewer evaluations and an exact boundary; the wall time is now dominated by
+MDBM's host-side bookkeeping (~0.9 s for ~2 000 cubes / 40 k points), so on the
+GPU brute force (30 ms) is still faster for a cheap 2-D model. MDBM pays off
+where an evaluation is expensive (big determinants, FEM), in 3-D+ parameter
+spaces (boundary ~ n², volume ~ n³), at very high resolution -- and everywhere
+once its host side is profiled and optimized (a natural next step in MDBM.jl).
+Count boundaries *inside* the unstable region keep the background resolution
+(one more objective per count level would refine them too).
 
 ## Roadmap
-**Phase 0: measure (now).** Run `colab/NyquistGPU_Colab.ipynb`, first on a T4/L4,
-then once on the RTX PRO 6000 (G4). Also run it on your own NVIDIA PC:
-`julia --project=gpu/scripts gpu/scripts/bench_ladder.jl` (same scripts, no Colab).
-Decisions: does `gpu_check` pass on real hardware? Measured ms vs the projections?
-Which schedule wins?
+**Phase 0: measure -- done on the T4.** Next: one run on the RTX PRO 6000 (G4)
+and on your own NVIDIA PC (`julia --project=gpu/scripts gpu/scripts/bench_ladder.jl`)
+to replace the predictions above.
 
 **Phase 1: GPU tuning,** guided by the Phase-0 profile: register pressure (fewer
 root slots), workgroup size and lane count, cheaper step control (cbrt/atan),
@@ -125,8 +191,8 @@ animations / 3-D cubes).
 
 **Phase 2: robustness without tuning.** Derive the band cap automatically from
 the delays (`hmax = π/(2τ_max)`). Add spatial and σ-sign consistency checks that
-feed `recheck!`. Add MDBM boundary refinement on the GPU: every MDBM level is just
-another point list, which the N-d API supports directly.
+feed `recheck!`. MDBM on the GPU: merge the `vectorized` hook into MDBM.jl, profile
+its host-side bookkeeping, add count-level objectives for full colour maps.
 
 **Phase 3: back into the package.** Offer `:unwrap` as a CPU back-end of
 `InterpolatedNyquist.jl` (it is 60–400× faster on the CPU alone, and more robust

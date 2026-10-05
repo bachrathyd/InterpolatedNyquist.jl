@@ -553,7 +553,8 @@ Keywords (defaults in brackets):
 - `backend` [`CPU()`] -- `CUDABackend()` after `using CUDA`
 - `T` [`Float32`] -- working precision (consumer GPUs: Float32)
 - `method` [`:unwrap`] -- `:unwrap` (1 eval/step) or `:bs3` (validated port)
-- `schedule` [`:queue`] -- `:pixel`, `:strided` or `:queue`
+- `schedule` [GPU: `:pixel`, CPU: `:queue`] -- `:pixel`, `:strided` or `:queue` (on a T4 the
+  plain one-thread-per-point `:pixel` was fastest; `:queue` balances CPU threads best)
 - `nroots` [`4`] -- tracked |D| minima per point (dominant root = max σ among them)
 - `n_power` (required) -- leading order n of D
 - `σ` [`0`], `ω0` [`1e-9`], `ω_max` [`1e5` for :unwrap, `1e4` for :bs3] -- the :unwrap end-point
@@ -573,12 +574,13 @@ Keywords (defaults in brackets):
   would let one item drain the whole queue), 64 for `:pixel`.
 """
 function plan_sweep(points; backend = CPU(), T::Type = Float32, method::Symbol = :unwrap,
-                    schedule::Symbol = :queue, nroots::Integer = 4, n_power,
+                    schedule::Union{Nothing, Symbol} = nothing, nroots::Integer = 4, n_power,
                     σ = 0.0, ω0 = 1e-9, ω_max = nothing, tol = nothing, h0 = 1e-2,
                     hrel = 1.0, hmax = Inf, ωband = 0.0, maxsteps::Integer = 200_000,
                     lanes::Union{Nothing, Integer} = nothing,
                     workgroup::Union{Nothing, Integer} = nothing)
     method in (:unwrap, :bs3) || error("method must be :unwrap or :bs3")
+    schedule = something(schedule, backend isa CPU ? :queue : :pixel)
     schedule in (:pixel, :strided, :queue) || error("schedule must be :pixel, :strided or :queue")
     ω_max = something(ω_max, method === :unwrap ? 1e5 : 1e4)
     tol = something(tol, method === :unwrap ? 0.3 : 1e-5)

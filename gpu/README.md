@@ -34,9 +34,9 @@ Rules for `D(λ, p, c)`:
 |---|---|
 | `method = :unwrap` (default) | unwraps `arg D(σ+iω)` directly: 1 evaluation per step, step control by the consistency of the observed phase increment with the exact derivatives. **30–130 evaluations per point** on the paper's systems (the integrator needs 650–12 000). |
 | `method = :bs3` | the paper's phase ODE with a Bogacki–Shampine 3(2) pair (validated port of the CPU method) |
-| `schedule = :queue` (default) | persistent threads + atomic work queue; a lane that finishes a point takes the next one inside the same step loop |
+| `schedule = :pixel` (GPU default) | one thread per point -- fastest on the T4 |
+| `schedule = :queue` (CPU default) | persistent threads + atomic work queue; a lane that finishes a point takes the next one inside the same step loop |
 | `schedule = :strided` | persistent threads, static coprime-stride scramble of the points (statistical balancing, no atomics) |
-| `schedule = :pixel` | one thread per point (baseline) |
 | `hmax`, `ωband` | step cap h ≤ hmax for ω < ωband. Needed when chains of roots run close to the axis (e.g. regenerative delay in turning: `hmax ≈ π/(2τ_max)`) |
 | `flags` (output) | bit 1: march failed; bit 2: a root closer to the line than the precision resolves was counted by its side (boundary-grazing point); bit 3: integer residual > 0.25 (a root on the line) |
 
@@ -45,10 +45,13 @@ Rules for `D(λ, p, c)`:
 gpu/
   Project.toml, src/NyquistGPU.jl   the engine (deps: KernelAbstractions, ForwardDiff, Atomix)
   test/runtests.jl                  unit tests (analytic Hayes region, 3-D point lists, flags, schedules)
-  scripts/                          GPU environment (CUDA.jl): gpu_check.jl, bench_ladder.jl,
-                                    example_custom.jl (template), systems.jl (paper systems)
+  scripts/                          GPU environment (CUDA.jl): gpu_check.jl, bench_ladder.jl, maps.jl,
+                                    precision_test.jl, kernel_info.jl, example_custom.jl (template),
+                                    systems.jl (paper systems)
   validate/                         CPU cross-validation against InterpolatedNyquist.jl:
                                     validate_vs_package.jl, boundary_stress.jl
+  mdbm/                             MDBM.jl with GPU batches (needs MDBM branch vectorized-eval):
+                                    mdbm_chart.jl -- boundary by bisection vs brute force
   colab/                            NyquistGPU_Colab.ipynb (+ make_notebook.py), plot_fields.py
   results/                          logs/CSVs of the runs
   PLAN.md                           findings, projections, roadmap

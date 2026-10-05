@@ -131,13 +131,13 @@ code(r"""
 """)
 
 md("""
-## 7. Benchmark ladder
-Resolutions 100² → 1920×1080 for the three paper systems, Float32 and Float64, the three
-schedules (`pixel` = one thread per point, `strided` = statistical load balancing,
-`queue` = persistent threads with an atomic work queue). Also times a "slider loop" (a
-constant changes every frame) at full HD. Each new configuration compiles once (~10–30 s).
+## 7. Benchmark ladder (4th-order benchmark model)
+Resolutions 100² → 1920×1080, Float32 and Float64, the three schedules (`pixel` = one
+thread per point, `strided` = statistical load balancing, `queue` = persistent threads with
+an atomic work queue). Also times a "slider loop" (a constant changes every frame) at full
+HD. Each new configuration compiles once (~10–30 s).
 
-Faster variant: add `--systems showcase --res 512,1920x1080 --T Float32 --schedules queue`
+Other systems: add `--systems fourth,showcase,turning`. Faster variant: `--res 512,1920x1080 --T Float32 --schedules pixel`
 """)
 code(r"""
 sh(f'cd {REPO_DIR} && julia --project=gpu/scripts gpu/scripts/bench_ladder.jl --out "{RUN}"',
@@ -158,10 +158,40 @@ display(df[['system', 'nx', 'ny', 'T', 'schedule', 't_med_ms', 'frame_ms', 'mpts
             'evals_med', 'evals_max', 'flagged', 'count_diff_vs_f64']])
 """)
 code(r"""
-import sys
-sys.path.insert(0, f'{REPO_DIR}/gpu/colab')
+import sys, importlib
+p = f'{REPO_DIR}/gpu/colab'
+sys.path_importer_cache.pop(p, None)          # forget a lookup cached before the clone existed
+if p not in sys.path:
+    sys.path.insert(0, p)
+importlib.invalidate_caches()
 import plot_fields
+importlib.reload(plot_fields)                 # pick up a freshly pulled version
 fig = plot_fields.plot_all(RUN, f'{RUN}/charts.png')
+""")
+
+md("""
+## 8b. Maps: full HD + a resolution series
+Full-HD charts of the 4th-order and the turning model, and the turning chart at
+64² … 1920×1080 (Float32 sweep + Float64 re-check of flagged points). The PNGs land in
+`runs/<date>_<GPU>/maps/` in your Drive: `*_chart.png` (with axes), `*_native.png`
+(pixel-exact 1920×1080) and `resolution_series.png`.
+""")
+code(r"""
+from IPython.display import Image, display
+sh(f'cd {REPO_DIR} && julia --project=gpu/scripts gpu/scripts/maps.jl --out "{RUN}/maps"', log=f'{RUN}/maps.log')
+plot_fields.render_all(f'{RUN}/maps')
+display(Image(f'{RUN}/maps/resolution_series.png'))
+""")
+
+md("""
+## 8c. Optional diagnostics
+* `precision_test.jl`: Float16 vs Float32 vs Float64 on the 4th-order chart (Float16 needs
+  ω_max ≤ 15 for this model -- its range ends at 65504).
+* `kernel_info.jl`: registers per thread, local memory, Float64 instructions, full-HD timing.
+""")
+code(r"""
+# sh(f'cd {REPO_DIR} && julia --project=gpu/scripts gpu/scripts/precision_test.jl', log=f'{RUN}/precision.log')
+# sh(f'cd {REPO_DIR} && julia --project=gpu/scripts gpu/scripts/kernel_info.jl', log=f'{RUN}/kernel_info.log')
 """)
 
 md("""

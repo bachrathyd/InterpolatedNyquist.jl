@@ -10,7 +10,7 @@
 # Run (Colab / any CUDA machine):
 #   julia --project=gpu/scripts gpu/scripts/bench_ladder.jl --out /content/drive/MyDrive/<folder>
 # Options (defaults):
-#   --systems fourth,showcase,turning   --res 100,256,512,1024,1920x1080 (CPU: 64,128,256)
+#   --systems fourth (also: showcase,turning)   --res 100,256,512,1024,1920x1080 (CPU: 64,128,256)
 #   --T Float32,Float64   --schedules pixel,strided,queue   --methods unwrap (add bs3)
 #   --bs3max 256 (bs3 only up to this many pixels per side)   --reps 5
 #   --fields 1920x1080 (CPU: 256)   --frames 30 (slider-loop frames at the field resolution)
@@ -18,7 +18,7 @@
 include(joinpath(@__DIR__, "common.jl"))
 
 const OUT = arg("out", joinpath(@__DIR__, "..", "results"))
-const SYS = split(arg("systems", "fourth,showcase,turning"), ',')
+const SYS = split(arg("systems", "fourth"), ',')
 const RES = parse_res.(split(arg("res", ON_GPU ? "100,256,512,1024,1920x1080" : "64,128,256"), ','))
 const TS = Dict("Float32" => Float32, "Float64" => Float64)
 const TLIST = [TS[t] for t in split(arg("T", "Float32,Float64"), ',')]
