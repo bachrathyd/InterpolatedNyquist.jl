@@ -50,7 +50,7 @@ Number formats:
 
 md("## 1. Setup (Julia, code, packages)")
 code(r"""
-REPO, BRANCH, JULIA_CHANNEL = "https://github.com/bachrathyd/InterpolatedNyquist.jl", "gpu-cuda", "1.12"
+REPO, BRANCH, JULIA_CHANNEL = "https://github.com/bachrathyd/InterpolatedNyquist.jl", "%BRANCH%", "1.12"
 REPO_DIR = '/content/InterpolatedNyquist.jl'
 import os, subprocess
 
@@ -143,11 +143,33 @@ code(r"""
 # srv.close()
 """)
 
-nb = {"cells": cells, "metadata": {"accelerator": "GPU", "colab": {"provenance": [], "gpuType": "G4"},
-                                   "kernelspec": {"display_name": "Python 3", "name": "python3"},
-                                   "language_info": {"name": "python"}},
-      "nbformat": 4, "nbformat_minor": 0}
-out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "NyquistGPU_Interactive.ipynb")
-with open(out, "w", encoding="utf-8") as f:
-    json.dump(nb, f, indent=1, ensure_ascii=False)
-print("written", out)
+def write(out, branch, extra_md=None):
+    cs = json.loads(json.dumps(cells).replace("%BRANCH%", branch))
+    if extra_md:
+        cs.insert(1, {"cell_type": "markdown", "metadata": {}, "source": extra_md.strip(chr(10)).splitlines(True)})
+    nb = {"cells": cs, "metadata": {"accelerator": "GPU", "colab": {"provenance": [], "gpuType": "G4"},
+                                    "kernelspec": {"display_name": "Python 3", "name": "python3"},
+                                    "language_info": {"name": "python"}},
+          "nbformat": 4, "nbformat_minor": 0}
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), out)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(nb, f, indent=1, ensure_ascii=False)
+    print("written", path)
+
+
+write("NyquistGPU_Interactive.ipynb", "gpu-cuda")
+write("NyquistGPU_Hill_Interactive.ipynb", "hill-argument-principle", r"""
+## Time-periodic systems (branch `hill-argument-principle`)
+Besides the three time-independent examples, the dropdown offers three **time-periodic** delayed
+systems, decided by a **Hill determinant + argument principle** (no time integration):
+* *delayed Mathieu* x'' + κx' + (δ + ε cos t)x = b x(t − 2π) (axes δ, b);
+* *milling, straight flutes* (Test 2): 1-DOF, z = 2, down milling, f_n = 922 Hz, cutting-force
+  coefficient with a jump at tooth entry (axes: spindle speed [1000 rpm], depth of cut [mm]);
+* *milling, different helix angles* (Test 3): helix 30° and β₂, the delay of every tooth distributed
+  linearly over the axial depth, spindle period (heavier: a dense 53×53 LU per point and frequency
+  sample -- start with 960×540).
+
+Counting: unstable Floquet exponents in one period strip of the imaginary axis, from the phase of the
+row-scaled (pole-free) Hill determinant; the number of harmonics is derived per point from one
+tolerance. Float32/Float64 only; the rightmost-root colouring uses the Newton-polished estimate.
+""")

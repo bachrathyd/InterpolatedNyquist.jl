@@ -20,7 +20,7 @@ using KernelAbstractions
 # --------------------------------------------------------------------------
 # examples: the systems of scripts/systems.jl plus the knobs of the UI
 # --------------------------------------------------------------------------
-const EXAMPLES = [
+const EXAMPLES = Any[
     (key = "fourth", sys = SYSTEMS["fourth"], ω16 = 15.0, smin = -0.6,
      knobs = [(i = 3, name = "delay τ", lo = 0.1, hi = 1.5),
               (i = 2, name = "damping ζ", lo = 0.0, hi = 0.2),
@@ -34,6 +34,40 @@ const EXAMPLES = [
               (i = 2, name = "mode-2 weight A₂", lo = 0.0, hi = 1.5),
               (i = 4, name = "mode-2 frequency ω₂", lo = 1.2, hi = 4.0)]),
 ]
+# time-periodic examples (Hill determinant + argument principle, hill/gpu_models.jl):
+# the model constants of the knobs are turned into the kernel constants by `cfun`
+# (Fourier coefficients of the cutting function, ...); D is a function of μ = λ/ω_p(point),
+# the march covers one period strip μ ∈ [a, a+1] and returns Z_raw = 2 Z
+const HILL_MODELS = joinpath(@__DIR__, "..", "..", "hill", "gpu_models.jl")
+if isfile(HILL_MODELS)
+    include(HILL_MODELS)
+    const HKW = (ω0 = A_STRIP, ω_max = A_STRIP + 1, h0 = 1e-3, hrel = 0.05)
+    const MEMO = Dict{Any, Any}()
+    memo(f, k) = get!(() -> f(), MEMO, k)
+    push!(EXAMPLES,
+        (key = "mathieu", ω16 = 0.0, smin = -0.3, hill = true, ωp = mathieu_ωp,
+         cfun = c -> mathieu_consts(c[1], c[2]),
+         note = "x'' + κx' + (δ + ε cos t)x = b x(t - 2π); Hill determinant, harmonics derived per point",
+         sys = (title = "delayed Mathieu (time-periodic, Hill)", D = D_mathieu, c = (0.1, 1.0), npow = 0,
+                xr = (-1.0, 5.0), yr = (-1.5, 1.5), xl = "δ", yl = "b", kw = HKW),
+         knobs = [(i = 1, name = "damping κ", lo = 0.0, hi = 0.5), (i = 2, name = "excitation ε", lo = 0.0, hi = 3.0)]),
+        (key = "mill2", ω16 = 0.0, smin = -0.04, hill = true, ωp = mill2_ωp,
+         cfun = c -> memo(() -> mill2_consts(ζ = c[1], aD = c[2], kr = c[3]), (:m2, c)),
+         note = "1-DOF milling, straight flutes, z = 2, down milling, f_n = 922 Hz; axes: spindle speed [1000 rpm], depth of cut [mm]",
+         sys = (title = "milling, straight flutes (Test 2, Hill)", D = D_mill2, c = (0.011, 0.05, 1 / 3), npow = 0,
+                xr = (5.0, 25.0), yr = (0.0, 5.0), xl = "rpm/1000", yl = "a_p [mm]", kw = HKW),
+         knobs = [(i = 1, name = "damping ζ", lo = 0.002, hi = 0.05), (i = 2, name = "immersion a/D", lo = 0.02, hi = 1.0),
+                  (i = 3, name = "K_n/K_t", lo = 0.0, hi = 1.0)]),
+        (key = "mill3", ω16 = 0.0, smin = -0.03, hill = true, ωp = mill3_ωp,
+         cfun = c -> memo(() -> mill3_consts(ζ = c[1], aD = c[2], β2 = c[3]), (:m3, c)),
+         note = "1-DOF milling, two flutes with helix 30° and β₂ (R = 8 mm): distributed delays, spindle period; heavier (dense 53x53 LU per point)",
+         sys = (title = "milling, different helix angles (Test 3, Hill)", D = D_mill3, c = (0.011, 0.05, 45.0), npow = 0,
+                xr = (8.0, 30.0), yr = (0.0, 10.0), xl = "rpm/1000", yl = "a_p [mm]", kw = HKW),
+         knobs = [(i = 1, name = "damping ζ", lo = 0.002, hi = 0.05), (i = 2, name = "immersion a/D", lo = 0.02, hi = 1.0),
+                  (i = 3, name = "helix β₂ [°]", lo = 0.0, hi = 60.0)]))
+end
+ishill(e) = hasproperty(e, :hill) && e.hill
+kconsts(e, c) = ishill(e) ? e.cfun(c) : c
 const EXBYKEY = Dict(e.key => e for e in EXAMPLES)
 # format -> (T, Teval, use the Float16 window, re-check flagged points in Float32)
 const FORMATS = Dict("F16" => (Float32, Float16, true, false),
@@ -58,7 +92,8 @@ function meta_json()
                       "\"value\":$(jnum(s.c[k.i]))}" for k in e.knobs], ",")
         "{\"key\":$(jstr(e.key)),\"title\":$(jstr(s.title)),\"xr\":$(jvec(collect(s.xr)))," *
         "\"yr\":$(jvec(collect(s.yr))),\"xl\":$(jstr(s.xl)),\"yl\":$(jstr(s.yl))," *
-        "\"c\":$(jvec(collect(s.c))),\"smin\":$(e.smin),\"knobs\":[$knobs]}"
+        "\"c\":$(jvec(collect(s.c))),\"smin\":$(e.smin),\"knobs\":[$knobs]," *
+        "\"hill\":$(ishill(e)),\"note\":$(jstr(ishill(e) ? e.note : ""))}"
     end
     fmts = join(["[$(jstr(k)),$(jstr(l))]" for (k, l) in FORMAT_LABELS], ",")
     refs = join(["[$(jstr(k)),$(jstr(l))]" for (k, l) in REFINES], ",")
@@ -161,7 +196,7 @@ function get_plan(e, fmt, nx, ny, xr, yr)
     key = (e.key, fmt, nx, ny)
     if S.key != key
         release!()
-        kw = (backend = BACKEND, T = T, Teval = TE, n_power = e.sys.npow, nroots = 4,
+        kw = (backend = BACKEND, T = T, Teval = TE, n_power = e.sys.npow, nroots = ishill(e) ? 1 : 4,
               ω_max = w16 ? e.ω16 : 1e5, lanes = default_lanes(), e.sys.kw...)
         S.plan = plan_grid(xr, yr, nx, ny; kw...)
         if rc
@@ -192,11 +227,13 @@ function render(a)
     e = EXBYKEY[a["ex"]]
     fmt = a["fmt"]
     haskey(FORMATS, fmt) || error("unknown format $fmt")
+    ishill(e) && startswith(fmt, "F16") && (fmt = "F32")     # Hill determinants: Float32/Float64 only
     nx, ny = parse(Int, a["nx"]), parse(Int, a["ny"])
     xr = (parse(Float64, a["x0"]), parse(Float64, a["x1"]))
     yr = (parse(Float64, a["y0"]), parse(Float64, a["y1"]))
     c = Tuple(parse.(Float64, split(a["c"], ',')))
     length(c) == length(e.sys.c) || error("expected $(length(e.sys.c)) constants")
+    c = kconsts(e, c)
     maxw, maxh = parse(Int, get(a, "maxw", "1600")), parse(Int, get(a, "maxh", "900"))
     smin = parse(Float64, get(a, "smin", string(e.smin)))
     zcap = parse(Float64, get(a, "zcap", "6"))
@@ -213,10 +250,23 @@ function render(a)
     ref = get(a, "refine", "count")
     nr = ref == "none" ? 0 : (ref == "newton" ? 10 : 5)
     cert = ref == "count"
-    set_march!(plan; ω_max = wmax, refine = nr, certify = cert)
+    if ishill(e)                  # fixed strip; counting on shifted lines would meet the row-scale poles
+        cert = false
+        ref == "count" && (nr = 10)
+        wmax = NaN
+        set_march!(plan; refine = nr, certify = false)
+    else
+        set_march!(plan; ω_max = wmax, refine = nr, certify = cert)
+    end
     rplan === nothing || set_march!(rplan; ω_max = max(wreq, e.ω16), refine = nr, certify = cert)
     t0 = time_ns()
     run!(plan, e.sys.D, c)
+    if ishill(e)                  # Z_raw = 2Z over the strip; σ from μ- to λ-units
+        plan.Zraw ./= 2
+        cT = map(eltype(plan.sigma), c)
+        plan.sigma .*= e.ωp.(plan.points, Ref(cT))
+        KernelAbstractions.synchronize(BACKEND)
+    end
     tker = ms(t0)
     t0 = time_ns()
     nflag = count(!=(Int8(0)), plan.flags)
@@ -239,7 +289,8 @@ function render(a)
     n = nx * ny
     return "{\"dw\":$dw,\"dh\":$dh,\"f\":$f,\"n\":$n,\"t_plan\":$(jt(tplan)),\"t_kernel\":$(jt(tker))," *
            "\"t_recheck\":$(jt(tre)),\"n_recheck\":$nre,\"t_colour\":$(jt(tcol)),\"t_read\":$(jt(tread))," *
-           "\"mpts\":$(jt(n / tker / 1e3)),\"flagged_pct\":$(jt(100nflag / n)),\"wmax\":$(jnum(wmax))}"
+           "\"mpts\":$(jt(n / tker / 1e3)),\"flagged_pct\":$(jt(100nflag / n)),\"wmax\":$(jnum(wmax))," *
+           "\"fmt\":$(jstr(fmt))}"
 end
 
 function save(a)

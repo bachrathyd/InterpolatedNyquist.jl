@@ -97,6 +97,7 @@ APP = r'''
  <div id="st2" style="font: 12px ui-monospace, monospace"></div>
  <img id="im">
  <div id="cap"></div>
+ <div id="note" style="font-size: 12px; opacity: .8"></div>
 </div>
 <script>
 (() => {
@@ -133,7 +134,10 @@ APP = r'''
  function setView(x0, x1, y0, y1) { $('x0').value = +x0.toPrecision(8); $('x1').value = +x1.toPrecision(8);
                                     $('y0').value = +y0.toPrecision(8); $('y1').value = +y1.toPrecision(8); }
  function reset() { const e = EX[$('ex').value]; buildKnobs(e); setView(...e.xr, ...e.yr);
-                    $('smin').value = e.smin; $('sminv').textContent = e.smin; go(); }
+                    $('smin').value = e.smin; $('sminv').textContent = e.smin;
+                    // time-periodic (Hill) examples: Float32/Float64, Newton polish, no ω_max
+                    if (e.hill) { if (isF16()) $('fmt').value = 'F32'; if ($('ref').value === 'count') $('ref').value = 'newton'; }
+                    $('wm').disabled = !!e.hill; $('note').textContent = e.note || ''; go(); }
  function params() {
   const e = EX[$('ex').value], c = e.c.slice();
   knobs.forEach(([i, r]) => c[i] = +r.value);
@@ -178,7 +182,7 @@ APP = r'''
  function pan(dx, dy) { const sx = (+$('x1').value - +$('x0').value) * dx, sy = (+$('y1').value - +$('y0').value) * dy;
   setView(+$('x0').value + sx, +$('x1').value + sx, +$('y0').value + sy, +$('y1').value + sy); go(); }
  $('ex').onchange = reset; $('res').onchange = go; $('ref').onchange = go;
- $('fmt').onchange = () => { defaultW(); go(); };
+ $('fmt').onchange = () => { if (EX[$('ex').value].hill && isF16()) $('fmt').value = 'F32'; defaultW(); go(); };
  $('wm').oninput = () => { showW(); go(); };
  $('smin').oninput = () => { $('sminv').textContent = $('smin').value; go(); };
  $('bnd').onchange = go; $('flg').onchange = go;

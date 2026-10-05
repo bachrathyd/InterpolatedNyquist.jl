@@ -1,0 +1,9 @@
+grid 120x60, rpm 8000..30000, a_p 0.05..10 mm, helix 30°/45°, R 8 mm, a/D 0.05 down, tol 1e-03
+exact kernel: 22.21 s on 8 threads; N 3..22 (median 10); error estimate max 1.0e-03
+kernel approx (ns,time,differs,stab differs): 1,45.24,674,471
+kernel approx (ns,time,differs,stab differs): 2,40.44,252,205
+kernel approx (ns,time,differs,stab differs): 4,39.29,44,38
+kernel approx (ns,time,differs,stab differs): 8,43.99,10,7
+kernel approx (ns,time,differs,stab differs): 16,78.79,3,3
+reference on 450 points (93.4 s): count differs 0, stability differs 0
+boundary pixels: μ=+1 290, flip 10, Neimark-Sacker 270

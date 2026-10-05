@@ -1,0 +1,9 @@
+chart 120x60, exact kernel: 22.21 s (8 threads); N 3..22 (median 10); err est max 1.0e-03; max |Zraw-round| 9.0e-04; unstable 44.7 %
+kernel from  1 axial points: 45.24 s, differs from the exact kernel at 674 points (stability 471)
+kernel from  2 axial points: 40.44 s, differs from the exact kernel at 252 points (stability 205)
+kernel from  4 axial points: 39.29 s, differs from the exact kernel at 44 points (stability 38)
+kernel from  8 axial points: 43.99 s, differs from the exact kernel at 10 points (stability 7)
+kernel from 16 axial points: 78.79 s, differs from the exact kernel at 3 points (stability 3)
+reference (RK4 monodromy, 400 steps/rev, 32 slices) on 450 points: 93.4 s; count differs 0, stability differs 0
+boundary pixels: μ=+1 290, flip 10, Neimark-Sacker 270
+written to C:\Users\Bacharthy\Documents\GitHub\InterpolatedNyquist.jl\hill\results
