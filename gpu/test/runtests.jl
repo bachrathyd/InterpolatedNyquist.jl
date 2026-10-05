@@ -105,6 +105,24 @@ D_promoting(λ, p, c) = λ^2 + 0.5 * λ + p[1]                        # Float64 
         @test n == 2 && r32.Z == [2, 0, 0, 2]
     end
 
+    @testset "root exactly on the line -> residual flag" begin
+        # Hayes with a + b = 0: D(0) = -a - b = 0, Z_raw is a half-integer
+        r = sweep(D_hayes, [(-1.0, 1.0), (-1.0, 0.5)]; n_power = 1, T = Float64)
+        @test r.flags[1] & 4 != 0
+        @test abs(r.Zraw[1] - round(r.Zraw[1])) > 0.25
+        @test r.flags[2] == 0 && r.Z[2] == 0
+    end
+
+    @testset "unrolled literal powers of the dual λ" begin
+        D4p(λ, p, c) = λ^4 + p[1] * λ^3 + λ^-2
+        D4m(λ, p, c) = λ * λ * λ * λ + p[1] * (λ * λ * λ) + inv(λ * λ)
+        for ω in (0.3, 1.7, 12.0)
+            a = NyquistGPU.eval_line(NyquistGPU.CharFn(D4p), (0.7,), (), 0.1, ω)
+            b = NyquistGPU.eval_line(NyquistGPU.CharFn(D4m), (0.7,), (), 0.1, ω)
+            @test all(isapprox.(a, b; rtol = 1e-12))
+        end
+    end
+
     @testset "precision check" begin
         @test check_eltype(D_hayes, (0.0, 0.0), (), Float32)
         @test !check_eltype(D_promoting, (0.0,), (), Float32)

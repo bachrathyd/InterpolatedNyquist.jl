@@ -38,7 +38,7 @@ Rules for `D(λ, p, c)`:
 | `schedule = :strided` | persistent threads, static coprime-stride scramble of the points (statistical balancing, no atomics) |
 | `schedule = :pixel` | one thread per point (baseline) |
 | `hmax`, `ωband` | step cap h ≤ hmax for ω < ωband. Needed when chains of roots run close to the axis (e.g. regenerative delay in turning: `hmax ≈ π/(2τ_max)`) |
-| `flags` (output) | bit 1: march failed; bit 2: a root closer to the line than the precision resolves was counted by its side (boundary-grazing point) |
+| `flags` (output) | bit 1: march failed; bit 2: a root closer to the line than the precision resolves was counted by its side (boundary-grazing point); bit 3: integer residual > 0.25 (a root on the line) |
 
 ## Layout
 ```

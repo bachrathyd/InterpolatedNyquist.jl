@@ -74,6 +74,21 @@ struct CharFn{F}
 end
 @inline (m::CharFn)(λ, p, c) = m.f(λ, p, c)
 
+# Literal integer powers of the dual-number λ (λ^4 in a user's D): unrolled
+# products instead of Base's generic power_by_squaring loop, which is not
+# inlined (2.5x slower on the CPU, a loop + call on the GPU). Only our own
+# PhaseTag duals are affected.
+const PhaseDualC{T} = Complex{ForwardDiff.Dual{PhaseTag, T, 1}}
+@inline Base.literal_pow(::typeof(^), z::PhaseDualC, ::Val{p}) where {p} = _upow(z, Val(p))
+@inline _upow(z, ::Val{0}) = one(z)
+@inline _upow(z, ::Val{1}) = z
+@inline _upow(z, ::Val{2}) = z * z
+@inline function _upow(z, ::Val{p}) where {p}
+    p < 0 && return inv(_upow(z, Val(-p)))
+    h = _upow(z, Val(p ÷ 2))
+    return isodd(p) ? h * h * z : h * h
+end
+
 # ===========================================================================
 # March parameters (isbits, passed by value to the kernels)
 # ===========================================================================
@@ -379,6 +394,10 @@ evals_per_step(::Val{:bs3}) = 3
     end
     σd = isfinite(σd) ? σd : T(NaN)
     fl = st.flags | (st.status == Int8(2) ? Int8(1) : Int8(0))
+    # the paper's integer residual: Z_raw far from an integer means a root ON
+    # the line (e.g. D(σ) = 0 exactly gives Z_raw = k + 1/2) or a truncation
+    # problem -- the count is not trustworthy either way
+    fl |= (abs(Zraw - round(Zraw)) > T(0.25)) ? Int8(4) : Int8(0)
     return Zraw, σd, ωd, st.steps, fl
 end
 
@@ -626,7 +645,8 @@ end
 NaN if none), `omega`, `steps`, `evals` (D evaluations per point), and
 `flags`: bit 1 = the march failed (step underflow / `maxsteps`), bit 2 = a
 root closer to the line than the precision can resolve was counted by its
-side (a boundary-grazing point: its count is a decision, not a measurement).
+side (a boundary-grazing point: its count is a decision, not a measurement),
+bit 3 = integer residual |Zraw - round(Zraw)| > 0.25 (a root on the line).
 """
 function fetch_result(p::SweepPlan)
     Zraw = Array(p.Zraw)
