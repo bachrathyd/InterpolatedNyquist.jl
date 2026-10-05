@@ -104,8 +104,10 @@ domain, but without truncating the harmonics:
   α = w(1 − e^{−λT}), H_kl = h_{k−l} the Toeplitz matrix of the cutting function h(ψ). h vanishes outside
   the cutting window, and the jump at tooth entry is what makes h_m decay like 1/m (many harmonics).
   Quadrature of the Fourier integral over the window factors H ≈ UVᴴ, U_kq = c_q e^{−ikψ_q},
-  Vᴴ_ql = e^{ilψ_q}, with c_q = W_q h(ψ_q)/2π, where ψ_q are Q nodes in the window. The jump sits at the
-  window edge, so the quadrature sees a smooth integrand.
+  Vᴴ_ql = e^{ilψ_q}, with c_q = W_q h(ψ_q)/2π, where ψ_q are Q nodes in the window. The jump of h sits at
+  the window edge, but the kernel S below has a slope kink on the diagonal (S'(0+) − S'(0−) = 2π/ω²):
+  that kink, not the jump, limits the plain node rules to O(Q⁻²). Gauss nodes alone converge no
+  faster than midpoints; Gauss nodes plus a diagonal kink correction reach O(Q⁻⁴) (math review).
 * **Matrix determinant lemma:** det(D + αUVᴴ) = det D · det(I_Q + αM), M = VᴴD⁻¹U,
   M_pq = c_q S(ψ_p − ψ_q). Every harmonic is summed exactly:
   S(Δ) = Σ_{k∈ℤ} e^{ikΔ}/p(λ + ikω), and by partial fractions of 1/p,
@@ -113,7 +115,8 @@ domain, but without truncating the harmonics:
   The only approximation left is the Q-node quadrature.
 * **Counting on the unit circle of the Floquet multiplier.** det(I_Q + αM) depends on λ only through
   z = e^{λT}. As a function of z it is analytic outside |z| = 1: its poles e^{r_iT} come from the
-  stable free-oscillator roots r_i and lie inside the circle. It also tends to 1 as z → ∞ (α → w).
+  stable free-oscillator roots r_i and lie inside the circle, and there is a pole at z = 0 (from α and
+  W_s ∝ 1/z), also inside. It tends to 1 as z → ∞ (α → w).
   Its winding along |z| = 1 therefore counts the multipliers outside the circle. This is the
   generalized (MIMO) Nyquist criterion of the regenerative loop. The D factor (the sinh ratio of the
   dense form) has only the stable free-oscillator zeros, so it drops out. A shift λ → λ + iω only
@@ -125,8 +128,11 @@ domain, but without truncating the harmonics:
   det(I_Q + αM) = det(I₂ + W·R), with R from one forward recursion over the nodes. With equispaced
   (midpoint) nodes the node-to-node factors are constant, so there is no division inside the loop
   (`D_mill2r`, a rolled loop).
-  - Read as an algorithm, this recursion is a quadrature of the free oscillator's response over the
-    cutting window. It never integrates the delayed system and builds no monodromy matrix.
+  - Read as an algorithm, this recursion is the kick–drift (Strang) propagator of the 2×2 ODE
+    x'' + 2ζx' + (1 + α(z)h)x = 0 over the cutting window: as Q → ∞ the compressed F equals
+    det(I − Φ_α(T)/z)/det(I − e^{A₀T}/z) to 1e−14 (math review). So it is a z-dependent monodromy-type
+    product in disguise; the method stays the frequency-domain determinant counted by the argument
+    principle (no time integration of the delayed system, no eigenvalues of a monodromy matrix).
   - The dense Q×Q LU of the same M (`D_mill2q`) gives the same numbers.
 * **Normalized recursion** (`D_mill2n`, the fastest form).
   - In the recursion, row s of the running sums appears only divided by u_s = e^{−a_sψ/ω}, and both
@@ -202,25 +208,88 @@ The latency from a slider move to its picture is one round trip plus one render,
 For comparison, the dense Hill form of the same chart (`D_mill2`, tol 1e−2) takes about 1 s for
 480×270 on the same GPU.
 
+## Code review, iteration 1 (2026-10-06)
+Six specialist reviewers (mathematics, Julia/GPU engineering, GPU performance, numerical linear
+algebra, machining dynamics, adaptive sampling) read the code and ran CPU experiments. Iteration 1
+implemented their main findings:
+
+* **The kernels were bound by function calls, not arithmetic.** D was compiled as a separate function
+  whose arguments and results went through local memory, and so were the complex dual products in its
+  loop. `CUDABackend(always_inline = true)` (`gpu/scripts/common.jl`) removes the calls. Together with
+  4 × 8 pixel tiles per warp for full charts (`k_tile!`; neighbouring pixels need similar step counts),
+  the old `D_mill2r` in Float32 went from 56.6 ms to 3.5 ms at full HD.
+* **Per-point `prepare` hook** (`NyquistGPU.prepare(D, p, c)`): run once per point in the march
+  precision; the march then calls D(λ, q, c). The kernels now receive the constants in the march
+  precision (refinement and certification use them unrounded) and convert them for D. In Float16
+  mode, the chart point was rounded to Float16 before (1920 columns collapsed to 1633 distinct spindle
+  speeds), and ω overflowed above 32.75 krpm (z = 2) or for f_n ≥ 1092 Hz.
+* **`D_mill2p`, the pole-free prepared Test 2 form** (`hill/gpu_fast.jl`):
+  - With C21 = κB21 and C12 = κ̄B12, κ drops out (|κ| = 1). The k_s leave the loop.
+  - Multiplying F by (1 − W1)(1 − W2) removes every division and the poles at the free-oscillator
+    multipliers. The factor has zero winding on |z| = 1 and is positive at z = ±1, so the count and
+    the parity rule are unchanged.
+  - Per evaluation: one exponential. Per node: about 44 real multiplications.
+  - **Light damping:** at ζ = 0.002 it gives the right counts with the large march steps (2/3200
+    against a fine reference). The old forms, whose poles sit near the circle there, miscounted
+    133/3200.
+  - **Float16:** with the constants prepared in Float32, all wrong counts are flagged (24, 0
+    unflagged, against 34 with 8 unflagged before). Float16 + re-check equals Float32 (11 differences
+    from Q = 64, the quadrature level).
+* **`D_mill3c`, Test 3 in the compressed form** (`hill/gpu_helix.jl`):
+  - Material nodes: tooth × axial Gauss node × window Gauss node. The regenerative term of a node is
+    exactly the same material node on the previous tooth, so there is no interpolation.
+  - D(z) = det(I + (I − P(z))S_z C).
+  - Reduced once per point to a determinant of size n_w + 2, where n_w is the number of nodes whose
+    regeneration arc crosses the time origin. The origin is chosen to minimize it: one tooth's nodes.
+  - The reduction uses forward sweeps with running sums (no N × N matrix), with pole-free rows.
+  - CPU checks: reduced = dense determinant to 7e−15. Counts against the dense Hill (exact kernel) on
+    288 points: 3 differ at Q = 8, n_s = 4 and 1 at n_s = 5. Float32 counts equal Float64. RK4: 4/4.
+    About 10 evaluations per point.
+* **Bugs fixed:**
+  - `recheck_flagged!` skipped points with the lane schedules.
+  - The dense Test 3 form had a Float64 literal (Float64 instructions in every GPU evaluation).
+  - A map over a 33-entry constants tuple did not compile on the GPU.
+  - A complex division in a setup widened to Float64.
+* **Offline PTX check without a GPU:** `gpu/scripts/ptx_offline.jl`, `hill/gpu_compile_check.jl`.
+
+RTX PRO 6000, full HD (`fast_kernel_info.jl`, 4 × 8 tiles, workgroup 64):
+
+| kernel, Q = 16 | before | iteration 1 | registers |
+|---|---|---|---|
+| `D_mill2r` Float32 | 56.6 ms | 3.54 ms | 163 |
+| `D_mill2n` Float32 / Float16 | 15.9 / 5.0 ms | 2.28 / 1.94 ms | 145 / 120 |
+| **`D_mill2p` Float32 / Float16** | — | **1.30 / 1.29 ms** (1.6 Gpts/s) | 92 / 72 |
+
+Float16 no longer beats Float32 on this GPU: its earlier advantage came from smaller stack frames,
+not from Float16 arithmetic.
+
+GPU tour on the RTX PRO 6000 (`hill/gpu_tour_milling.jl`, `gpu/results/hill_tour_G4_iter1.csv`). Check:
+192 × 108 points against a Float64 reference of the same model with a finer quadrature or tolerance.
+
+| model | Float32 | Float16 | Float16 + re-check | check: differ of 20 736 |
+|---|---|---|---|---|
+| Test 2, `D_mill2p` (Q = 16), full HD | 1.49 ms | 1.30 ms | 2.05 ms | 13 / 47 / 13 |
+| Test 3, `D_mill3c` (Q = 8, n_s = 4), full HD | 13.1 s | 13.6 s | 14.0 s | 38 / 42 / 37 |
+| Test 3, dense `D_mill3` (tol 1e−2), 480 × 270 | 1.0 s (≈ 16 s at full HD) | — | — | 5 |
+
+Your full-HD Test 3 chart took 61.5 s before. The Test 3 forms are now limited by the per-thread
+matrix in GPU memory (about 0.5 TFLOPS effective); that is the target of iteration 2.
+
 ## Interactive
 `gpu/colab/NyquistGPU_Hill_Interactive.ipynb` (this branch) adds these time-periodic examples to the
 three time-independent ones:
-* *milling, straight flutes (Test 2, compressed Hill, fast)*: the default; Float16 / Float16 + re-check /
-  Float32 / Float64; full HD.
+* *milling, straight flutes (Test 2, compressed Hill, fast)*: the default (`D_mill2p`); Float16 /
+  Float16 + re-check / Float32 / Float64; full HD.
+* *milling, different helix angles (Test 3, compressed Hill, fast)* (`D_mill3c`): starts at 960 × 540.
 * *delayed Mathieu*.
 * *milling, straight flutes (Test 2, dense Hill, slow)*.
-* *milling, different helix angles (Test 3)*.
+* *milling, different helix angles (Test 3)*: the dense Hill form.
 
 Model constants are sliders: κ, ε for Mathieu; ζ, a/D, K_n/K_t for Test 2; ζ, a/D, β₂ for Test 3.
 
 ## Not done yet
-* The compressed determinant for Test 3 (helix: nodes over the window × the axial slices, a
-  distributed delay per node, spindle period) and for multi-DOF models (S becomes a matrix sum of 2n
-  exponentials, so the semiseparable rank grows to 2n).
-* The kernels still run far below the GPU's FMA peak: they are bound by latency and occupancy, with
-  one serial recursion per thread. Splitting the two independent columns of the recursion over two
-  threads per point, or evaluating two frequency samples per pass, would give the scheduler
-  independent work.
+* The compressed determinant for multi-DOF models: S becomes a matrix sum of 2n exponentials, so the
+  semiseparable rank grows to 2n.
 * Banded/shifted truncation and Schur-complement ring growth (not needed for Mathieu: N = 9
   everywhere; becomes relevant for milling with many harmonics).
 * Schur-complement ring growth (N is re-factorized per ring in the a-posteriori check) and the banded

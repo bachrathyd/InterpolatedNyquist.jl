@@ -1,0 +1,8 @@
+gpu,model,format,nx,ny,kernel_ms,recheck_ms,total_ms,mpts_per_s,flagged_pct,check_differ,check_n,check_failed
+NVIDIA RTX PRO 6000 Blackwell Server Edition,mill2p,F32,1920,1080,1.490,0.000,1.490,1391.782,0.001,13,20736,0
+NVIDIA RTX PRO 6000 Blackwell Server Edition,mill2p,F16,1920,1080,1.298,0.000,1.298,1597.302,3.186,47,20736,0
+NVIDIA RTX PRO 6000 Blackwell Server Edition,mill2p,F16+,1920,1080,1.323,0.725,2.048,1012.742,0.001,13,20736,0
+NVIDIA RTX PRO 6000 Blackwell Server Edition,mill3c,F32,1920,1080,13135.336,0.000,13135.336,0.158,0.001,38,20736,0
+NVIDIA RTX PRO 6000 Blackwell Server Edition,mill3c,F16,1920,1080,13557.379,0.000,13557.379,0.153,1.182,42,20736,1
+NVIDIA RTX PRO 6000 Blackwell Server Edition,mill3c,F16+,1920,1080,13574.286,453.507,14027.792,0.148,0.001,37,20736,0
+NVIDIA RTX PRO 6000 Blackwell Server Edition,mill3d,F32,480,270,1008.482,0.000,1008.482,0.129,0.001,5,20736,0
