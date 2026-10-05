@@ -127,8 +127,10 @@ md("""
 ## 3. The interactive chart
 Move a slider, pick another example / format / resolution, zoom or pan: the chart is recomputed on
 the GPU. The page always shows the newest request (intermediate slider positions are skipped while
-a frame is in flight). The status line gives the GPU times; the frame round trip adds the PNG
-encoding and the transfer to your browser.
+a frame is in flight). The status line gives the GPU times; the frame round trip adds the image
+encoding and the transfer to your browser, which, not the GPU, limits the frame rate of the fast
+examples. The live view is therefore sent as JPEG, about 5× smaller than PNG; choose *PNG* for exact
+pixels. *save full-resolution PNG* always writes the exact chart.
 """)
 code(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "interactive_app.py"),
           encoding="utf-8").read())
