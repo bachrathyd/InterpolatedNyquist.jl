@@ -217,9 +217,10 @@ function get_plan(e, fmt, nx, ny, xr, yr)
                   workspace = (Complex{ForwardDiff.Dual{NyquistGPU.PhaseTag, T, 1}}, ws_len(e.sys.D)))
         end
         S.plan = plan_grid(xr, yr, nx, ny; kw...)
-        if rc
-            S.rplan = plan_grid(xr, yr, nx, ny; backend = BACKEND, T = Float32, n_power = e.sys.npow,
-                nroots = 4, schedule = :pixel, e.sys.kw...)
+        if rc                        # same march (Hill: the same strip / circle), Float32 throughout
+            rkw = (kw..., T = Float32, Teval = Float32)
+            ishill(e) || (rkw = (rkw..., nroots = 4, schedule = :pixel))
+            S.rplan = plan_grid(xr, yr, nx, ny; rkw...)
         end
         S.key = key
         S.grid = (xr, yr)
@@ -276,16 +277,12 @@ function render(a)
     else
         set_march!(plan; ω_max = wmax, refine = nr, certify = cert)
     end
-    rplan === nothing || set_march!(rplan; ω_max = max(wreq, e.ω16), refine = nr, certify = cert)
+    if rplan !== nothing          # Hill: keep the strip / circle of the example
+        ishill(e) ? set_march!(rplan; refine = nr, certify = false) :
+                    set_march!(rplan; ω_max = max(wreq, e.ω16), refine = nr, certify = cert)
+    end
     t0 = time_ns()
     run!(plan, e.sys.D, c)
-    if ishill(e)                  # Z_raw = 2Z over the strip; σ from μ- to λ-units
-        zdiv = hasproperty(e, :zdiv) ? e.zdiv : 2
-        zdiv == 1 || (plan.Zraw ./= zdiv)
-        cT = map(eltype(plan.sigma), c)
-        plan.sigma .*= e.ωp.(plan.points, Ref(cT))
-        KernelAbstractions.synchronize(BACKEND)
-    end
     tker = ms(t0)
     t0 = time_ns()
     nflag = count(!=(Int8(0)), plan.flags)
@@ -296,6 +293,13 @@ function render(a)
     end
     tre = ms(t0)
     t0 = time_ns()
+    if ishill(e)                  # Z_raw = 2Z over the strip; σ from μ- to λ-units (after the re-check)
+        zdiv = hasproperty(e, :zdiv) ? e.zdiv : 2
+        zdiv == 1 || (plan.Zraw ./= zdiv)
+        cT = map(eltype(plan.sigma), c)
+        plan.sigma .*= e.ωp.(plan.points, Ref(cT))
+        KernelAbstractions.synchronize(BACKEND)
+    end
     f = max(1, cld(nx, maxw), cld(ny, maxh))
     img, dw, dh = colour!(plan, nx, ny, f, smin, zcap, flags, bnd)
     tcol = ms(t0)
