@@ -560,7 +560,8 @@ end
 # ===========================================================================
 # Per-lane workspace (plan_sweep(...; workspace = (eltype, len))): characteristic
 # functions that need scratch memory -- e.g. a dense Hill matrix and its LU --
-# get a WorkSlot as the LAST entry of their constants tuple c. Element k of
+# get c = (constants, WorkSlot) instead of the constants alone (a pair, not an appended
+# entry: long heterogeneous tuples defeat inference on the GPU). Element k of
 # lane l lives at ws[(k-1)·L + l] (interleaved: the lanes of a warp touch
 # consecutive addresses). Only for the lane schedules (:strided, :queue), where
 # a lane processes its points one after another.
@@ -573,9 +574,12 @@ end
 @inline Base.getindex(s::WorkSlot, k::Int) = @inbounds s.ws[(k - 1) * s.L + s.l]
 @inline Base.setindex!(s::WorkSlot, v, k::Int) = (@inbounds s.ws[(k - 1) * s.L + s.l] = v)
 @inline with_slot(c, ::Nothing, l, L) = c
-@inline with_slot(c, ws, l, L) = (c..., WorkSlot(ws, Int(l), Int(L)))
+@inline with_slot(c, ws, l, L) = (c, WorkSlot(ws, Int(l), Int(L)))   # D gets (constants, slot)
 # convert the numeric constants to precision T, pass anything else (a WorkSlot) through
-@inline conv_consts(::Type{T}, c) where {T} = map(x -> x isa Number ? T(x) : x, c)
+@inline conv_consts(::Type{T}, c::Tuple) where {T} = map(x -> conv_consts(T, x), c)
+@inline conv_consts(::Type{T}, c::NTuple{N, T}) where {N, T} = c    # no map over long tuples in kernels
+@inline conv_consts(::Type{T}, x::Number) where {T} = T(x)
+@inline conv_consts(::Type{T}, x) where {T} = x
 
 # ===========================================================================
 # Kernels -- one per schedule. Pts is a device vector of NTuple{K,T}.
@@ -742,7 +746,7 @@ Keywords (defaults in brackets):
   rational D in PLAN.md)
 - `maxsteps` [`200_000`]
 - `workspace` [`nothing`] -- `(eltype, len)`: `len` elements of scratch memory per lane,
-  passed to `D` as a `WorkSlot` (indexable 1..len) appended to its constants `c`; needs the
+  passed to `D` as c = (constants, slot) with a `WorkSlot` (indexable 1..len); needs the
   `:strided` or `:queue` schedule. For characteristic functions that need a matrix (e.g. a
   dense Hill determinant) -- per-thread `MArray`s of that size do not compile on the GPU.
 - `refine` [`0`] -- Newton steps polishing each tracked root after the march (complex

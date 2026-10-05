@@ -127,8 +127,7 @@ mathieu_ωp(p, c) = one(p[1])
 mill2_ωp(p, c) = c[3] * p[1] * 1000 / (60 * c[7])
 
 function D_mill2(μ, p, cw)
-    c = Base.front(cw)               # numeric constants (homogeneous: dynamic indexing is fine)
-    A = cw[end]                      # WorkSlot: the Hill matrix
+    c, A = cw                        # constants (homogeneous NTuple), WorkSlot: the Hill matrix
     rk, ap = p
     ζ, w1, z, cs, tol, Hmax = c[1], c[2], c[3], c[4], c[5], c[6]
     ωp = mill2_ωp(p, c)
@@ -182,8 +181,7 @@ mill3_ωp(p, c) = p[1] * 1000 / (60 * c[6])
 end
 
 function D_mill3(μ, p, cw)
-    c = Base.front(cw)
-    A = cw[end]
+    c, A = cw
     rk, ap = p
     ζ, w1, cs, tol, Cmax, fn, tb1, tb2, R = c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[8], c[9]
     Ω = mill3_ωp(p, c)
