@@ -1,0 +1,13 @@
+# gpu/interactive/server.jl on NVIDIA RTX PRO 6000 Blackwell Server Edition (Colab G4), 2026-10-05
+# median of 5 frames; t_* in ms; server_rt = request -> display image written (no PNG/browser)
+example,format,nx,ny,t_kernel,mpts_per_s,n_recheck,t_recheck,t_colour,t_read,server_rt,flagged_pct_after
+fourth,F16,1920,1080,0.99,2098,0,0,0.05,0.67,1.8,1.736
+fourth,F16,3840,2160,3.75,2209,0,0,0.14,1.19,5.2,1.730
+fourth,F16,7680,4320,14.76,2247,0,0,0.61,1.76,17.1,1.746
+fourth,F32,7680,4320,43.75,758,0,0,0.50,1.56,46.1,0.000
+fourth,F16+,7680,4320,14.75,2250,579185,2.57,0.47,0.90,20.2,0.000
+showcase,F16,7680,4320,24.71,1343,0,0,0.62,1.56,26.8,5.038
+turning,F16+,7680,4320,101.20,328,10948842,96.01,0.60,1.50,200.1,0.007
+turning,F32,7680,4320,234.90,141,0,0,0.62,1.55,237.4,0.007
+# 8K Float16 delay sweep (slider), 20 frames: kernel median 14.36 ms, server frame 21.1 ms
+# full-resolution 8K PNG export: 1.5 MB

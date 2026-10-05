@@ -299,10 +299,17 @@ times faster than Float32 (the gain is largest on cards with a fast
 half-precision path) ($\GpuBestFsixteen$\,ms on the \GpuBest), with
 $\GpuFsixteenWrong\,\%$ wrong counts that are \emph{all} flagged, and
 $\GpuFsixteenFlagged\,\%$ flagged points in total. Re-checking the flagged
-points in Float32 restores the exact chart; at full-HD resolution, however,
-the separate re-check launch costs more than a plain Float32 sweep on the
-fast cards, so Float16 is the format for interactive previews, and Float32
-the format for final charts. BFloat16, with only seven mantissa bits, flags
+points in Float32 restores the exact chart, and done in place on the device
+-- gather the flagged points, march them in Float32, scatter the results
+back -- the second pass is cheap: for an 8K chart ($7680\times4320\approx
+3.3\cdot10^{7}$ points) on the same card, the Float16 sweep takes
+$14.8$\,ms and the re-check of its $5.8\cdot10^{5}$ flagged points
+$2.6$\,ms, against $43.8$\,ms for the Float32 sweep: an exact chart
+$2.5$ times faster than in Float32, and an interactive frame rate at 8K
+(\code{gpu/results/interactive\_G4.csv}). The gain depends on the system:
+for the lightly damped two-mode turning model a third of the points are
+flagged in Float16, and the hybrid ($197$\,ms) is barely faster than Float32
+($235$\,ms). BFloat16, with only seven mantissa bits, flags
 $14\,\%$ of the chart, and the 8-bit and 4-bit formats are useless for this
 purpose: with two or three mantissa bits even the \emph{parameters} of a
 chart are quantized to a handful of distinct values per octave, so that

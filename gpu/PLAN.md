@@ -154,6 +154,12 @@ faster than Float32 at the same window, with identical wrong/flagged counts on
 every card (0.0169 % wrong, all flagged; 1.756 % flagged). The `:queue`
 schedule is slower than `:pixel` everywhere.
 
+The "Float16 + Float32 recheck total" rows above re-check on the host side
+(`recheck!`: gather on the CPU, new plan, upload). The device-side
+`recheck_flagged!` of the interactive server is far cheaper -- on the G4 at 8K
+(33 M points): Float16 sweep 14.8 ms + re-check of 579 k flagged points 2.6 ms
+= an exact chart in 17.4 ms, vs 43.8 ms in Float32 (`results/interactive_G4.csv`).
+
 ## Lower precision: Float16 / Float8
 Measured on the T4 (`precision_test.jl`, 4th-order full HD): Float16 runs in
 **15.4 ms vs 33.5 ms** for Float32 (2.2×); 236 counts wrong (0.011 %), **all of
