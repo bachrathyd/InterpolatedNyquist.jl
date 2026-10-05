@@ -140,6 +140,31 @@ D_promoting(λ, p, c) = λ^2 + 0.5 * λ + p[1]                        # Float64 
         @test all((r.Z .== 0)[ok] .== [hayes_stable(p...) for p in pts][ok])
     end
 
+    @testset "device-generated grid, regrid!, recheck_flagged!" begin
+        xs, ys = range(-3.0, 0.9; length = 23), range(-3.0, 3.0; length = 17)
+        ref = sweep(D_hayes, grid_points(xs, ys); n_power = 1, T = Float64)
+        g = plan_grid((-3.0, 0.9), (-3.0, 3.0), 23, 17; n_power = 1, T = Float64)
+        @test all(isapprox.(collect.(Array(g.points)), collect.(grid_points(xs, ys)); atol = 1e-12))
+        @test fetch_result(run!(g, D_hayes)).Z == ref.Z
+        # zoom without reallocating
+        regrid!(g, (-1.0, 0.5), (0.0, 2.0), 23, 17)
+        @test fetch_result(run!(g, D_hayes)).Z ==
+              sweep(D_hayes, grid_points(range(-1.0, 0.5; length = 23), range(0.0, 2.0; length = 17));
+                    n_power = 1, T = Float64).Z
+        @test_throws ErrorException regrid!(g, (0, 1), (0, 1), 10, 10)
+        # second pass: Float16-evaluated sweep, flagged points redone in Float64 on the device
+        regrid!(g, (-3.0, 0.9), (-3.0, 3.0), 23, 17)
+        h = plan_grid((-3.0, 0.9), (-3.0, 3.0), 23, 17; n_power = 1, T = Float32,
+                      Teval = Float16_emu, ω_max = 1e3, schedule = :pixel)
+        run!(h, D_hayes)
+        flagged = count(!=(0), Array(h.flags))
+        r64 = plan_grid((0.0, 1.0), (0.0, 1.0), 23, 17; n_power = 1, T = Float32, schedule = :pixel)
+        @test recheck_flagged!(h, r64, D_hayes) == flagged
+        @test r64.npts == 23 * 17                       # capacity restored
+        ok = [hayes_safe(p...) for p in grid_points(xs, ys)]
+        @test (fetch_result(h).Z .== ref.Z)[ok] == trues(count(ok))
+    end
+
     @testset "precision check" begin
         @test check_eltype(D_hayes, (0.0, 0.0), (), Float32)
         @test !check_eltype(D_promoting, (0.0,), (), Float32)

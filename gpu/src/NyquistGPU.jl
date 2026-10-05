@@ -60,7 +60,8 @@ import Atomix
 
 export LowFloat, Float8_E4M3, Float8_E5M2, Float4_E2M1, Float16_emu, BFloat16_emu, format_range
 export SweepPlan, plan_sweep, run!, fetch_result, sweep, grid_points, chart, recheck!,
-       check_eltype, simulate_schedule, coprime_stride, colour_field
+       check_eltype, simulate_schedule, coprime_stride, colour_field,
+       plan_grid, regrid!, recheck_flagged!
 
 include("lowfloat.jl")
 
@@ -713,6 +714,81 @@ function chart(D, xr, yr, nx::Integer, ny::Integer; c = (), kw...)
     return (Z = m(r.Z), Zraw = m(r.Zraw), sigma = m(r.sigma), omega = m(r.omega),
         steps = m(r.steps), evals = m(r.evals), flags = m(r.flags), xs = xs, ys = ys,
         t = r.t, plan = r.plan)
+end
+
+@kernel function k_grid!(Pts, x0, dx, y0, dy, nx)
+    k = @index(Global, Linear)
+    i = (k - 1) % nx
+    j = (k - 1) ÷ nx
+    @inbounds Pts[k] = (x0 + i * dx, y0 + j * dy)
+end
+
+"""
+    plan_grid(xr, yr, nx, ny; kw...) -> SweepPlan
+
+A plan for the `nx × ny` chart over `xr × yr` (first axis fastest, as
+`grid_points`) whose points are generated ON THE DEVICE: no host array and no
+upload, which matters at 4K/8K (33 M points). Same keywords as `plan_sweep`.
+Change the axis ranges later with [`regrid!`](@ref), without reallocating.
+"""
+function plan_grid(xr, yr, nx::Integer, ny::Integer; backend = CPU(), T::Type = Float32,
+                   lanes::Union{Nothing, Integer} = nothing, kw...)
+    p = plan_sweep(((xr[1], yr[1]), (xr[2], yr[2])); backend, T, lanes, kw...)
+    n = nx * ny
+    n < typemax(Int32) || error("too many points for Int32 indexing")
+    alloc(S) = KernelAbstractions.zeros(backend, S, n)
+    p.npts = n
+    p.points = KernelAbstractions.allocate(backend, NTuple{2, T}, n)
+    p.Zraw, p.sigma, p.omega = alloc(T), alloc(T), alloc(T)
+    p.steps, p.flags = alloc(Int32), alloc(Int8)
+    nt = Threads.nthreads()
+    cpu = backend isa CPU
+    p.lanes = min(something(lanes, cpu ? (p.schedule === :queue ? nt : 8 * nt) : 1 << 18), n)
+    p.stride = coprime_stride(n)
+    return regrid!(p, xr, yr, nx, ny)
+end
+
+"""
+    regrid!(plan, xr, yr, nx, ny) -> plan
+
+Refill the points of a [`plan_grid`](@ref) plan with the `nx × ny` grid over
+`xr × yr` on the device (`nx * ny` must equal the plan's point count).
+"""
+function regrid!(p::SweepPlan{T}, xr, yr, nx::Integer, ny::Integer) where {T}
+    nx * ny == length(p.points) || error("regrid!: the plan holds $(length(p.points)) points")
+    p.npts = nx * ny
+    dx = nx > 1 ? T((xr[2] - xr[1]) / (nx - 1)) : zero(T)
+    dy = ny > 1 ? T((yr[2] - yr[1]) / (ny - 1)) : zero(T)
+    k_grid!(p.backend, 256)(p.points, T(xr[1]), dx, T(yr[1]), dy, Int32(nx); ndrange = p.npts)
+    KernelAbstractions.synchronize(p.backend)
+    return p
+end
+
+"""
+    recheck_flagged!(plan, rplan, D, c = ()) -> n
+
+Device-side second pass: gather every flagged point of `plan` (`flags != 0`)
+into `rplan` -- a plan of at least the same capacity, typically Float32 with
+production settings -- run it there, and scatter `Zraw`, `sigma`, `omega`,
+`flags` back into `plan`. Nothing crosses the bus except the count `n`.
+`rplan` must use the `:pixel` schedule (the GPU default).
+"""
+function recheck_flagged!(p::SweepPlan, rp::SweepPlan, D, c = ())
+    idx = findall(!=(Int8(0)), p.flags)
+    n = length(idx)
+    n == 0 && return 0
+    n <= length(rp.points) || error("recheck_flagged!: rplan is too small")
+    cap = rp.npts
+    rp.npts = n
+    view(rp.points, 1:n) .= view(p.points, idx)
+    run!(rp, D, c)
+    view(p.Zraw, idx) .= view(rp.Zraw, 1:n)
+    view(p.sigma, idx) .= view(rp.sigma, 1:n)
+    view(p.omega, idx) .= view(rp.omega, 1:n)
+    view(p.flags, idx) .= view(rp.flags, 1:n)
+    KernelAbstractions.synchronize(p.backend)
+    rp.npts = cap
+    return n
 end
 
 """
