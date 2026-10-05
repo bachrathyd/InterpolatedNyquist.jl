@@ -22,6 +22,21 @@ const GPU_SYSTEMS_INCLUDED = true
 "4th-order delayed oscillator (paper App. A.1 / solver zoo), axes (P, D)."
 D_fourth(λ, p, c) = c[1] * λ^4 + λ^2 + 2 * c[2] * λ + 1 + (p[1] + p[2] * λ) * exp(-c[3] * λ)
 
+"""
+4th-order model in rescaled frequency, for narrow number formats:
+    μ = λ/Ω,   D̂(μ) = D(Ωμ) / (c1 Ω⁴)
+          = μ⁴ + k2 μ² + k1 μ + k0 + (kP P + kD D μ) e^{-τ̂ μ}
+Z is unchanged (the argument principle is invariant under a positive scaling
+of D and of the frequency axis); the march runs in μ up to ω_max/Ω.
+Constants from `fourth_scaled_consts(Ω)`.
+"""
+D_fourth_scaled(μ, p, c) = μ^4 + c[1] * μ^2 + c[2] * μ + c[3] +
+                           (c[4] * p[1] + c[5] * p[2] * μ) * exp(-c[6] * μ)
+function fourth_scaled_consts(Ω; c1 = 0.03, ζ = 0.02, τ = 0.5)
+    a = c1 * Ω^4
+    return (Ω^2 / a, 2ζ * Ω / a, 1 / a, 1 / a, Ω / a, τ * Ω)
+end
+
 "Showcase constrained 2-DOF structure, delayed PD control (reduced quasi-polynomial), axes (P, D)."
 function D_showcase(λ, p, c)
     P, Dg = p

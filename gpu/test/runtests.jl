@@ -123,6 +123,23 @@ D_promoting(λ, p, c) = λ^2 + 0.5 * λ + p[1]                        # Float64 
         end
     end
 
+    @testset "emulated narrow formats" begin
+        xs = [0.1, 1.0625, -3.3, 65504.0, 7e4, 1e-6, 2.5, 449.0, 7.0]
+        @test all(Float32(Float16_emu(x)) == Float32(Float16(x)) for x in xs[1:6])
+        @test Float32(Float8_E4M3(1.0625)) == 1.0          # ties to even, 3 mantissa bits
+        @test Float32(Float8_E4M3(449.0)) == 448.0         # E4M3FN saturates at 448
+        @test Float32(Float8_E5M2(7e4)) == Inf32           # E5M2 overflows to Inf (max 57344)
+        @test sort(unique(Float32.(Float4_E2M1.(0:0.01:7)))) == Float32[0, 0.5, 1, 1.5, 2, 3, 4, 6]
+        @test Float32(Float8_E4M3(0.1)) == 0.1015625f0                      # 3 mantissa bits
+        @test Float32(Float8_E4M3(0.1) * Float8_E4M3(3.0)) == 0.3125f0      # 0.3046875 rounded
+        # mixed precision: march in Float32, D evaluated in (emulated) Float16
+        pts = grid_points(range(-3.0, 0.9; length = 15), range(-3.0, 3.0; length = 15))
+        ok = [hayes_safe(p...) for p in pts]
+        # ω_max stays below the Float16 range (65504): λ itself would overflow at 1e5
+        r = sweep(D_hayes, pts; n_power = 1, T = Float32, Teval = Float16_emu, ω_max = 1e3)
+        @test all((r.Z .== 0)[ok] .== [hayes_stable(p...) for p in pts][ok])
+    end
+
     @testset "precision check" begin
         @test check_eltype(D_hayes, (0.0, 0.0), (), Float32)
         @test !check_eltype(D_promoting, (0.0,), (), Float32)

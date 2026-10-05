@@ -58,8 +58,11 @@ using KernelAbstractions
 using ForwardDiff
 import Atomix
 
+export LowFloat, Float8_E4M3, Float8_E5M2, Float4_E2M1, Float16_emu, BFloat16_emu, format_range
 export SweepPlan, plan_sweep, run!, fetch_result, sweep, grid_points, chart, recheck!,
        check_eltype, simulate_schedule, coprime_stride, colour_field
+
+include("lowfloat.jl")
 
 struct PhaseTag end
 
@@ -92,7 +95,10 @@ end
 # ===========================================================================
 # March parameters (isbits, passed by value to the kernels)
 # ===========================================================================
-struct MarchParams{T}
+# T: precision of the march (frequency, step control, phase sum);
+# TE: precision in which D is evaluated (TE = T, or a narrower format such as
+# Float16 / an emulated Float8 -- mixed precision)
+struct MarchParams{T, TE}
     σ::T         # integration line Re λ = σ
     ω0::T        # start of the march (tiny > 0, like the CPU package)
     ωmax::T      # end of the march
@@ -105,17 +111,24 @@ struct MarchParams{T}
     npow::T      # leading order n of D (D ~ c λ^n)
     maxsteps::Int32
 end
+evaltype(::MarchParams{T, TE}) where {T, TE} = TE
 
 # ===========================================================================
 # One evaluation: D and dD/dω on the line λ = σ + iω (one dual-number call)
 # ===========================================================================
-@inline function eval_line(D::F, p, c, σ::T, ω::T) where {F, T}
-    w = ForwardDiff.Dual{PhaseTag}(ω, one(T))
-    s = ForwardDiff.Dual{PhaseTag}(σ, zero(T))
-    v = D(Complex(s, w), p, c)
+@inline eval_line(D::F, p, c, σ::T, ω::T) where {F, T} = eval_line(D, p, c, σ, ω, T)
+@inline eval_line(D::F, p, c, mp::MarchParams{T, TE}, ω::T) where {F, T, TE} =
+    eval_line(D, p, c, mp.σ, ω, TE)
+
+# D is evaluated in TE (σ, ω and the point p are rounded to TE first; c already
+# is TE), the results are returned in the march precision T
+@inline function eval_line(D::F, p, c, σ::T, ω::T, ::Type{TE}) where {F, T, TE}
+    w = ForwardDiff.Dual{PhaseTag}(TE(ω), one(TE))
+    s = ForwardDiff.Dual{PhaseTag}(TE(σ), zero(TE))
+    v = D(Complex(s, w), map(TE, p), c)
     re, im = real(v), imag(v)
-    Dv = Complex{T}(ForwardDiff.value(re), ForwardDiff.value(im))
-    Dw = Complex{T}(ForwardDiff.partials(re, 1), ForwardDiff.partials(im, 1))
+    Dv = Complex{T}(T(ForwardDiff.value(re)), T(ForwardDiff.value(im)))
+    Dw = Complex{T}(T(ForwardDiff.partials(re, 1)), T(ForwardDiff.partials(im, 1)))
     return Dv, Dw
 end
 
@@ -265,7 +278,7 @@ end
 
 @inline function seed(D::F, p::P, c, mp::MarchParams{T}, ::Val{N}) where {F, P, T, N}
     ω = mp.ω0
-    Dv, Dw = eval_line(D, p, c, mp.σ, ω)
+    Dv, Dw = eval_line(D, p, c, mp, ω)
     u, th, g, s = sample_data(Dv, Dw)
     dd = ntuple(_ -> T(Inf), Val(N))
     ds = ntuple(_ -> T(NaN), Val(N))
@@ -298,7 +311,7 @@ end
         return MarchState{T, N, P}(st.p, b, hn, Φn, Db, Dwb, ub, sb, thb, gb,
             steps, status, st.flags | fl, dd, ds, dw)
     else
-        stuck = hn <= hfloor(st.ω)
+        stuck = hn <= hfloor(st.ω, mp)
         status = (stuck | (steps >= mp.maxsteps)) ? Int8(2) : Int8(0)
         return MarchState{T, N, P}(st.p, st.ω, hn, st.Φ, st.Da, st.Dwa, st.ua, st.sa,
             st.tha, st.ga, steps, status, st.flags, st.dd, st.ds, st.dw)
@@ -317,12 +330,17 @@ end
 
 # smallest step that still moves ω in precision T
 @inline hfloor(ω::T) where {T} = 8 * eps(T) * max(ω, one(T))
+# with a narrower evaluation format, frequencies closer than its relative
+# spacing evaluate to the same point: steps below that are wasted
+@inline hfloor(ω::T, ::MarchParams{T, T}) where {T} = hfloor(ω)
+@inline hfloor(ω::T, mp::MarchParams{T, TE}) where {T, TE} =
+    8 * max(eps(T), T(eps(TE))) * max(ω, mp.ω0)
 
 # --- :unwrap  (1 evaluation per step) --------------------------------------
 @inline function march_step(D::F, st::MarchState{T, N}, c, mp::MarchParams{T},
                             ::Val{:unwrap}) where {F, T, N}
     h, b = trial_step(st, mp)
-    Db, Dwb = eval_line(D, st.p, c, mp.σ, b)
+    Db, Dwb = eval_line(D, st.p, c, mp, b)
     ub, thb, gb, sb = sample_data(Db, Dwb)
     Δ = dphase(st.ua, ub)
     err = finite_or_inf(abs(Δ - h * (st.tha + thb) / 2))
@@ -331,7 +349,7 @@ end
     accept = (err <= tol) & valid
     fac = clamp(T(0.9) * cbrt(tol / max(err, floatmin(T))), T(0.2), T(4))
     hn = h * fac
-    if !accept & valid & (hn <= hfloor(st.ω))
+    if !accept & valid & (hn <= hfloor(st.ω, mp))
         # A root so close to the line that its ±π phase transition is narrower
         # than the smallest representable step (|Re λ - σ| ≲ eps·ω): the step
         # cannot be refined further, and the principal increment is ambiguous
@@ -352,7 +370,7 @@ end
 
 # --- :bs3  (Bogacki-Shampine 3(2), FSAL: 3 evaluations per step) ------------
 @inline function theta_at(D::F, st::MarchState{T}, c, mp::MarchParams{T}, ω::T) where {F, T}
-    Dv, Dw = eval_line(D, st.p, c, mp.σ, ω)
+    Dv, Dw = eval_line(D, st.p, c, mp, ω)
     _, th, _, _ = sample_data(Dv, Dw)
     return th
 end
@@ -364,7 +382,7 @@ end
     th2 = theta_at(D, st, c, mp, st.ω + h / 2)
     th3 = theta_at(D, st, c, mp, st.ω + 3 * h / 4)
     ynew = st.Φ + h * (T(2 / 9) * th1 + T(1 / 3) * th2 + T(4 / 9) * th3)
-    Db, Dwb = eval_line(D, st.p, c, mp.σ, b)
+    Db, Dwb = eval_line(D, st.p, c, mp, b)
     ub, th4, gb, sb = sample_data(Db, Dwb)
     zlow = st.Φ + h * (T(7 / 24) * th1 + T(1 / 4) * th2 + T(1 / 3) * th3 + T(1 / 8) * th4)
     err = finite_or_inf(abs(ynew - zlow))
@@ -551,7 +569,11 @@ buffers -- once; reuse the plan for every frame / constant set.
 
 Keywords (defaults in brackets):
 - `backend` [`CPU()`] -- `CUDABackend()` after `using CUDA`
-- `T` [`Float32`] -- working precision (consumer GPUs: Float32)
+- `T` [`Float32`] -- working precision of the march (consumer GPUs: Float32)
+- `Teval` [`T`] -- precision in which D itself is evaluated (mixed precision):
+  `Float16`, or an emulated `Float8_E4M3`, `Float8_E5M2`, `Float4_E2M1`, `BFloat16_emu`
+  (accuracy studies only -- GPUs have no scalar Float8/Float4 units). Narrow formats
+  overflow easily: write D in a rescaled frequency, see `scripts/precision_scaled.jl`
 - `method` [`:unwrap`] -- `:unwrap` (1 eval/step) or `:bs3` (validated port)
 - `schedule` [GPU: `:pixel`, CPU: `:queue`] -- `:pixel`, `:strided` or `:queue` (on a T4 the
   plain one-thread-per-point `:pixel` was fastest; `:queue` balances CPU threads best)
@@ -573,7 +595,8 @@ Keywords (defaults in brackets):
   task -- a CPU workgroup runs its items one after another, so a bigger group
   would let one item drain the whole queue), 64 for `:pixel`.
 """
-function plan_sweep(points; backend = CPU(), T::Type = Float32, method::Symbol = :unwrap,
+function plan_sweep(points; backend = CPU(), T::Type = Float32, Teval::Union{Nothing, Type} = nothing,
+                    method::Symbol = :unwrap,
                     schedule::Union{Nothing, Symbol} = nothing, nroots::Integer = 4, n_power,
                     σ = 0.0, ω0 = 1e-9, ω_max = nothing, tol = nothing, h0 = 1e-2,
                     hrel = 1.0, hmax = Inf, ωband = 0.0, maxsteps::Integer = 200_000,
@@ -592,7 +615,8 @@ function plan_sweep(points; backend = CPU(), T::Type = Float32, method::Symbol =
     lanes = something(lanes, cpu ? (schedule === :queue ? nt : 8 * nt) : 1 << 18)
     lanes = min(lanes, npts)
     workgroup = something(workgroup, cpu ? (schedule === :pixel ? 64 : 1) : 256)
-    mp = MarchParams{T}(T(σ), T(ω0), T(ω_max), T(h0), T(tol), T(tol), T(hrel), T(hmax),
+    TE = something(Teval, T)
+    mp = MarchParams{T, TE}(T(σ), T(ω0), T(ω_max), T(h0), T(tol), T(tol), T(hrel), T(hmax),
         T(ωband), T(n_power), Int32(maxsteps))
     dpts = KernelAbstractions.allocate(backend, eltype(hpts), npts)
     copyto!(dpts, hpts)
@@ -618,7 +642,7 @@ of constants passed to `D(λ, p, c)` (converted to the plan's `T`); changing
 function run!(p::SweepPlan{T, N}, D0::F, c = ()) where {T, N, F}
     be = p.backend
     D = D0 isa CharFn ? D0 : CharFn(D0)
-    cT = map(T, Tuple(c))
+    cT = map(evaltype(p.mp), Tuple(c))
     meth = Val(p.method)
     nr = Val(N)
     n = Int32(p.npts)
@@ -667,7 +691,7 @@ time `t` of the compute (kernel + sync, excluding upload and download).
 """
 function sweep(D, points; c = (), kw...)
     p = plan_sweep(points; kw...)
-    T = typeof(p.mp.σ)
+    T = evaltype(p.mp)
     check_eltype(D, first(points), c, T) || @warn "D(λ, p, c) promotes $(T) to a wider " *
         "type -- use constants from `c` or $(T) literals (e.g. 0.5f0) for full GPU speed" maxlog = 1
     t = @elapsed run!(p, D, c)
