@@ -357,3 +357,54 @@ function D_mill2r(μ, p, c::NTuple{L, TT}) where {L, TT}
     w2v = W2 * cinv(u2)
     return (1 + w1v * P11) * (1 + w2v * P22) - w1v * P12 * w2v * P21
 end
+
+# Normalized form of D_mill2r: the same determinant, cheaper per node. Row s of P only ever
+# appears divided by u_s (w_s = W_s/u_s at the end), and P_s· and u_s are scaled by the same ρ_s
+# -- so with A_st = P_st/u_s the scalings drop out, and with them every λ-dependent exponential
+# except E = e^{-λT} = 1/z (F is a function of the Floquet multiplier alone). What is left of the
+# node position is the ratio κ = u2/u1 = e^{-2i sζ ψ/ω}: a unit rotation, independent of λ (no
+# dual numbers), advanced by ϱ = e^{-2i sζ δ/ω} per node. B = T/(r1 - r2) · A absorbs the
+# constant factor of the update:
+#   y1 = h (k1 - B11 + κ B21),  y2 = h (B22 - k2 - κ̄ B12),  h = T/(r1 - r2) α c_i,
+#   B11 += y1,  B21 += κ̄ y1,  B22 += y2,  B12 += κ y2,  κ ← κ ϱ,
+#   F = (1 + v1 B11)(1 + v2 B22) - v1 B12 v2 B21,  v_s = W_s (r1 - r2)/T.
+# ~64 real multiplications per node instead of ~140 (dual numbers), 1 dual exponential per
+# evaluation instead of 3.
+function D_mill2n(μ, p, c::NTuple{L, TT}) where {L, TT}
+    Q = L - 6
+    rk, ap = p
+    ζ, w1 = c[1], c[2]
+    twoπ = TT(6.283185307179586)
+    ω = mill2q_ωp(p, c)
+    T = twoπ / ω
+    λ = μ * ω
+    w = w1 * ap
+    sζ = sqrt(1 - ζ * ζ)
+    r1 = Complex(-ζ, sζ)
+    E = exp(-λ * T)                                # 1/z
+    er1 = exp(r1 * T)
+    W1 = er1 * E
+    W2 = conj(er1) * E
+    Tr = T * Complex(zero(TT), -1 / (2 * sζ))      # T/(r1 - r2)
+    k1 = Tr * cinv(1 - W1)
+    k2 = Tr * cinv(1 - W2)
+    G = Tr * (w * (1 - E))
+    s2 = -2 * sζ / ω
+    κ = cis(s2 * c[6])                             # u2/u1 at the first node (x1 = c[6]/ω)
+    ϱ = cis(s2 * c[5])                             # node to node (δ = c[5]/ω)
+    B11 = zero(λ); B12 = zero(λ); B21 = zero(λ); B22 = zero(λ)
+    i = 1
+    while true
+        h = G * @inbounds(c[6 + i])
+        y1 = h * (k1 - B11 + κ * B21)
+        y2 = h * (B22 - k2 - conj(κ) * B12)
+        B11 += y1; B21 += conj(κ) * y1
+        B22 += y2; B12 += κ * y2
+        i == Q && break
+        κ *= ϱ
+        i += 1
+    end
+    iTr = cinv(Tr)
+    v1 = W1 * iTr; v2 = W2 * iTr
+    return (1 + v1 * B11) * (1 + v2 * B22) - v1 * B12 * v2 * B21
+end

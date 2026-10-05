@@ -23,10 +23,10 @@ nx, ny = 1920, 1080
 pts = grid_points(range(5.0, 25.0; length = nx), range(0.0, 5.0; length = ny))
 @printf("\n%-6s %-4s %-16s | %5s %9s %6s | %9s %8s | %9s %9s\n", "model", "Q", "T/Teval", "regs",
     "local[B]", "f64", "cuda128", "Mpts/s", "KA wg128", "KA wg256")
-for (mname, Dm) in (("mid", D_mill2m), ("rolled", D_mill2r)), Q in (8, 16),
+for (mname, Dm) in (("rolled", D_mill2r), ("normal", D_mill2n)), Q in (8, 16),
     (T, TE) in ((Float32, Float32), (Float32, Float16))
     plan = plan_sweep(pts; backend = BACKEND, T = T, Teval = TE, nroots = 1, n_power = 0, ω0 = 1e-9,
-        ω_max = 0.5, h0 = 1e-3, hrel = 0.05, schedule = :pixel)
+        ω_max = 0.5, h0 = 0.05, hrel = 0.25, schedule = :pixel)
     D = NG.CharFn(Dm)
     c = map(TE, mill2m_consts(Q = Q))
     n = Int32(length(pts))
@@ -45,7 +45,7 @@ for (mname, Dm) in (("mid", D_mill2m), ("rolled", D_mill2r)), Q in (8, 16),
     end
     tka = map((128, 256)) do wg
         g = plan_grid((5.0, 25.0), (0.0, 5.0), nx, ny; backend = BACKEND, T = T, Teval = TE, nroots = 1,
-            n_power = 0, ω0 = 1e-9, ω_max = 0.5, h0 = 1e-3, hrel = 0.05, schedule = :pixel, workgroup = wg)
+            n_power = 0, ω0 = 1e-9, ω_max = 0.5, h0 = 0.05, hrel = 0.25, schedule = :pixel, workgroup = wg)
         run!(g, Dm, c)
         minimum(timed(() -> run!(g, Dm, c)) for _ in 1:3)
     end
