@@ -164,14 +164,25 @@ display image):
 | Float16 + Float32 re-check | 25.6 ms (39 fps; 63 k points re-checked in 6.5 ms) | 85.4 ms (12 fps) | 315 ms (3 fps) |
 | Float32 | 70.0 ms (14 fps) | 248 ms (4 fps) | — |
 
-In the browser (the Colab page; full HD Float16 chart shown as a 960×540 image), the picture is
-different, because the transfer through the kernel channel costs more than the GPU work:
+The interactive example takes larger march steps on the circle (h0 = 0.05, hrel = 0.25 instead of
+1e−3 and 0.05). The counts are the same on the 12 800 test points, with 13.9 instead of 18.3
+evaluations per point, and the Float16 full HD kernel drops to 15.4 ms (134 Mpts/s).
 
-| image sent to the browser | requests in flight | time per frame |
-|---|---|---|
-| PNG | 1 | 117 ms (8.5 fps) |
-| JPEG, 114 KB, encoded in 2.4 ms | 1 | 77 ms (13 fps) |
-| JPEG (now the default) | 2: the next frame is computed while the last one travels | 41 ms (24 fps) |
+In the browser (the Colab page; full HD Float16 chart shown as a 960×540 image), the transfer,
+not the GPU, decided the frame rate. Each request through Colab, via the kernel channel or the
+port proxy alike, costs a ~55 ms round trip:
+
+| frames sent to the browser | time per frame |
+|---|---|
+| PNG through the kernel channel, one request per frame | 117 ms (8.5 fps) |
+| JPEG (114 KB, 2.4 ms to encode), one request per frame | 77 ms (13 fps) |
+| JPEG, two requests in flight | 41 ms (24 fps) |
+| **JPEG streamed through the port proxy** (now the default) | **17.9 ms (56 fps)** |
+
+In the stream mode, the page posts each new state, and a small HTTP server in the notebook renders the
+newest state as soon as the previous frame is out. It writes the frames into one open response, which
+the proxy passes through unbuffered. The frame rate is then that of the GPU plus the JPEG encoding.
+The latency from a slider move to its picture is one round trip plus one render, with no queue.
 
 For comparison, the dense Hill form of the same chart (`D_mill2`, tol 1e−2) takes about 1 s for
 480×270 on the same GPU.
