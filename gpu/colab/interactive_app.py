@@ -126,29 +126,32 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_error(404)
 
     def _stream(self):
-        # frames: [header length][image length] (big-endian uint32), header JSON, image bytes
+        # frames: [header length][image length] (big-endian uint32), header JSON, image bytes.
+        # The stream keeps ITS state object: after the cell is re-run (a new _ST), a stream of the
+        # old page must not take the new page's frames.
+        st = _ST
         self.send_response(200)
         self.send_header('Content-Type', 'application/octet-stream')
         self.send_header('Cache-Control', 'no-store')
         self.send_header('X-Accel-Buffering', 'no')
         self.end_headers()
-        with _ST.cv:
-            _ST.gen += 1
-            gen = _ST.gen
-            _ST.cv.notify_all()                   # an older stream (reloaded page) stops
+        with st.cv:
+            st.gen += 1
+            gen = st.gen
+            st.cv.notify_all()                    # an older stream (reloaded page) stops
         done = 0
         try:
             while True:
-                with _ST.cv:
-                    _ST.cv.wait_for(lambda: _ST.gen != gen or _ST.seq > done or _ST.burst, timeout=10)
-                    if _ST.gen != gen:
+                with st.cv:
+                    st.cv.wait_for(lambda: st.gen != gen or st.seq > done or st.burst, timeout=10)
+                    if st.gen != gen or st is not _ST:
                         return
                     k = 0
-                    if _ST.burst:
-                        q = _ST.burst.pop()
-                        k = len(_ST.burst) + 1    # countdown to 1
-                    elif _ST.seq > done:
-                        q, done = _ST.q, _ST.seq
+                    if st.burst:
+                        q = st.burst.pop()
+                        k = len(st.burst) + 1     # countdown to 1
+                    elif st.seq > done:
+                        q, done = st.q, st.seq
                     else:
                         q = None
                 if q is None:                     # keep-alive for the proxy
@@ -356,7 +359,7 @@ APP = r'''
   const now = performance.now();
   if (r.burst) {                                // benchmark frames, counting down to 1
    burstT.push(now);
-   if (r.burst === 1 && burstDone) { const t = burstT; burstDone((t[t.length - 1] - t[0]) / Math.max(t.length - 1, 1)); burstDone = null; }
+   if (r.burst === 1 && burstDone) burstDone();
    return;
   }
   const t0 = sentAt.get(r.seq);
@@ -365,9 +368,15 @@ APP = r'''
   rate(now, newer);                            // more states pending: the server renders back to back
   status(r, r.q, `latency ${t0 ? (now - t0).toFixed(0) : '?'} ms from the state to the picture (stream)`);
  }
- function burst(n) {
-  return new Promise(res => { burstT = []; burstDone = res; const p = params(); p.n = n; p.seq = sseq;
-                              fetch('burst', {method: 'POST', body: JSON.stringify(p)}); });
+ function burst(n) {                            // n frames of the same state, back to back
+  return new Promise(res => {
+   burstT = [];
+   const fin = () => { if (!burstDone) return; burstDone = null; const t = burstT;
+                       res(t.length > 1 ? (t[t.length - 1] - t[0]) / (t.length - 1) : NaN); };
+   burstDone = fin; setTimeout(fin, 15000);
+   const p = params(); p.n = n; p.seq = sseq;
+   fetch('burst', {method: 'POST', body: JSON.stringify(p)});
+  });
  }
  async function readStream() {
   const concat = cs => { const out = new Uint8Array(cs.reduce((s, c) => s + c.length, 0)); let o = 0;
