@@ -115,7 +115,9 @@ domain, but without truncating the harmonics:
   stable free-oscillator roots r_i and lie inside the circle. It also tends to 1 as z → ∞ (α → w).
   Its winding along |z| = 1 therefore counts the multipliers outside the circle. This is the
   generalized (MIMO) Nyquist criterion of the regenerative loop. The D factor (the sinh ratio of the
-  dense form) has no zeros there and drops out. By conjugate symmetry, half the circle suffices:
+  dense form) has only the stable free-oscillator zeros, so it drops out. A shift λ → λ + iω only
+  conjugates M by a diagonal phase matrix, so the determinant is single-valued in z. By conjugate
+  symmetry, half the circle suffices:
   Z = −Φ/π over μ = Im λ/ω ∈ [0, ½]. There is no strip offset a, no row scaling and no poles on the path.
 * **O(Q) evaluation.** S(Δ) is a sum of two exponentials in Δ, with an extra factor e^{−a_iT} when
   ψ_p < ψ_q. M is therefore a unit-lower-triangular semiseparable matrix plus a rank-2 term, and
@@ -150,9 +152,9 @@ closer to |z| = 1 than Float16 resolves, so the count was decided from the root'
 | Float32 | 36.9 ms (56 Mpts/s) | 69.6 ms (30 Mpts/s) | 167 / 0.9 KB |
 | Float16 evaluation | 10.1 ms (206 Mpts/s) | 17.4 ms (119 Mpts/s) | 120 / 0.3 KB |
 
-The unrolled forms (`D_mill2m`, `D_mill2s`) hit the 255-register limit and spill. The rolled loop and
-compiling the kernels without the refinement code (`Val(:none)`, which removes the extra inlined
-copies of D) brought the 2–4× speed-up over the first GPU version. The interactive server, Q = 16,
+The unrolled forms (`D_mill2m`, `D_mill2s`) hit the 255-register limit and spill. The rolled loop does
+not. When no root refinement is requested, the kernels are compiled without the refinement code
+(`Val(:none)`), which removes its extra inlined copies of D. The interactive server, Q = 16,
 first-order estimate, measured as a whole frame (kernel, colouring and the device-to-host copy of the
 display image):
 
@@ -161,6 +163,15 @@ display image):
 | Float16 | 19–22 ms (46–53 fps) | 64.5 ms (15 fps) | 243 ms (4 fps) |
 | Float16 + Float32 re-check | 25.6 ms (39 fps; 63 k points re-checked in 6.5 ms) | 85.4 ms (12 fps) | 315 ms (3 fps) |
 | Float32 | 70.0 ms (14 fps) | 248 ms (4 fps) | — |
+
+In the browser (the Colab page; full HD Float16 chart shown as a 960×540 image), the picture is
+different, because the transfer through the kernel channel costs more than the GPU work:
+
+| image sent to the browser | requests in flight | time per frame |
+|---|---|---|
+| PNG | 1 | 117 ms (8.5 fps) |
+| JPEG, 114 KB, encoded in 2.4 ms | 1 | 77 ms (13 fps) |
+| JPEG (now the default) | 2: the next frame is computed while the last one travels | 41 ms (24 fps) |
 
 For comparison, the dense Hill form of the same chart (`D_mill2`, tol 1e−2) takes about 1 s for
 480×270 on the same GPU.
@@ -177,6 +188,12 @@ three time-independent ones:
 Model constants are sliders: κ, ε for Mathieu; ζ, a/D, K_n/K_t for Test 2; ζ, a/D, β₂ for Test 3.
 
 ## Not done yet
+* The compressed determinant for Test 3 (helix: nodes over the window × the axial slices, a
+  distributed delay per node, spindle period) and for multi-DOF models (S becomes a matrix sum of 2n
+  exponentials, so the semiseparable rank grows to 2n).
+* The F32 kernel runs at a few per cent of the GPU's FMA peak: it is bound by latency and occupancy
+  (one serial recursion per thread, 167 registers). Splitting the nodes over 2–4 threads per point,
+  or evaluating two frequency samples per pass, would give the scheduler independent work.
 * Banded/shifted truncation and Schur-complement ring growth (not needed for Mathieu: N = 9
   everywhere; becomes relevant for milling with many harmonics).
 * Schur-complement ring growth (N is re-factorized per ring in the a-posteriori check) and the banded
