@@ -26,86 +26,89 @@ if !@isdefined(cinv)        # shared with gpu_models.jl
     end
 end
 
-# fully unrolled LU with branch-free partial pivoting of a Q x Q matrix given as a tuple of rows;
-# every entry is a local variable (registers), no indexing at run time
-@generated function det_unrolled(A::NTuple{Q, NTuple{Q, T}}) where {Q, T}
-    a(i, j) = Symbol(:a_, i, :_, j)
-    ex = Expr(:block)
-    for i in 1:Q, j in 1:Q
-        push!(ex.args, :($(a(i, j)) = @inbounds A[$i][$j]))
-    end
-    push!(ex.args, :(d = one(T)))
+# Code generation: a Q x Q LU with branch-free partial pivoting on scalar variables a_i_j
+# (registers; no arrays, no run-time indexing), leaving the determinant in `d`.
+_a(i, j) = Symbol(:a_, i, :_, j)
+function lu_exprs(Q)
+    ex = Any[:(d = one(a_1_1))]
     for k in 1:Q
         if k < Q
-            push!(ex.args, :(pk = $k))
-            push!(ex.args, :(best = _mag2($(a(k, k)))))
+            push!(ex, :(pk = $k))
+            push!(ex, :(best = _mag2($(_a(k, k)))))
             for i in (k + 1):Q
-                push!(ex.args, :(v = _mag2($(a(i, k)))))
-                push!(ex.args, :(pk = ifelse(v > best, $i, pk)))
-                push!(ex.args, :(best = ifelse(v > best, v, best)))
+                push!(ex, :(v = _mag2($(_a(i, k)))))
+                push!(ex, :(pk = ifelse(v > best, $i, pk)))
+                push!(ex, :(best = ifelse(v > best, v, best)))
             end
-            for i in (k + 1):Q, j in k:Q        # swap row k with row pk (at most one i matches)
-                push!(ex.args, quote
-                    s = pk == $i
-                    t = $(a(k, j))
-                    $(a(k, j)) = ifelse(s, $(a(i, j)), t)
-                    $(a(i, j)) = ifelse(s, t, $(a(i, j)))
-                end)
+            for i in (k + 1):Q, j in k:Q            # swap row k with row pk (at most one i matches)
+                push!(ex, :(s = pk == $i))
+                push!(ex, :(t = $(_a(k, j))))
+                push!(ex, :($(_a(k, j)) = ifelse(s, $(_a(i, j)), t)))
+                push!(ex, :($(_a(i, j)) = ifelse(s, t, $(_a(i, j)))))
             end
-            push!(ex.args, :(d = ifelse(pk == $k, d, -d)))
+            push!(ex, :(d = ifelse(pk == $k, d, -d)))
         end
-        push!(ex.args, :(d *= $(a(k, k))))
+        push!(ex, :(d *= $(_a(k, k))))
         if k < Q
-            push!(ex.args, :(ip = cinv($(a(k, k)))))
+            push!(ex, :(ip = cinv($(_a(k, k)))))
             for i in (k + 1):Q
-                push!(ex.args, :(f = $(a(i, k)) * ip))
+                push!(ex, :(f = $(_a(i, k)) * ip))
                 for j in (k + 1):Q
-                    push!(ex.args, :($(a(i, j)) -= f * $(a(k, j))))
+                    push!(ex, :($(_a(i, j)) -= f * $(_a(k, j))))
                 end
             end
         end
     end
-    push!(ex.args, :(return d))
     return ex
 end
 
 # p = (rpm/1000, a_p [mm]);  c = (ζ, w1, z, f_n, ψ_1..ψ_Q (ascending), c_1..c_Q)
 mill2q_ωp(p, c) = c[3] * p[1] * 1000 / (60 * c[4])
 
-function D_mill2q(μ, p, c)
-    rk, ap = p
-    ζ, w1, z, fn = c[1], c[2], c[3], c[4]
-    Q = (length(c) - 4) ÷ 2
-    TT = typeof(ζ)
-    twoπ = TT(6.283185307179586)
-    ω = mill2q_ωp(p, c)
-    T = twoπ / ω
-    λ = μ * ω
-    w = w1 * ap
-    sζ = sqrt(1 - ζ * ζ)
-    r1 = Complex(-ζ, sζ)                       # r2 = conj(r1)
-    E = exp(-λ * T)                            # e^{-λT} = 1/z
-    α = w * (1 - E)
-    er1 = exp(r1 * T)
-    W1 = er1 * E                               # e^{-a1 T}
-    W2 = conj(er1) * E                         # e^{-a2 T}
-    inv2is = Complex(zero(TT), -1 / (2 * sζ))  # 1/(r1 - r2)
-    k1 = T * inv2is * cinv(1 - W1)
-    k2 = T * inv2is * cinv(1 - W2)
-    # separable exponentials: e^{-a_i ψ/ω} = e^{-λψ/ω} e^{r_i ψ/ω}
-    u1 = ntuple(i -> exp(-λ * (c[4 + i] / ω)) * exp(r1 * (c[4 + i] / ω)), Val(Q))
-    u2 = ntuple(i -> exp(-λ * (c[4 + i] / ω)) * exp(conj(r1) * (c[4 + i] / ω)), Val(Q))
-    v1 = map(cinv, u1)
-    v2 = map(cinv, u2)
-    M = ntuple(pp -> ntuple(qq -> begin
-            e1 = u1[pp] * v1[qq]
-            e2 = u2[pp] * v2[qq]
-            wrap = pp < qq                     # Δ = ψ_p - ψ_q < 0: wrapped by one period
-            e1 = ifelse(wrap, e1 * W1, e1)
-            e2 = ifelse(wrap, e2 * W2, e2)
-            ifelse(pp == qq, one(λ), zero(λ)) + α * c[4 + Q + qq] * (k1 * e1 - k2 * e2)
-        end, Val(Q)), Val(Q))
-    return det_unrolled(M)
+# the whole characteristic function generated for the number of nodes Q = (length(c) - 4) / 2
+@generated function D_mill2q(μ, p, c::NTuple{L, TT}) where {L, TT}
+    Q = (L - 4) ÷ 2
+    ex = Any[quote
+        rk, ap = p
+        ζ, w1 = c[1], c[2]
+        twoπ = TT(6.283185307179586)
+        ω = mill2q_ωp(p, c)
+        T = twoπ / ω
+        λ = μ * ω
+        w = w1 * ap
+        sζ = sqrt(1 - ζ * ζ)
+        r1 = Complex(-ζ, sζ)                     # r2 = conj(r1)
+        E = exp(-λ * T)                          # e^{-λT} = 1/z
+        α = w * (1 - E)
+        er1 = exp(r1 * T)
+        W1 = er1 * E                             # e^{-a1 T}
+        W2 = conj(er1) * E                       # e^{-a2 T}
+        inv2is = Complex(zero(TT), -1 / (2 * sζ))
+        k1 = T * inv2is * cinv(1 - W1)
+        k2 = T * inv2is * cinv(1 - W2)
+        iω = 1 / ω
+    end]
+    for i in 1:Q                                 # e^{∓a_i ψ/ω} = e^{∓λψ/ω} e^{±r_i ψ/ω} per node
+        push!(ex, quote
+            $(Symbol(:x_, i)) = c[$(4 + i)] * iω
+            $(Symbol(:el_, i)) = exp(-λ * $(Symbol(:x_, i)))
+            $(Symbol(:er_, i)) = exp(r1 * $(Symbol(:x_, i)))
+            $(Symbol(:u1_, i)) = $(Symbol(:el_, i)) * $(Symbol(:er_, i))
+            $(Symbol(:u2_, i)) = $(Symbol(:el_, i)) * conj($(Symbol(:er_, i)))
+            $(Symbol(:v1_, i)) = cinv($(Symbol(:u1_, i)))
+            $(Symbol(:v2_, i)) = cinv($(Symbol(:u2_, i)))
+            $(Symbol(:g_, i)) = α * c[$(4 + Q + i)]
+        end)
+    end
+    for i in 1:Q, j in 1:Q                       # M_ij = δ_ij + α c_j S(ψ_i - ψ_j)
+        e1 = i < j ? :($(Symbol(:u1_, i)) * $(Symbol(:v1_, j)) * W1) : :($(Symbol(:u1_, i)) * $(Symbol(:v1_, j)))
+        e2 = i < j ? :($(Symbol(:u2_, i)) * $(Symbol(:v2_, j)) * W2) : :($(Symbol(:u2_, i)) * $(Symbol(:v2_, j)))
+        diag = i == j ? :(one(λ)) : :(zero(λ))
+        push!(ex, :($(_a(i, j)) = $diag + $(Symbol(:g_, j)) * (k1 * $e1 - k2 * $e2)))
+    end
+    append!(ex, lu_exprs(Q))
+    push!(ex, :(return d))
+    return Expr(:block, ex...)
 end
 
 # --- host side: quadrature nodes of the cutting window(s) in the tooth phase ψ ∈ [0, 2π) ----
