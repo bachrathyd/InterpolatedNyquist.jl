@@ -137,7 +137,7 @@ APP = r'''
  function reset() { const e = EX[$('ex').value]; buildKnobs(e); setView(...e.xr, ...e.yr);
                     $('smin').value = e.smin; $('sminv').textContent = e.smin;
                     // time-periodic (Hill) examples: Float32/Float64, Newton polish, no ω_max
-                    if (e.hill) { if (isF16()) $('fmt').value = 'F32'; if ($('ref').value === 'count') $('ref').value = 'newton'; }
+                    if (e.hill) { if (isF16() && !e.f16) $('fmt').value = 'F32'; if ($('ref').value === 'count') $('ref').value = 'none'; }
                     if (e.res) $('res').value = e.res;   // heavy examples start at a low resolution
                     $('wm').disabled = !!e.hill; showW(); $('note').textContent = e.note || ''; go(); }
  function params() {
@@ -185,7 +185,7 @@ APP = r'''
  function pan(dx, dy) { const sx = (+$('x1').value - +$('x0').value) * dx, sy = (+$('y1').value - +$('y0').value) * dy;
   setView(+$('x0').value + sx, +$('x1').value + sx, +$('y0').value + sy, +$('y1').value + sy); go(); }
  $('ex').onchange = reset; $('res').onchange = go; $('ref').onchange = go;
- $('fmt').onchange = () => { if (EX[$('ex').value].hill && isF16()) $('fmt').value = 'F32'; defaultW(); go(); };
+ $('fmt').onchange = () => { const e = EX[$('ex').value]; if (e.hill && isF16() && !e.f16) $('fmt').value = 'F32'; defaultW(); go(); };
  $('wm').oninput = () => { showW(); go(); };
  $('smin').oninput = () => { $('sminv').textContent = $('smin').value; go(); };
  $('bnd').onchange = go; $('flg').onchange = go;

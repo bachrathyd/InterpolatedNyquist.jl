@@ -41,11 +41,23 @@ const EXAMPLES = Any[
 const HILL_MODELS = joinpath(@__DIR__, "..", "..", "hill", "gpu_models.jl")
 if isfile(HILL_MODELS)
     include(HILL_MODELS)
+    include(joinpath(@__DIR__, "..", "..", "hill", "gpu_fast.jl"))
     const HKW = (ω0 = A_STRIP, ω_max = A_STRIP + 1, h0 = 1e-3, hrel = 0.05)
     const HKWM = (ω0 = A_STRIP, ω_max = A_STRIP + 1, h0 = 1e-3, hrel = 0.1)   # milling: fewer samples
     const MEMO = Dict{Any, Any}()
     memo(f, k) = get!(() -> f(), MEMO, k)
+    const HKWQ = (ω0 = 1e-9, ω_max = 0.5, h0 = 1e-3, hrel = 0.05)    # half circle |z| = 1
     push!(EXAMPLES,
+        (key = "mill2q", ω16 = 0.0, smin = -0.04, hill = true, zdiv = 1, f16 = true, ωp = mill2q_ωp,
+         cfun = c -> memo(() -> mill2q_consts(ζ = c[1], aD = c[2], kr = c[3], Q = 8), (:m2q, c)), res = "1920x1080",
+         note = "1-DOF milling, straight flutes, z = 2, down milling, f_n = 922 Hz: Hill determinant compressed to " *
+                "8 x 8 (cutting-window quadrature + matrix determinant lemma, all harmonics in closed form), " *
+                "counted along the unit circle of the Floquet multiplier",
+         sys = (title = "milling, straight flutes (Test 2, compressed Hill, fast)", D = D_mill2q,
+                c = (0.011, 0.05, 1 / 3), npow = 0, xr = (5.0, 25.0), yr = (0.0, 5.0), xl = "rpm/1000",
+                yl = "a_p [mm]", kw = HKWQ),
+         knobs = [(i = 1, name = "damping ζ", lo = 0.002, hi = 0.05), (i = 2, name = "immersion a/D", lo = 0.02, hi = 1.0),
+                  (i = 3, name = "K_n/K_t", lo = 0.0, hi = 1.0)]),
         (key = "mathieu", ω16 = 0.0, smin = -0.3, hill = true, ωp = mathieu_ωp,
          cfun = c -> mathieu_consts(c[1], c[2]),
          note = "x'' + κx' + (δ + ε cos t)x = b x(t - 2π); Hill determinant, harmonics derived per point",
@@ -94,7 +106,7 @@ function meta_json()
         "{\"key\":$(jstr(e.key)),\"title\":$(jstr(s.title)),\"xr\":$(jvec(collect(s.xr)))," *
         "\"yr\":$(jvec(collect(s.yr))),\"xl\":$(jstr(s.xl)),\"yl\":$(jstr(s.yl))," *
         "\"c\":$(jvec(collect(s.c))),\"smin\":$(e.smin),\"knobs\":[$knobs]," *
-        "\"hill\":$(ishill(e)),\"note\":$(jstr(ishill(e) ? e.note : "")),\"res\":$(jstr(hasproperty(e, :res) ? e.res : ""))}"
+        "\"hill\":$(ishill(e)),\"f16\":$(hasproperty(e, :f16) && e.f16),\"note\":$(jstr(ishill(e) ? e.note : "")),\"res\":$(jstr(hasproperty(e, :res) ? e.res : ""))}"
     end
     fmts = join(["[$(jstr(k)),$(jstr(l))]" for (k, l) in FORMAT_LABELS], ",")
     refs = join(["[$(jstr(k)),$(jstr(l))]" for (k, l) in REFINES], ",")
@@ -232,7 +244,7 @@ function render(a)
     e = EXBYKEY[a["ex"]]
     fmt = a["fmt"]
     haskey(FORMATS, fmt) || error("unknown format $fmt")
-    ishill(e) && startswith(fmt, "F16") && (fmt = "F32")     # Hill determinants: Float32/Float64 only
+    ishill(e) && startswith(fmt, "F16") && !(hasproperty(e, :f16) && e.f16) && (fmt = "F32")   # Float16 only where tested
     nx, ny = parse(Int, a["nx"]), parse(Int, a["ny"])
     xr = (parse(Float64, a["x0"]), parse(Float64, a["x1"]))
     yr = (parse(Float64, a["y0"]), parse(Float64, a["y1"]))
@@ -267,7 +279,8 @@ function render(a)
     t0 = time_ns()
     run!(plan, e.sys.D, c)
     if ishill(e)                  # Z_raw = 2Z over the strip; σ from μ- to λ-units
-        plan.Zraw ./= 2
+        zdiv = hasproperty(e, :zdiv) ? e.zdiv : 2
+        zdiv == 1 || (plan.Zraw ./= zdiv)
         cT = map(eltype(plan.sigma), c)
         plan.sigma .*= e.ωp.(plan.points, Ref(cT))
         KernelAbstractions.synchronize(BACKEND)
