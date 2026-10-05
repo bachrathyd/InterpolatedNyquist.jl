@@ -14,11 +14,11 @@ cpts = grid_points(range(xr...; length = cx), range(yr...; length = cy))
 ref = sweep(D_mill2s, cpts; c = mill2q_consts(Q = 64), backend = CPU(), kwq(Float64)...)
 Zref = round.(Int, ref.Zraw)
 println("reference: CPU, Float64, semiseparable Q = 64, $(cx)x$(cy) points, unstable $(round(100count(>(0), Zref) / length(Zref); digits = 1)) %")
-cases = [(:semi, 8), (:semi, 16), (:semi, 32), (:dense, 4)]
+cases = [(:mid, 8), (:mid, 12), (:mid, 16), (:mid, 24), (:mid, 32), (:semi, 8)]
 for (kind, Q) in cases, (T, TE) in ((Float32, Float32), (Float32, Float16))
-    D = kind === :semi ? D_mill2s : D_mill2q
-    c = mill2q_consts(Q = Q)
-    lab = (kind === :semi ? "O(Q) " : "LU   ") * (TE === T ? string(T) : "$(T)/$(TE)")
+    D = kind === :mid ? D_mill2m : (kind === :semi ? D_mill2s : D_mill2q)
+    c = kind === :mid ? mill2m_consts(Q = Q) : mill2q_consts(Q = Q)
+    lab = (kind === :mid ? "mid  " : kind === :semi ? "O(Q) " : "LU   ") * (TE === T ? string(T) : "$(T)/$(TE)")
     try
         r = sweep(D, cpts; c = c, backend = BACKEND, lanes = default_lanes(), kwq(T, TE)...)
         Z = round.(Int, r.Zraw)

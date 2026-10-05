@@ -235,3 +235,81 @@ end
     push!(ex, :(return (1 + W1 * P11) * (1 + W2 * P22) - W1 * P12 * W2 * P21))
     return Expr(:block, ex...)
 end
+
+# ---------------------------------------------------------------------------------------------
+# Fastest form: equispaced (midpoint-rule) nodes + rescaled recursion. With constant node
+# spacing δ the propagators ρ_s = e^{-a_s δ/ω} are the same for every node (2 exponentials per
+# evaluation instead of 2 per node), and the scaled sums P̃_st = u_s(i) P_st obey
+#   Y_i[t] = κ_t u_t(i) - T/(r1 - r2) (P̃_1t - P̃_2t),   P̃_st ← ρ_s (P̃_st + α c_i Y_i[t]),
+# (κ_1 = k1, κ_2 = -k2) -- no reciprocals inside the loop; ~14 complex multiply-adds per node.
+# c = (ζ, w1, z, f_n, δψ, ψ_1, c_1..c_Q); single cutting window per tooth period (z(φex-φen) ≤ 2π).
+# ---------------------------------------------------------------------------------------------
+@generated function D_mill2m(μ, p, c::NTuple{L, TT}) where {L, TT}
+    Q = L - 6
+    ex = Any[quote
+        rk, ap = p
+        ζ, w1 = c[1], c[2]
+        twoπ = TT(6.283185307179586)
+        ω = mill2q_ωp(p, c)
+        T = twoπ / ω
+        λ = μ * ω
+        w = w1 * ap
+        sζ = sqrt(1 - ζ * ζ)
+        r1 = Complex(-ζ, sζ)
+        E = exp(-λ * T)
+        α = w * (1 - E)
+        er1 = exp(r1 * T)
+        W1 = er1 * E
+        W2 = conj(er1) * E
+        Tr = T * Complex(zero(TT), -1 / (2 * sζ))
+        k1 = Tr * cinv(1 - W1)
+        k2 = Tr * cinv(1 - W2)
+        δ = c[5] / ω
+        x1 = c[6] / ω
+        el = exp(-λ * δ); er = exp(r1 * δ)
+        ρ1 = el * er; ρ2 = el * conj(er)
+        e1 = exp(-λ * x1); f1 = exp(r1 * x1)
+        u1 = e1 * f1; u2 = e1 * conj(f1)
+        P11 = zero(λ); P12 = zero(λ); P21 = zero(λ); P22 = zero(λ)
+    end]
+    for i in 1:Q
+        push!(ex, quote
+            g = α * c[$(6 + i)]
+            Y1 = k1 * u1 - Tr * (P11 - P21)
+            Y2 = -k2 * u2 - Tr * (P12 - P22)
+            P11 += g * Y1; P12 += g * Y2; P21 += g * Y1; P22 += g * Y2
+        end)
+        if i < Q
+            push!(ex, quote
+                P11 *= ρ1; P12 *= ρ1; P21 *= ρ2; P22 *= ρ2
+                u1 *= ρ1; u2 *= ρ2
+            end)
+        end
+    end
+    push!(ex, quote
+        w1v = W1 * cinv(u1)                        # W_s / u_s(ψ_Q)
+        w2v = W2 * cinv(u2)
+        return (1 + w1v * P11) * (1 + w2v * P22) - w1v * P12 * w2v * P21
+    end)
+    return Expr(:block, ex...)
+end
+
+function mill2m_consts(; ζ = 0.011, aD = 0.05, kr = 1 / 3, down = true, z = 2, w1 = 0.4478,
+                       fn = 922.0, Q = 16)
+    φen, φex = down ? (acos(2aD - 1), Float64(π)) : (0.0, acos(1 - 2aD))
+    Lw = z * (φex - φen)
+    Lw <= 2π + 1e-12 || error("mill2m: the cutting window exceeds one tooth period (use D_mill2q/D_mill2s)")
+    δ = Lw / Q
+    cc = [begin
+        ψi = (i - 0.5) * δ
+        φ = φen + ψi / z
+        δ * sin(φ) * (cos(φ) + kr * sin(φ)) / 2π
+    end for i in 1:Q]
+    return (ζ, w1, Float64(z), fn, δ, δ / 2, cc...)
+end
+# the same nodes for the general forms (consistency check)
+function mill2m_as_q(cm)
+    Q = length(cm) - 6
+    ψ = [cm[6] + (i - 1) * cm[5] for i in 1:Q]
+    return (cm[1:4]..., ψ..., cm[7:end]...)
+end
