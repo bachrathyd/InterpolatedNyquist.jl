@@ -44,17 +44,30 @@ md("## 1. Settings")
 code(r"""
 REPO          = "https://github.com/bachrathyd/InterpolatedNyquist.jl"
 BRANCH        = "gpu-cuda"
-DRIVE_FOLDER  = "NyquistGPU"   # folder in *My Drive* that receives the results (created if missing);
-                               # a nested path such as "Research/NyquistGPU" works too
+DRIVE_FOLDER  = "Colab Notebooks/InterpolatedNyquist"   # folder in *My Drive* for the results
+                                                        # (created if missing)
 JULIA_CHANNEL = "1.12"         # juliaup channel (the branch is tested with Julia 1.12)
+
+import os, subprocess
+
+def sh(cmd, log=None):
+    "Run a shell command, stream its output (and append it to `log`), and STOP on failure."
+    p = subprocess.Popen(cmd, shell=True, executable='/bin/bash', text=True, bufsize=1,
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    with (open(log, 'a') if log else open(os.devnull, 'w')) as f:
+        for line in p.stdout:
+            print(line, end='')
+            f.write(line)
+    if p.wait() != 0:
+        raise RuntimeError(f'command failed (exit code {p.returncode}) -- see the output above')
 """)
 
 md("## 2. GPU and Google Drive")
 code(r"""
-!nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv
+sh('nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv')
 """)
 code(r"""
-import os, datetime, subprocess
+import datetime
 from google.colab import drive
 drive.mount('/content/drive')
 
@@ -76,22 +89,21 @@ print('results ->', RUN)
 
 md("## 3. Julia (juliaup, ~1 min)")
 code(r"""
-import os
 os.environ['PATH'] = '/root/.juliaup/bin:' + os.environ['PATH']
 os.environ['JULIA_NUM_THREADS'] = 'auto'
 if not os.path.exists('/root/.juliaup/bin/julia'):
-    !curl -fsSL https://install.julialang.org | sh -s -- --yes --default-channel {JULIA_CHANNEL} > /dev/null
-!julia --version
+    sh(f'curl -fsSL https://install.julialang.org | sh -s -- --yes --default-channel {JULIA_CHANNEL} > /dev/null')
+sh('julia --version')
 """)
 
 md("## 4. Code (clone or update the branch)")
 code(r"""
 REPO_DIR = '/content/InterpolatedNyquist.jl'
 if os.path.isdir(REPO_DIR):
-    !cd {REPO_DIR} && git fetch -q --depth 1 origin {BRANCH} && git reset -q --hard FETCH_HEAD
+    sh(f'cd {REPO_DIR} && git fetch -q --depth 1 origin {BRANCH} && git reset -q --hard FETCH_HEAD')
 else:
-    !git clone -q -b {BRANCH} --depth 1 {REPO} {REPO_DIR}
-!cd {REPO_DIR} && git log -1 --format='%h  %ad  %s' --date=short
+    sh(f'git clone -q -b {BRANCH} --depth 1 {REPO} {REPO_DIR}')
+sh(f"cd {REPO_DIR} && git log -1 --format='%h  %ad  %s' --date=short")
 """)
 
 md("""
@@ -100,22 +112,22 @@ Installs CUDA.jl, KernelAbstractions and NyquistGPU, downloads the matching CUDA
 and prints the CUDA configuration.
 """)
 code(r"""
-!cd {REPO_DIR} && julia --project=gpu/scripts -e 'using Pkg; Pkg.instantiate(); Pkg.precompile(); using CUDA; CUDA.versioninfo()'
+sh(f"cd {REPO_DIR} && julia --project=gpu/scripts -e 'using Pkg; Pkg.instantiate(); Pkg.precompile(); using CUDA; CUDA.versioninfo()'")
 """)
 
 md("""
 ## 6. Checks
 * **GPU vs CPU**: the same kernels on the GPU and on the CPU backend must give the same
   counts on every unflagged point (the CPU backend is validated against the CPU package
-  `InterpolatedNyquist.jl`, see `gpu/validate/`). Must end with `PASS`.
+  `InterpolatedNyquist.jl`, see `gpu/validate/`). Must end with `PASS` (otherwise the run stops here).
 * Optional: the package unit tests (analytic Hayes region, 3-D point lists, flags), CPU only.
 """)
 code(r"""
-!cd {REPO_DIR} && julia --project=gpu/scripts gpu/scripts/gpu_check.jl --n 128 2>&1 | tee "{RUN}/gpu_check.log"
+sh(f'cd {REPO_DIR} && julia --project=gpu/scripts gpu/scripts/gpu_check.jl --n 128', log=f'{RUN}/gpu_check.log')
 """)
 code(r"""
 # optional (~2 min):
-# !cd {REPO_DIR} && julia --project=gpu -t auto -e 'using Pkg; Pkg.test()'
+# sh(f"cd {REPO_DIR} && julia --project=gpu -t auto -e 'using Pkg; Pkg.test()'")
 """)
 
 md("""
@@ -125,17 +137,20 @@ schedules (`pixel` = one thread per point, `strided` = statistical load balancin
 `queue` = persistent threads with an atomic work queue). Also times a "slider loop" (a
 constant changes every frame) at full HD. Each new configuration compiles once (~10–30 s).
 
-Faster variant: `--systems showcase --res 512,1920x1080 --T Float32 --schedules queue`
+Faster variant: add `--systems showcase --res 512,1920x1080 --T Float32 --schedules queue`
 """)
 code(r"""
-!cd {REPO_DIR} && julia --project=gpu/scripts gpu/scripts/bench_ladder.jl --out "{RUN}" 2>&1 | tee "{RUN}/bench.log"
+sh(f'cd {REPO_DIR} && julia --project=gpu/scripts gpu/scripts/bench_ladder.jl --out "{RUN}"',
+   log=f'{RUN}/bench.log')
 """)
 
 md("## 8. Results")
 code(r"""
 import glob, pandas as pd
-csv = sorted(glob.glob(f'{RUN}/bench_*.csv'))[-1]
-df = pd.read_csv(csv)
+csvs = sorted(glob.glob(f'{RUN}/bench_*.csv'))
+if not csvs:
+    raise RuntimeError(f'no bench_*.csv in {RUN} -- the benchmark cell did not finish')
+df = pd.read_csv(csvs[-1])
 print('kernel time [ms], median of the repetitions:')
 display(df.pivot_table(index=['system', 'nx', 'ny', 'method', 'T'], columns='schedule',
                        values='t_med_ms').round(3))
@@ -155,8 +170,8 @@ md("""
 of any length, `c` constants), an arbitrary point list (a chart is `grid_points(xs, ys)`),
 a Float32 GPU sweep, a Float64 re-check of the flagged points, and the saved field.
 
-1. Run the next cell once. It copies the template to `gpu/scripts/my_model.jl` and to your Drive folder.
-2. Edit the copy in your Drive folder: double-click `my_model.jl` in the Files pane under `drive/MyDrive/...`.
+1. Run the next cell once. It copies the template to `my_model.jl` in your Drive folder.
+2. Edit that copy: double-click `my_model.jl` in the Files pane under `drive/MyDrive/...`.
 3. Run the cell after it.
 
 Rules for `D`: write it as an **entire** function (multiply out rational denominators; stable poles
@@ -172,7 +187,7 @@ print('edit this file:', MY)
 """)
 code(r"""
 shutil.copy(MY, f'{REPO_DIR}/gpu/scripts/my_model.jl')
-!cd {REPO_DIR} && julia --project=gpu/scripts gpu/scripts/my_model.jl --out "{RUN}" --res 1920x1080
+sh(f'cd {REPO_DIR} && julia --project=gpu/scripts gpu/scripts/my_model.jl --out "{RUN}" --res 1920x1080')
 fig = plot_fields.plot_all(RUN, f'{RUN}/charts.png')
 """)
 
