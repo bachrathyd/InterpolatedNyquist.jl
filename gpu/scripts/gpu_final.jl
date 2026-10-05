@@ -73,9 +73,9 @@ for (label, kw) in cases
             run!(plan, kw.D, kw.c)
             recheck!(fetch_result(plan), sys.D, pts; rkw...)
         end
-        @printf("%-32s %10.2f   (Float16 sweep + Float64 re-check of the flagged points)\n",
+        @printf("%-32s %10.2f   (Float16 sweep + Float32 re-check of the flagged points)\n",
             "Float16 + recheck  total", 1e3t)
-        push!(rows, join([dev, "Float16 + Float64 recheck total", round(1e3t; digits = 3), "", "", "", "", "", ""], ','))
+        push!(rows, join([dev, "Float16 + Float32 recheck total", round(1e3t; digits = 3), "", "", "", "", "", ""], ','))
     end
 end
 # slider loop: the delay changes every frame, results copied to the host
