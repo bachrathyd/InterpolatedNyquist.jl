@@ -101,9 +101,12 @@ cross-validation of both (Section~\ref{sec:showcase}).
 
 The complete chart-generation recipe used throughout the paper is:
 \begin{enumerate}
-  \item \emph{Coarse colored sweep.} Multithreaded evaluation
-    of~\eqref{eq:phaseode} on a coarse grid; plot the combined
-    field~\eqref{eq:coloring}. Cost: a fraction of a second to a few seconds.
+  \item \emph{Colored sweep.} Multithreaded evaluation on a grid -- with the
+    discrete march of Section~\ref{sec:unwrap} for an entire $\Dfun$, with
+    the phase ODE~\eqref{eq:phaseode} otherwise; plot the combined
+    field~\eqref{eq:coloring}. Cost: tens of milliseconds for a
+    $100\times100$ grid with the discrete march (on a GPU, milliseconds for
+    a full-HD grid), up to a few seconds with the phase ODE.
   \item \emph{Boundary tracing.} MDBM on the scalar
     objective~\eqref{eq:objective}, typically $4$ refinement levels from a
     $20\times20$--$30\times30$ initial mesh. Cost: comparable to or below

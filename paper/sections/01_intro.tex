@@ -111,15 +111,27 @@ frequency range poses an additional truncation problem.
 
 This paper revisits the integration-based Nyquist criterion and turns it into
 a fast and robust tool with \emph{interpolable} output -- fast enough that a
-complete chart of a simpler system regenerates in a fraction of a second,
-i.e., at near-real-time, interactive rates. The contributions are the
+complete chart regenerates in tens of milliseconds on a desktop processor
+and a full-HD chart in milliseconds on a graphics processor, i.e., at
+real-time, interactive rates. The contributions are the
 following. (i)~The winding integral is reformulated as a scalar ordinary
 differential equation for the phase, marched by a high-order adaptive
 integrator~\cite{verner2010numerically,tsitouras2011runge,rackauckas2017differentialequations}
 whose step-size control resolves the near-singular peaks and crosses the
 practically unbounded frequency range, with the integrand evaluated exactly
 by forward-mode automatic differentiation~\cite{revels2016forward}.
-(ii)~The location of the
+(ii)~Since the count needs only the end value of the continuous phase, the
+integration can be dropped altogether: the exact phase increments between
+adaptively placed samples are summed (discrete phase unwrapping), and the
+exact phase slope from the same automatic derivatives drives an
+ODE-style step-size control that rejects any step hiding a root transition.
+This integration-free march needs one evaluation of $\Dfun$ per step and
+tens of evaluations per parameter point, is one to two orders of magnitude
+faster than the phase ODE on the CPU and more robust near the boundary, and
+-- consisting of identical scalar steps on a fixed-size state -- maps
+directly onto GPUs, where full-HD charts are computed in milliseconds in
+single and half precision.
+(iii)~The location of the
 characteristic root closest to the integration line -- normally the rightmost
 root -- is estimated \emph{during the same sweep} at negligible extra cost; the
 first-order estimate is the smooth, sign-correct default, and an optional local
@@ -128,23 +140,23 @@ for a modest fraction of the cost when an accurate root is wanted. Tracking
 several local minima yields multiple roots at once. This ordered march is what
 distinguishes the phase ODE from plain quadrature, whose recursive subdivision
 visits the frequencies out of order and cannot recognize the minima at all.
-(iii)~The root
+(iv)~The root
 estimate makes the chart interpolable: a combined coloring shows the integer
 number of unstable roots outside and the smooth spectral gap inside the
 stable domain, which is a strikingly effective visual diagnostic.
-(iv)~The integrality of the computed winding number provides a built-in,
+(v)~The integrality of the computed winding number provides a built-in,
 dimensionless error estimate that scales with the requested solver tolerance
 and lets the accuracy of the count be prescribed in advance; where it is
 structurally blind -- a skipped peak costs exactly $\pm\pi$ and leaves the
 result an integer -- the independently obtained root supplies the missing
-check. (v)~The estimated root distance serves
+check. (vi)~The estimated root distance serves
 as a scalar objective for MDBM, which then traces the \emph{true} stability
 boundary (not the D-curves) at very high equivalent resolution, and the most
 robust parameter point is found as the center of the largest circle inscribed
-in the stable domain. (vi)~The characteristic function is extracted
+in the stable domain. (vii)~The characteristic function is extracted
 algorithmically from a simulation-ready right-hand side -- including singular
 mass matrices (DDAEs) -- so the user never has to derive
-$\Dfun(\lam)$ by hand. (vii)~The method applies verbatim to retarded,
+$\Dfun(\lam)$ by hand. (viii)~The method applies verbatim to retarded,
 neutral, distributed-delay, transcendental, high-dimensional and
 (preliminarily) fractional-order systems, and is released as the open-source
 Julia~\cite{bezanson2017julia} package \pkg{InterpolatedNyquist.jl}.
@@ -159,12 +171,15 @@ tailored to the half-line stability sweep.
 The paper is organized as follows. Section~\ref{sec:theory} summarizes the
 system classes and the argument-principle counting formula.
 Section~\ref{sec:method} presents the phase ODE, the rightmost-root tracking,
-the higher-order refinement, and the self-validating error estimate.
+the higher-order refinement, the self-validating error estimate, and the
+integration-free discrete phase unwrapping.
 Section~\ref{sec:charts} assembles these ingredients into fast stability
 charts. Section~\ref{sec:extraction} describes the automatic extraction of
 $\Dfun(\lam)$ from a time-domain model. Section~\ref{sec:showcase} walks
 through the complete workflow on a constrained two-degree-of-freedom system
 with delayed control, Section~\ref{sec:performance} quantifies accuracy, CPU
-time and memory, including a comparison with the semi-discretization method,
+time and memory, including a comparison with the semi-discretization method
+and GPU timings in several number formats,
 and Section~\ref{sec:conclusion} concludes. Appendix~\ref{app:gallery} collects twelve
-further case studies from all supported system classes.
+further case studies from all supported system classes, and
+Appendix~\ref{app:unwrap} lists the discrete march in algorithmic form.

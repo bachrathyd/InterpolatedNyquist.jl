@@ -4,10 +4,8 @@ The Nyquist/argument-principle criterion for linear autonomous time-delay
 systems was reformulated as a scalar ordinary differential equation for the
 phase of the characteristic function and marched by a high-order adaptive
 integrator with an exact, automatically differentiated integrand. The
-outcome is a genuinely fast tool: complete stability charts of simpler
-systems are computed in fractions of a second on a desktop machine --
-near-real-time, fast enough for interactive exploration and for use inside
-optimization loops. The reformulation tames the practically unbounded
+outcome is a genuinely fast tool, fast enough for interactive exploration
+and for use inside optimization loops. The reformulation tames the practically unbounded
 frequency range and the near-singular integrand through the mature
 step-size control of modern ODE software, and it makes the accuracy
 self-validating through the integer residual of the computed winding
@@ -22,6 +20,26 @@ chart in this paper is built from -- is the characteristic root obtained
 along the way: a smooth first-order estimate at negligible cost, sharpened
 toward machine precision by an optional Taylor, Newton or combined polish
 when an accurate root is wanted.
+
+Taking the observation that the count needs only the end value of the
+phase one step further removed the integration altogether. The discrete
+phase-unwrapping march sums the exact phase increments between adaptively
+placed samples and uses the exact phase slope, delivered by the same
+automatic derivatives, for an ODE-style step control that rejects every step
+hiding a root transition; transitions below the resolution of the number
+format are decided by the side of the tracked root. With one evaluation per
+step and a few dozen evaluations per point it computes the benchmark charts
+$\UwSpeedFourth$--$\UwSpeedTurning$ times faster than the phase ODE --
+$10$--$35$\,ms for a $100\times100$ chart on a desktop processor -- without a
+single wrong count, and it resolves the Hopf boundary down to a parameter
+distance of $10^{-12}$. Its fixed-size loop of identical scalar steps is
+equally at home on a GPU: a full-HD chart takes $\GpuBestFthirtytwo$\,ms in
+Float32 and $\GpuBestFsixteen$\,ms with the characteristic function
+evaluated in Float16, whose rare errors are all flagged; 8-bit and 4-bit
+formats, by contrast, are useless for stability charts. The ODE march
+remains the reference with the convergence-controlled integer residual; the
+discrete march is the tool for charts, real-time exploration and parameter
+optimization.
 
 The root estimate transforms the integer-valued root-counting map into an
 interpolable chart: one coloring simultaneously shows the number of unstable
@@ -61,9 +79,11 @@ deep spectrum is needed. Third -- intrinsic to the argument principle
 itself -- a peak that no sample lands on shifts the count by one while
 leaving it an integer, so the residual cannot see it; the cross-check
 between the count and the independently tracked root detects this at no
-cost, and the optional detect-and-repair callback of
+cost, the optional detect-and-repair callback of
 Section~\ref{sec:showcase-tolerance} mends the flagged pixels within the
-march. A formally guaranteed count would still require a different device,
+march, and the discrete march rejects such steps by construction -- its own
+blind spot being a pair of transitions in the same direction within one
+step, which an entire $\Dfun$ and a band-limited step cap remove. A formally guaranteed count would still require a different device,
 such as interval arithmetic. Fourth, for neutral systems beyond the
 essential instability threshold the root count diverges with the truncation
 frequency; the classification into stable and unstable domains nevertheless
@@ -76,8 +96,9 @@ for future work. Finally, for large models the cost is dominated by each
 evaluation of $\Dfun$ rather than by the method; where the feedback has low
 rank the matrix determinant lemma already removes most of that
 cost~\eqref{eq:detlemma}, and caching factorizations across frequencies,
-extending the automatic extraction to neutral right-hand sides, and
-coupling the interactive charts to formal optimization loops are natural
+extending the automatic extraction to neutral right-hand sides,
+evaluating large determinants on the GPU, and coupling the real-time charts
+to formal optimization loops and to a browser front end are natural
 continuations.
 
 \section*{Software and reproducibility}
@@ -88,7 +109,9 @@ The method is implemented in the open-source Julia package
 \pkg{ForwardDiff.jl}~\cite{revels2016forward},
 \pkg{QuadGK.jl}~\cite{johnson2013quadgk},
 \pkg{MDBM.jl}~\cite{bachrathy2025mdbm} and
-\pkg{DelaunayTriangulation.jl}~\cite{vandenheuvel2024delaunay}. All figures and tables of this
+\pkg{DelaunayTriangulation.jl}~\cite{vandenheuvel2024delaunay}. The GPU implementation of the
+discrete march (\pkg{NyquistGPU}, with a Google Colab notebook) is
+in the \code{gpu/} directory of the same repository. All figures and tables of this
 paper can be regenerated by the scripts in the \code{paper/} directory of the
 repository; the benchmark hardware and software versions are embedded
 automatically in the manuscript.

@@ -20,6 +20,7 @@ using PrecompileTools
 # Include sub-files
 include("mdbm_enrichment.jl")
 include("integration_solvers.jl")
+include("unwrap_solver.jl")
 include("dde_extraction.jl")
 include("find_largest_circle.jl")
 
@@ -36,6 +37,8 @@ export calculate_encirclement_number,
        calculate_unstable_roots_quadgk_p_vec,
        calculate_unstable_roots_fixed_step,
        calculate_unstable_roots_fixed_step_p_vec,
+       calculate_unstable_roots_unwrap,
+       calculate_unstable_roots_unwrap_p_vec,
        refine_roots,
        peak_skip_suspect,
        get_D_from_model,
@@ -60,6 +63,7 @@ export calculate_encirclement_number,
         calculate_unstable_roots_direct(D_precompile, p_tuple; ω_max=100.0)
         calculate_unstable_roots_quadgk(D_precompile, p_tuple; ω_max=100.0)
         calculate_unstable_roots_fixed_step(D_precompile, p_tuple; ω_max=100.0, steps=10)
+        calculate_unstable_roots_unwrap(D_precompile, p_tuple; ω_max=100.0)
         
         # Precompile vectorized sweeps
         params_vec = [p_tuple, (1.0, 0.5)]

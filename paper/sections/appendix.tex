@@ -261,3 +261,61 @@ stability-\emph{degree} chart cannot be offered at all; extending the
 criterion to fractional systems with a prescribed decay rate requires a
 contour that respects the cut (a keyhole, or a formulation in the
 $w=s^{1/m}$ plane) and is left for future work.
+\section{The discrete phase-unwrapping march}\label{app:unwrap}
+
+This appendix lists the march of Section~\ref{sec:unwrap} in the form in which
+it is implemented (the function
+\code{calculate\_\allowbreak unstable\_\allowbreak roots\_\allowbreak unwrap} of the package,
+and the GPU kernel of Section~\ref{sec:performance-gpu}). All quantities are
+evaluated on the line $\lam=\sigma+\ii\omega$; one call of $\Dfun$ with a dual
+number $\omega+\varepsilon$ returns both $\Dfun$ and
+$\Dfun_\omega=\ii\,\Dfun'$.
+
+\paragraph{Sample.} For a sample at $\omega$ store the scale-free value
+$u=\Dfun/s$, $s=\max\{|\Real\Dfun|,|\Imag\Dfun|\}$ (which avoids overflow and
+underflow, essential in Float16), the phase slope
+$\theta'=\Imag(\bar u\,\Dfun_\omega)/(s|u|^{2})$, and the sign
+$g=\operatorname{sgn}\Real(\bar u\,\Dfun_\omega)$ of $\partial_\omega|\Dfun|$.
+
+\paragraph{Algorithm.}
+\begin{enumerate}
+  \item Set $\omega=\omega_0$ ($10^{-9}$), $\Phi=0$, $h=h_0$ ($10^{-2}$);
+    take the sample $a$ at $\omega_0$. If $g_a>0$, $|\Dfun|$ has its minimum at
+    $\omega=0$: record a Newton root estimate from $a$.
+  \item Trial step $h_t=\min\{h,\;h_{\mathrm{rel}}\max(\omega,1),\;h_{\max}
+    \text{ if }\omega<\omega_{\mathrm{band}}\}$, truncated at $\wmax$; take the
+    sample $b$ at $\omega+h_t$.
+  \item Observed increment $\Delta=\operatorname{Arg}(u_b\bar u_a)$; error
+    $e=|\Delta-\tfrac{h_t}{2}(\theta'_a+\theta'_b)|$; proposal
+    $h_{\mathrm{new}}=h_t\cdot\min\{4,\max\{0.2,\,0.9(\mathrm{tol}/e)^{1/3}\}\}$.
+  \item If $e\le\mathrm{tol}$: accept. If $e>\mathrm{tol}$ but
+    $h_{\mathrm{new}}\le8\epsilon_{\mathrm{mach}}\max(\omega,1)$ (sub-resolution
+    transition): compute the Newton step $q=\Dfun/\Dfun_\omega$ at $b$; if
+    $|\Delta|>\pi/2$, take the branch $\Delta-2\pi$ when $\Delta>0$ and the
+    root lies right of the line ($\Imag q>0$), $\Delta+2\pi$ when $\Delta<0$
+    and the root lies left of it; accept and flag the point. Otherwise reject,
+    set $h=h_{\mathrm{new}}$ and go to step~2.
+  \item On acceptance: if $g_a<0<g_b$, a minimum of $|\Dfun|$ lies inside the
+    step; locate it on the cubic Hermite interpolant of $\Dfun$ through
+    $(\Dfun_a,\Dfun_{\omega,a},\Dfun_b,\Dfun_{\omega,b})$ by four regula-falsi
+    (Illinois) iterations on $\Real(\bar p\,p')=0$, take one Newton step from
+    it, and insert the estimate $(\sest,\west)$ into the depth-sorted buffer of
+    the $N$ deepest minima if it lies inside the trust region. Then
+    $\Phi\leftarrow\Phi+\Delta$, $a\leftarrow b$, $h=h_{\mathrm{new}}$.
+  \item Repeat from step~2 until $\omega=\wmax$; return
+    $\Zraw=n/2-\Phi/\pi$, $\Zint=\operatorname{round}(\Zraw)$, the root
+    estimates, and the number of evaluations.
+\end{enumerate}
+
+\paragraph{Parameters and flags.} The defaults are $\mathrm{tol}=0.3$\,rad,
+$\wmax=10^{5}$, $h_0=10^{-2}$, $h_{\mathrm{rel}}=1$, and no band cap
+($h_{\max}=\infty$). The tolerance is a statement about the phase only: it is
+independent of the scale of $\Dfun$, and it is far from critical: every value
+from $0.05$ to $1.2$\,rad reproduces the three charts of
+Table~\ref{tab:unwrap} without a single wrong count, while the cost changes
+by at most a factor of $2.5$ between $0.1$ and $0.5$ -- a skipped transition
+costs an error of almost $\pi$, well above any sensible tolerance. The GPU kernel returns three flag bits per point: \emph{failed} (the
+step fell below the resolution without a decidable branch, or the step budget
+was exhausted), \emph{decided} (step~4 fired) and \emph{residual}
+($|\Zraw-\Zint|>1/4$, typically a root on the line). Flagged points are the
+candidates for a re-check in a wider number format.

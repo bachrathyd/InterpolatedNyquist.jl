@@ -1,0 +1,13 @@
+system,backend,chart_time_s,per_point_us,wrong_Z,evals_median
+fourth,ODE Vern9 + root (default),0.360137,36.0137,0,
+fourth,QuadGK, Z only,0.1594541,15.945409999999997,0,
+fourth,fixed-step (500),0.0751947,7.51947,8075,
+fourth,unwrap + root (new),0.0095645,0.95645,0,31
+showcase,ODE Vern9 + root (default),2.3452136,234.52136000000002,0,
+showcase,QuadGK, Z only,3.4448878,344.48878,0,
+showcase,fixed-step (500),0.0923321,9.23321,8863,
+showcase,unwrap + root (new),0.0174887,1.7488700000000001,0,52
+turning,ODE Vern9 + root (default),10.3715122,1037.15122,4,
+turning,QuadGK, Z only,27.3151816,2731.5181599999996,0,
+turning,fixed-step (500),0.0913597,9.13597,9903,
+turning,unwrap + root (new),0.0348069,3.48069,0,129

@@ -186,6 +186,129 @@ fast enough to be explored \emph{interactively}, which changes how such
 charts are used in design -- parameter studies and optimization loops can
 call the entire chart pipeline as an inner function.
 
+\subsection{The discrete march: two orders of magnitude on the CPU}\label{sec:performance-unwrap}
+
+\begin{table}[tb]
+  \centering
+  \caption{Complete $100\times100$ charts of the three benchmark systems with
+  the integration back-ends and with the discrete phase-unwrapping march of
+  Section~\ref{sec:unwrap}, all measured in one session on one machine
+  (\UwCPU, \UwThreads{} threads), so that the speed-up factors are free of
+  hardware differences. The integration back-ends use the chart window
+  $\wmax=10^{4}$, the discrete march $\wmax=10^{5}$; the wrong-$\Zint$ column
+  counts the deviations from a tight-tolerance ($10^{-8}$) integration
+  reference of the same chart. The turning model enters the discrete march
+  with its denominators cleared (Section~\ref{sec:unwrap}).}\label{tab:unwrap}
+  \maybeinput{tables/tab_unwrap.tex}
+\end{table}
+
+\begin{table}[tb]
+  \centering
+  \caption{The boundary stress test of Table~\ref{tab:boundarystress},
+  repeated with the discrete march at its default tolerance ($0.3$\,rad)
+  and with the ODE march at the tight tolerance $10^{-8}$. Bold entries are
+  wrong counts. The last column is the number of evaluations of $\Dfun$ the
+  discrete march spends on the point.}\label{tab:unwrapstress}
+  \maybeinput{tables/tab_unwrap_stress.tex}
+\end{table}
+
+Table~\ref{tab:unwrap} measures what Section~\ref{sec:unwrap} predicts. On
+the same machine and the same ten thousand points, the discrete march computes
+every chart without a single wrong count, $\UwSpeedFourth$, $\UwSpeedShowcase$
+and $\UwSpeedTurning$ times faster than the default ODE back-end, and at
+$\UwUsFourth$, $\UwUsShowcase$ and $\UwUsTurning$\,$\mu$s per point -- a
+complete $100\times100$ chart of any of the three systems in $10$--$35$\,ms.
+The gain grows with the difficulty of the system, because the discrete march
+pays only for what it must resolve: the median point costs $31$, $52$ and $129$
+evaluations of $\Dfun$, whereas the integrators pay for every period of the
+delay ripple up to $\wmax$. It is even \emph{faster} than the fixed-step
+trapezoid with $500$ steps, which gets $80$--$99\,\%$ of the counts wrong.
+The quadrature, which skips the root by-product, is no longer competitive
+anywhere. Near a boundary the discrete march is also the more robust
+back-end (Table~\ref{tab:unwrapstress}): it reproduces the exact count down
+to $|P-P_b|=10^{-12}$ on both sides of the Hopf boundary of the showcase
+system, spending at most $165$ evaluations there, while the ODE march at the
+tight tolerance $10^{-8}$ misses the narrow peak from $|P-P_b|\le10^{-8}$ on -- the
+failure mode discussed above, here resolved by the step rejection on an
+unpredicted phase jump and by the root-side decision below the resolution of
+the number format.
+
+The discrete march therefore becomes the recommended back-end for charts of
+entire characteristic functions, with the ODE march kept for what it does
+better: the convergence-controlled integer residual of
+Section~\ref{sec:integerness} as an independent check, and rational $\Dfun$
+whose denominators cannot be cleared conveniently. All the timings of
+Sections~\ref{sec:performance-convergence}--\ref{sec:performance-cost} were
+measured with the integration back-ends, on an earlier machine; their
+\emph{ratios} remain valid, but the absolute chart times of
+Table~\ref{tab:gridtimings} are now one to two orders of magnitude above what
+the package delivers by default.
+
+\subsection{GPU sweeps and number formats}\label{sec:performance-gpu}
+
+\begin{table}[tb]
+  \centering
+  \caption{Full-HD brute-force charts ($1920\times1080\approx2.07\cdot10^{6}$
+  points, one GPU thread per point) of the fourth-order benchmark with the
+  discrete march on four NVIDIA GPUs (Google Colab): median kernel time in
+  milliseconds over ten repetitions. $\wmax=10^{5}$ is the production window;
+  $\wmax=15$ suffices for this model and is required by Float16, whose range
+  ends at $65504$; in the Float16 column $\Dfun$ is evaluated in Float16 on a
+  rescaled frequency axis while the march runs in Float32. Float64 and Float32
+  give identical charts; the last column is the Float16 throughput in million
+  points per second.}\label{tab:gpu}
+  \maybeinput{tables/tab_gpu.tex}
+\end{table}
+
+\begin{table}[tb]
+  \centering
+  \caption{The discrete march with $\Dfun$ evaluated in narrow number formats
+  ($400\times400$ chart of the fourth-order benchmark, $\wmax=15$, best of four
+  frequency scalings $\lam=\Omega\mu$ per format; the march itself runs in
+  Float32). \emph{Flagged} points carry a sub-resolution or residual flag and
+  are re-checked in a wider format; \emph{failed} points did not reach $\wmax$.
+  $^\ast$Emulated: every operation is rounded to the format.}\label{tab:precision}
+  \maybeinput{tables/tab_precision.tex}
+\end{table}
+
+The discrete march is a fixed-size loop of identical scalar steps, so the
+parameter points of a chart -- or of any $N$-dimensional point list -- map
+one-to-one onto GPU threads. We implemented it as a portable kernel
+with \pkg{KernelAbstractions.jl} -- the same code also runs on CPU threads -- that
+evaluates a user-written $\Dfun$ with dual numbers, exactly as on the CPU.
+Table~\ref{tab:gpu} reports full-HD charts of the fourth-order benchmark. On
+the fastest card, the \GpuBest, a complete $1920\times1080$ chart in Float32
+takes $\GpuBestFthirtytwo$\,ms -- some seven hundred times the speed of the
+twelve-thread CPU of Table~\ref{tab:unwrap}, and identical to the Float64
+chart point for point -- and a slider loop that changes the delay and copies
+the result back to the host for every frame runs at $\GpuBestSlider$\,ms per
+frame. The ranking of the cards follows their single-precision rate:
+consumer and graphics-oriented cards run Float64 at $1/32$--$1/64$ of the
+Float32 rate, so Float64 is a reference rather than a production format
+(only the A100, with full-rate Float64, narrows the gap to a factor of two).
+Load balancing turned out not to be an issue: a dynamic work queue, in which
+threads that finish early fetch new points, was slower on every card than one
+thread per point, because the per-point cost varies only moderately across a chart and the
+hardware scheduler absorbs the difference.
+
+Narrower formats pay off only to a point (Table~\ref{tab:precision}). Since
+the march needs only the \emph{phase} of $\Dfun$ to a fraction of a radian,
+Float16 is accurate enough wherever no root is close to the line: after
+rescaling the frequency into its range, it computes the chart another $1.2$--$6$
+times faster than Float32 (the gain is largest on cards with a fast
+half-precision path) ($\GpuBestFsixteen$\,ms on the \GpuBest), with
+$\GpuFsixteenWrong\,\%$ wrong counts that are \emph{all} flagged, and
+$\GpuFsixteenFlagged\,\%$ flagged points in total. Re-checking the flagged
+points in Float32 restores the exact chart; at full-HD resolution, however,
+the separate re-check launch costs more than a plain Float32 sweep on the
+fast cards, so Float16 is the format for interactive previews, and Float32
+the format for final charts. BFloat16, with only seven mantissa bits, flags
+$14\,\%$ of the chart, and the 8-bit and 4-bit formats are useless for this
+purpose: with two or three mantissa bits even the \emph{parameters} of a
+chart are quantized to a handful of distinct values per octave, so that
+$95$--$100\,\%$ of the points are flagged and up to one in ten counts is
+wrong; Float4 gets every count wrong.
+
 \subsection{Comparison with semi-discretization}\label{sec:performance-sd}
 
 \begin{table}[tb]

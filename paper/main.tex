@@ -47,6 +47,18 @@
   \newcommand{\RefShowNewton}{[e]}\newcommand{\RefTurnRaw}{[e]}%
   \newcommand{\RefTurnPolyThree}{[e]}\newcommand{\RefTurnNewton}{[e]}%
   \newcommand{\RefTurnComb}{[e]}\newcommand{\RefCombOver}{[x]}}
+% discrete phase-unwrapping march (paper/scripts/studies/s13_unwrap.jl)
+\IfFileExists{generated/unwrap_numbers.tex}{\input{generated/unwrap_numbers.tex}}{%
+  \newcommand{\UwCPU}{[CPU]}\newcommand{\UwThreads}{[N]}%
+  \newcommand{\UwSpeedFourth}{[x]}\newcommand{\UwSpeedShowcase}{[x]}%
+  \newcommand{\UwSpeedTurning}{[x]}\newcommand{\UwUsFourth}{[t]}%
+  \newcommand{\UwUsShowcase}{[t]}\newcommand{\UwUsTurning}{[t]}}
+% GPU sweeps (paper/scripts/studies/s14_gpu_tables.jl)
+\IfFileExists{generated/gpu_numbers.tex}{\input{generated/gpu_numbers.tex}}{%
+  \newcommand{\GpuBest}{[GPU]}\newcommand{\GpuBestFsixtyfour}{[t]}%
+  \newcommand{\GpuBestFthirtytwo}{[t]}\newcommand{\GpuBestFsixteen}{[t]}%
+  \newcommand{\GpuBestSlider}{[t]}\newcommand{\GpuFsixteenWrong}{[p]}%
+  \newcommand{\GpuFsixteenFlagged}{[p]}}
 
 \begin{document}
 
@@ -68,7 +80,7 @@ H-1111 Budapest, Hungary}
 \begin{keyword}
 time-delay systems \sep stability chart \sep Nyquist criterion \sep argument
 principle \sep neutral delay differential equation \sep differential--algebraic
-equation \sep automatic differentiation \sep adaptive integration
+equation \sep automatic differentiation \sep adaptive integration \sep phase unwrapping \sep GPU
 \end{keyword}
 
 \end{frontmatter}

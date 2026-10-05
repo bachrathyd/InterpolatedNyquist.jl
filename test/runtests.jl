@@ -42,6 +42,47 @@ import MDBM
         @test length(σ_ests_vec) == 9
     end
 
+    @testset "Discrete phase unwrapping (unwrap back-end)" begin
+        function D_uw(λ::T, p) where T
+            P, D = p
+            return T(0.03) * λ^4 + λ^2 + T(0.04) * λ + one(T) + P * exp(-T(0.5) * λ) +
+                   D * λ * exp(-T(0.5) * λ)
+        end
+        pts = vec([(P, D) for P in range(-0.95, 2.0; length = 12), D in range(-1.0, 1.0; length = 12)])  # P = -1: root at λ = 0
+        Zref, = calculate_unstable_roots_p_vec(D_uw, pts; n_roots_to_track = 0, reltol = 1e-9,
+            abstol = 1e-9, ω_max = 1e4)
+        Zu, Zru = calculate_unstable_roots_unwrap_p_vec(D_uw, pts; n_roots_to_track = 0)
+        @test Zu == Zref
+        @test maximum(abs.(Zru .- Zu)) < 1e-3                 # no integration error left
+        # single point: same tuple layout as the ODE back-end, consistent root estimate
+        Z1, Zr1, md1, σ1, ω1 = calculate_unstable_roots_unwrap(D_uw, (1.5, 0.0))
+        Zo, _, _, σo, ωo = calculate_unstable_roots_direct(D_uw, (1.5, 0.0); ω_max = 1e4)
+        @test Z1 == Zo
+        @test sign(σ1) == sign(σo)
+        @test isapprox(σ1, σo; atol = 1e-2) && isapprox(ω1, ωo; rtol = 1e-2)
+        # Newton-refined estimate is a root of D
+        _, _, _, σn, ωn = calculate_unstable_roots_unwrap(D_uw, (1.5, 0.0); refinement_method = :Newton)
+        @test abs(D_uw(complex(σn, ωn), (1.5, 0.0))) < 1e-8
+        # multi-root output and a shifted line
+        Zm, _, mds, σs, ωs = calculate_unstable_roots_unwrap(D_uw, (1.5, 0.0); n_roots_to_track = 3)
+        @test length(σs) == 3 && issorted(mds)
+        Zs, = calculate_unstable_roots_unwrap(D_uw, (0.2, 0.1), -0.05; n_roots_to_track = 0)
+        Zso, = calculate_unstable_roots_direct(D_uw, (0.2, 0.1), -0.05; n_roots_to_track = 0, ω_max = 1e4)
+        @test Zs == Zso
+        # near-boundary robustness: a root just right of the line is still counted
+        Pb = let lo = 0.0, hi = 0.3                        # Z: 2 -> 4 (Hopf) in between
+            for _ in 1:60
+                m = (lo + hi) / 2
+                calculate_unstable_roots_direct(D_uw, (m, 0.0); ω_max = 1e4, reltol = 1e-10,
+                    abstol = 1e-10, refinement_method = :Newton, refinement_steps = 15)[4] < 0 ? (lo = m) : (hi = m)
+            end
+            (lo + hi) / 2
+        end
+        Zlo, = calculate_unstable_roots_unwrap(D_uw, (Pb - 1e-9, 0.0); n_roots_to_track = 0)
+        Zhi, = calculate_unstable_roots_unwrap(D_uw, (Pb + 1e-9, 0.0); n_roots_to_track = 0)
+        @test Zhi == Zlo + 2
+    end
+
     @testset "Shifted σ-line: absolute root coordinates" begin
         # D(λ) = (λ - r)(λ - conj(r)) with known root pair r = -0.3 ± 2im
         function D_pair(λ::T, p) where T

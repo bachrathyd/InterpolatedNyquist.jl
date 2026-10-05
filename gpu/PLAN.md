@@ -137,6 +137,23 @@ the GPU is only needed for re-checking flagged points, which are few, so the
 consumer/workstation FP64 rate does not matter. Your own 5-year-old NVIDIA card
 (an RTX 30-series has ~13–35 TFLOPS FP32, 2–4× a T4) runs the same scripts.
 
+### Measured on all four Colab GPUs (2026-10-05, `gpu_final.jl`)
+4th-order model, full HD (2 073 600 points), brute force, median kernel ms
+(all rows in `results/gpu_final_summary.csv`):
+
+| GPU | F64 ω_max=1e5 | F32 ω_max=1e5 | F64 15 | F32 15 | **F16 15 (scaled)** | F16 Mpts/s | slider loop F32 |
+|---|---|---|---|---|---|---|---|
+| T4 | 195.95 | 50.06 | 126.88 | 35.48 | **6.12** | 339 | 81.1 ms/frame |
+| L4 | 102.64 | 9.04 | 66.41 | 5.31 | **2.78** | 746 | 18.9 ms/frame |
+| A100 80 GB | 10.17 | 4.93 | 5.55 | 2.78 | **2.29** | 904 | 10.7–14.9 ms/frame |
+| RTX PRO 6000 Blackwell (G4) | 27.65 | 2.84 | 17.96 | 1.68 | **0.74** | 2816 | 6.0 ms/frame |
+
+The predictions held for L4 and G4; the A100 beat its FP32 prediction by 2.5×
+(and is the only card with fast Float64). Float16 is 1.2× (A100) to 5.8× (T4)
+faster than Float32 at the same window, with identical wrong/flagged counts on
+every card (0.0169 % wrong, all flagged; 1.756 % flagged). The `:queue`
+schedule is slower than `:pixel` everywhere.
+
 ## Lower precision: Float16 / Float8
 Measured on the T4 (`precision_test.jl`, 4th-order full HD): Float16 runs in
 **15.4 ms vs 33.5 ms** for Float32 (2.2×); 236 counts wrong (0.011 %), **all of
