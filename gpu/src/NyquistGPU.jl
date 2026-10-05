@@ -987,24 +987,26 @@ end
 Device-side second pass: gather every flagged point of `plan` (`flags != 0`)
 into `rplan` -- a plan of at least the same capacity, typically Float32 with
 production settings -- run it there, and scatter `Zraw`, `sigma`, `omega`,
-`flags` back into `plan`. Nothing crosses the bus except the count `n`.
-`rplan` must use the `:pixel` schedule (the GPU default).
+`steps`, `flags` back into `plan`. Nothing crosses the bus except the count `n`.
 """
 function recheck_flagged!(p::SweepPlan, rp::SweepPlan, D, c = ())
     idx = findall(!=(Int8(0)), p.flags)
     n = length(idx)
     n == 0 && return 0
     n <= length(rp.points) || error("recheck_flagged!: rplan is too small")
-    cap = rp.npts
+    cap, stride, lanes = rp.npts, rp.stride, rp.lanes
     rp.npts = n
+    rp.stride = coprime_stride(n)            # the lane schedules visit points by this stride
+    rp.lanes = min(lanes, n)
     view(rp.points, 1:n) .= view(p.points, idx)
     run!(rp, D, c)
     view(p.Zraw, idx) .= view(rp.Zraw, 1:n)
     view(p.sigma, idx) .= view(rp.sigma, 1:n)
     view(p.omega, idx) .= view(rp.omega, 1:n)
+    view(p.steps, idx) .= view(rp.steps, 1:n)
     view(p.flags, idx) .= view(rp.flags, 1:n)
     KernelAbstractions.synchronize(p.backend)
-    rp.npts = cap
+    rp.npts, rp.stride, rp.lanes = cap, stride, lanes
     return n
 end
 

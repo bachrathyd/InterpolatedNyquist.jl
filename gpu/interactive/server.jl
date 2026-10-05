@@ -45,7 +45,10 @@ if isfile(HILL_MODELS)
     const HKW = (ω0 = A_STRIP, ω_max = A_STRIP + 1, h0 = 1e-3, hrel = 0.05)
     const HKWM = (ω0 = A_STRIP, ω_max = A_STRIP + 1, h0 = 1e-3, hrel = 0.1)   # milling: fewer samples
     const MEMO = Dict{Any, Any}()
-    memo(f, k) = get!(() -> f(), MEMO, k)
+    function memo(f, k)                 # constants per slider state (bounded: sliders produce many)
+        length(MEMO) > 512 && !haskey(MEMO, k) && empty!(MEMO)
+        return get!(() -> f(), MEMO, k)
+    end
     # half circle |z| = 1; the step cap of the strip examples is not needed there (same counts
     # on 12 800 test points, 13.9 instead of 18.3 evaluations per point)
     const HKWQ = (ω0 = 1e-9, ω_max = 0.5, h0 = 0.05, hrel = 0.25)

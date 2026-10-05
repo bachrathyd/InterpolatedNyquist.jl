@@ -163,6 +163,18 @@ D_promoting(λ, p, c) = λ^2 + 0.5 * λ + p[1]                        # Float64 
         @test r64.npts == 23 * 17                       # capacity restored
         ok = [hayes_safe(p...) for p in grid_points(xs, ys)]
         @test (fetch_result(h).Z .== ref.Z)[ok] == trues(count(ok))
+        # a lane-schedule re-check plan: its stride belongs to its full capacity (with a common
+        # factor of stride and the flagged count, points were skipped)
+        h2 = plan_grid((-3.0, 0.9), (-3.0, 3.0), 23, 17; n_power = 1, T = Float32,
+                       Teval = Float16_emu, ω_max = 1e3, schedule = :pixel)
+        run!(h2, D_hayes)
+        rs = plan_grid((0.0, 1.0), (0.0, 1.0), 23, 17; n_power = 1, T = Float32, schedule = :strided,
+                       lanes = 7)
+        st0 = rs.stride
+        @test recheck_flagged!(h2, rs, D_hayes) == flagged
+        @test fetch_result(h2).Z == fetch_result(h).Z
+        @test fetch_result(h2).steps == fetch_result(h).steps
+        @test (rs.npts, rs.stride, rs.lanes) == (23 * 17, st0, 7)
     end
 
     @testset "root refinement: Newton polish and certification by counting" begin

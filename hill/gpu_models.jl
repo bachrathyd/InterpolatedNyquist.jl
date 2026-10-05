@@ -20,18 +20,20 @@ const NN3 = 2NM3 + 1
 # WorkSlot appended to c by the kernel -- per-thread MArrays of this size do not compile on the GPU
 
 
-@inline _val(x::ForwardDiff.Dual) = ForwardDiff.value(x)
-@inline _val(x::Real) = x
-@inline _mag2(z) = _val(real(z))^2 + _val(imag(z))^2
-# complex division without Base's scaled algorithm: for dual-number components it calls
-# exponent(), which THROWS on an exact zero (a kernel exception on the GPU); here a zero
-# denominator just gives Inf/NaN, which the march treats as a failed sample
-# (scaled by the primal magnitude first, so neither |b|² nor its derivative underflows in Float32)
-@inline function cinv(b)
-    sc = max(abs(_val(real(b))), abs(_val(imag(b))))
-    sc = ifelse(sc > 0, sc, one(sc))
-    bs = b / sc
-    return conj(bs) * inv(real(bs) * real(bs) + imag(bs) * imag(bs)) / sc
+if !@isdefined(cinv)        # shared with gpu_fast.jl (defined once, whatever the include order)
+    @inline _val(x::ForwardDiff.Dual) = ForwardDiff.value(x)
+    @inline _val(x::Real) = x
+    @inline _mag2(z) = _val(real(z))^2 + _val(imag(z))^2
+    # complex division without Base's scaled algorithm: for dual-number components it calls
+    # exponent(), which THROWS on an exact zero (a kernel exception on the GPU); here a zero
+    # denominator just gives Inf/NaN, which the march treats as a failed sample
+    # (scaled by the primal magnitude first, so neither |b|² nor its derivative underflows in Float32)
+    @inline function cinv(b)
+        sc = max(abs(_val(real(b))), abs(_val(imag(b))))
+        sc = ifelse(sc > 0, sc, one(sc))
+        bs = b / sc
+        return conj(bs) * inv(real(bs) * real(bs) + imag(bs) * imag(bs)) / sc
+    end
 end
 @inline cdiv(a, b) = a * cinv(b)
 
