@@ -123,171 +123,15 @@ META = srv.ask('meta')
 print(f"server up in {time.time() - t0:.0f} s on {META['device']}")
 """)
 
-md("## 3. The interactive chart")
-code(r"""
-import io, numpy as np, ipywidgets as W
-from PIL import Image as PImage
-from IPython.display import display
-
-EX = {e['key']: e for e in META['examples']}
-RES = [('960×540 (qHD)', (960, 540)), ('1280×720 (HD)', (1280, 720)), ('1920×1080 (full HD)', (1920, 1080)),
-       ('2560×1440 (QHD)', (2560, 1440)), ('3840×2160 (4K UHD)', (3840, 2160)),
-       ('7680×4320 (8K UHD)', (7680, 4320))]
-DISP = (1600, 900)                                    # display size (the GPU box-filters down to it)
-DISP_FILE = '/dev/shm/nyq_disp.rgb'
-
-w_ex = W.Dropdown(options=[(e['title'], e['key']) for e in META['examples']], description='example')
-w_fmt = W.Dropdown(options=[(l, k) for k, l in META['formats']], value='F16', description='format',
-                   layout=W.Layout(width='420px'))
-w_res = W.Dropdown(options=RES, value=(1920, 1080), description='resolution')
-w_bnd = W.Checkbox(value=True, description='boundary (white)')
-w_flag = W.Checkbox(value=False, description='show flagged points')
-w_smin = W.FloatSlider(description='σ colour floor', min=-2.0, max=-0.005, step=0.005, readout_format='.3f',
-                       continuous_update=True)
-w_x0, w_x1, w_y0, w_y1 = (W.FloatText(description=d, layout=W.Layout(width='190px'))
-                          for d in ('x min', 'x max', 'y min', 'y max'))
-b = lambda txt, tip: W.Button(description=txt, tooltip=tip, layout=W.Layout(width='auto'))
-b_in, b_out, b_reset = b('zoom in ×2', 'halve both ranges'), b('zoom out ×2', ''), b('reset view', '')
-b_l, b_r, b_d, b_u = b('←', 'pan left'), b('→', 'pan right'), b('↓', 'pan down'), b('↑', 'pan up')
-b_bench, b_save = b('benchmark 20 frames', 'kernel timing at the current settings'), \
-                  b('save full-resolution PNG', 'writes /content/<example>_<res>.png')
-knob_box = W.VBox()
-img = W.Image(format='png', layout=W.Layout(width='100%', max_width=f'{DISP[0]}px'))
-caption = W.HTML()
-status = W.HTML()
-knobs = []
-
-def build_knobs(e):
-    global knobs
-    knobs = []
-    for k in e['knobs']:
-        s = W.FloatSlider(value=k['value'], min=k['lo'], max=k['hi'], step=(k['hi'] - k['lo']) / 400,
-                          description=k['name'], readout_format='.4g', continuous_update=True,
-                          style={'description_width': '150px'}, layout=W.Layout(width='520px'))
-        s.ci = k['i'] - 1
-        s.observe(lambda ch: None if _quiet[0] else request(), 'value')
-        knobs.append(s)
-    knob_box.children = knobs
-
-def constants():
-    c = list(EX[w_ex.value]['c'])
-    for s in knobs:
-        c[s.ci] = s.value
-    return c
-
-def params():
-    nx, ny = w_res.value
-    return dict(ex=w_ex.value, fmt=w_fmt.value, nx=nx, ny=ny, x0=w_x0.value, x1=w_x1.value,
-                y0=w_y0.value, y1=w_y1.value, c=','.join(repr(float(v)) for v in constants()),
-                maxw=DISP[0], maxh=DISP[1], smin=w_smin.value, flags=int(w_flag.value),
-                bnd=int(w_bnd.value), out=DISP_FILE)
-
-def cmd(name, p):
-    return name + ' ' + ' '.join(f'{k}={v}' for k, v in p.items())
-
-def draw(p):
-    t0 = time.time()
-    status.value = '<i>computing… (the first use of an example / format compiles its kernel, ~10–30 s)</i>'
-    r = srv.ask(cmd('render', p))
-    a = np.fromfile(DISP_FILE, np.uint8, count=3 * r['dw'] * r['dh']).reshape(r['dh'], r['dw'], 3)
-    buf = io.BytesIO()
-    PImage.fromarray(a).save(buf, 'PNG', compress_level=1)
-    img.value = buf.getvalue()
-    rt = 1e3 * (time.time() - t0)
-    e = EX[p['ex']]
-    caption.value = (f"<b>{e['title']}</b> — horizontal: {e['xl']} ∈ [{p['x0']:.4g}, {p['x1']:.4g}], "
-                     f"vertical: {e['yl']} ∈ [{p['y0']:.4g}, {p['y1']:.4g}] — "
-                     f"red: number of unstable roots, blue→yellow: rightmost root σ in the stable domain")
-    re = f" | re-check {r['n_recheck']:,} pts {r['t_recheck']:.2f} ms" if p['fmt'] == 'F16+' else ''
-    alloc = f" | plan allocation {r['t_plan']:.0f} ms" if r['t_plan'] > 2 else ''
-    status.value = (f"<tt>{p['nx']}×{p['ny']} = {r['n'] / 1e6:.2f} Mpts | <b>GPU kernel {r['t_kernel']:.2f} ms</b> "
-                    f"({r['mpts']:,.0f} Mpts/s){re} | colour + downsample {r['t_colour']:.2f} ms | "
-                    f"read-back {r['t_read']:.2f} ms{alloc} | flagged {r['flagged_pct']:.3f} % | "
-                    f"frame round trip {rt:.0f} ms (incl. PNG + browser)</tt>")
-
-# latest-request-wins worker: slider events never queue up behind a slow frame
-_lock, _state = threading.Lock(), {'pending': None, 'busy': False}
-def request(*_):
-    with _lock:
-        _state['pending'] = params()
-        if _state['busy']:
-            return
-        _state['busy'] = True
-    threading.Thread(target=_worker, daemon=True).start()
-
-def _worker():
-    while True:
-        with _lock:
-            p, _state['pending'] = _state['pending'], None
-            if p is None:
-                _state['busy'] = False
-                return
-        try:
-            draw(p)
-        except Exception as err:
-            status.value = f'<b style="color:#c00">error:</b> <tt>{err}</tt>'
-
-_quiet = [False]
-def set_view(x0, x1, y0, y1):
-    _quiet[0] = True
-    w_x0.value, w_x1.value, w_y0.value, w_y1.value = x0, x1, y0, y1
-    _quiet[0] = False
-    request()
-
-def on_example(*_):
-    e = EX[w_ex.value]
-    _quiet[0] = True
-    w_smin.value = e['smin']
-    w_x0.value, w_x1.value = e['xr']
-    w_y0.value, w_y1.value = e['yr']
-    build_knobs(e)
-    _quiet[0] = False
-    request()
-
-def zoom(f):
-    cx, cy = (w_x0.value + w_x1.value) / 2, (w_y0.value + w_y1.value) / 2
-    hx, hy = (w_x1.value - w_x0.value) / 2 * f, (w_y1.value - w_y0.value) / 2 * f
-    set_view(cx - hx, cx + hx, cy - hy, cy + hy)
-
-def pan(dx, dy):
-    sx, sy = (w_x1.value - w_x0.value) * dx, (w_y1.value - w_y0.value) * dy
-    set_view(w_x0.value + sx, w_x1.value + sx, w_y0.value + sy, w_y1.value + sy)
-
-def bench(*_):
-    p = params()
-    ts = [srv.ask(cmd('render', p))['t_kernel'] for _ in range(20)]
-    status.value += f"<br><tt>benchmark: kernel median {np.median(ts):.3f} ms, min {min(ts):.3f} ms " \
-                    f"over 20 frames ({p['nx'] * p['ny'] / np.median(ts) / 1e3:,.0f} Mpts/s)</tt>"
-
-def save(*_):
-    p = params()
-    status.value = '<i>saving the full-resolution image…</i>'
-    srv.ask(cmd('render', p))
-    r = srv.ask('save out=/dev/shm/nyq_full.rgb')
-    a = np.fromfile('/dev/shm/nyq_full.rgb', np.uint8, count=3 * r['w'] * r['h']).reshape(r['h'], r['w'], 3)
-    fn = f"/content/{p['ex']}_{p['fmt'].replace('+', 'r')}_{r['w']}x{r['h']}.png"
-    PImage.fromarray(a).save(fn, optimize=False)
-    status.value = f"saved <tt>{fn}</tt> ({os.path.getsize(fn) / 1e6:.1f} MB) — Files panel on the left, or " \
-                   f"<tt>from google.colab import files; files.download('{fn}')</tt>"
-
-for w in (w_fmt, w_res, w_bnd, w_flag, w_smin, w_x0, w_x1, w_y0, w_y1):
-    w.observe(lambda ch: None if _quiet[0] else request(), 'value')
-w_ex.observe(on_example, 'value')
-b_in.on_click(lambda _: zoom(0.5)); b_out.on_click(lambda _: zoom(2.0))
-b_reset.on_click(lambda _: on_example())
-b_l.on_click(lambda _: pan(-0.25, 0)); b_r.on_click(lambda _: pan(0.25, 0))
-b_d.on_click(lambda _: pan(0, -0.25)); b_u.on_click(lambda _: pan(0, 0.25))
-b_bench.on_click(bench); b_save.on_click(save)
-
-ui = W.VBox([
-    W.HBox([w_ex, w_fmt, w_res]),
-    W.HBox([knob_box, W.VBox([w_smin, W.HBox([w_bnd, w_flag])])]),
-    W.HBox([w_x0, w_x1, w_y0, w_y1]),
-    W.HBox([b_in, b_out, b_reset, b_l, b_r, b_d, b_u, b_bench, b_save]),
-    status, img, caption])
-display(ui)
-on_example()
+md("""
+## 3. The interactive chart
+Move a slider, pick another example / format / resolution, zoom or pan: the chart is recomputed on
+the GPU. The page always shows the newest request (intermediate slider positions are skipped while
+a frame is in flight). The status line gives the GPU times; the frame round trip adds the PNG
+encoding and the transfer to your browser.
 """)
+code(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "interactive_app.py"),
+          encoding="utf-8").read())
 
 md("""
 ## 4. Done?
@@ -295,7 +139,8 @@ Stop the server and **disconnect the runtime** (*Runtime → Disconnect and dele
 stops consuming compute units.
 """)
 code(r"""
-srv.close()
+# (commented out so that *Run all* does not stop the server right after starting it)
+# srv.close()
 """)
 
 nb = {"cells": cells, "metadata": {"accelerator": "GPU", "colab": {"provenance": [], "gpuType": "G4"},
