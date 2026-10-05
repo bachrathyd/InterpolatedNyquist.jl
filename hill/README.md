@@ -1,9 +1,13 @@
 # Hill determinant + argument principle for time-periodic delayed systems
 
-Branch `hill-argument-principle` (local, not pushed). Stability of time-periodic delayed
+Branch `hill-argument-principle`. Stability of time-periodic delayed
 systems without time integration: a regularized Hill determinant evaluated on the
 imaginary axis, its phase unwrapped by the discrete march of the package, and the
-argument principle on one period strip of the Floquet exponents.
+argument principle on one period strip of the Floquet exponents. For straight-fluted
+milling the infinite Hill determinant is also available in a **compressed form** (all
+harmonics in closed form, a 16-node determinant counted along the unit circle of the
+Floquet multiplier): full HD charts in 18 ms (Float16) / 70 ms (Float32) on one GPU, see
+[Fast milling](#fast-milling-the-compressed-hill-determinant).
 
 ## Method (delayed Mathieu, `hill_core.jl`)
 x'' + κx' + (δ + ε cos ω_p t) x = b x(t − τ).  Harmonic k of the Floquet ansatz:
@@ -90,10 +94,87 @@ Base's scaled algorithm (it throws on an exact zero for dual numbers — a kerne
 by the primal magnitude (Float32 underflow otherwise). GPU forms agree with the CPU cores on all test
 points (Mathieu 450, Test 2 288, Test 3 128) in Float64 and Float32.
 
+## Fast milling: the compressed Hill determinant
+`fredholm_core.jl` (CPU prototype), `gpu_fast.jl` (GPU forms), `gpu_fast_bench.jl`, `fast_kernel_info.jl`.
+Test 2 (straight teeth, uniform pitch, one delay τ = T = 2π/ω, ω = zΩ), still purely in the frequency
+domain, but without truncating the harmonics:
+
+* **Low-rank coupling.** A(λ) = D(λ) + α(λ)H, D = diag p(λ + ikω), p(s) = s² + 2ζs + 1,
+  α = w(1 − e^{−λT}), H_kl = h_{k−l} the Toeplitz matrix of the cutting function h(ψ). h vanishes outside
+  the cutting window, and the jump at tooth entry is what makes h_m decay like 1/m (many harmonics).
+  Quadrature of the Fourier integral over the window factors H ≈ UVᴴ, U_kq = c_q e^{−ikψ_q},
+  Vᴴ_ql = e^{ilψ_q}, with c_q = W_q h(ψ_q)/2π, where ψ_q are Q nodes in the window. The jump sits at the
+  window edge, so the quadrature sees a smooth integrand.
+* **Matrix determinant lemma:** det(D + αUVᴴ) = det D · det(I_Q + αM), M = VᴴD⁻¹U,
+  M_pq = c_q S(ψ_p − ψ_q). Every harmonic is summed exactly:
+  S(Δ) = Σ_{k∈ℤ} e^{ikΔ}/p(λ + ikω), and by partial fractions of 1/p,
+  Σ_k e^{ikΔ}/(a + ikω) = T e^{−aΔ/ω}/(1 − e^{−aT}) for Δ ∈ [0, 2π).
+  The only approximation left is the Q-node quadrature.
+* **Counting on the unit circle of the Floquet multiplier.** det(I_Q + αM) depends on λ only through
+  z = e^{λT}. As a function of z it is analytic outside |z| = 1: its poles e^{r_iT} come from the
+  stable free-oscillator roots r_i and lie inside the circle. It also tends to 1 as z → ∞ (α → w).
+  Its winding along |z| = 1 therefore counts the multipliers outside the circle. This is the
+  generalized (MIMO) Nyquist criterion of the regenerative loop. The D factor (the sinh ratio of the
+  dense form) has no zeros there and drops out. By conjugate symmetry, half the circle suffices:
+  Z = −Φ/π over μ = Im λ/ω ∈ [0, ½]. There is no strip offset a, no row scaling and no poles on the path.
+* **O(Q) evaluation.** S(Δ) is a sum of two exponentials in Δ, with an extra factor e^{−a_iT} when
+  ψ_p < ψ_q. M is therefore a unit-lower-triangular semiseparable matrix plus a rank-2 term, and
+  det(I_Q + αM) = det(I₂ + W·R), with R from one forward recursion over the nodes. With equispaced
+  (midpoint) nodes the node-to-node factors are constant, so one evaluation needs 2 complex
+  exponentials for the window plus about 14 complex FMAs per node, and no division inside the loop
+  (`D_mill2r`, a rolled loop).
+  - Read as an algorithm, this recursion is a quadrature of the free oscillator's response over the
+    cutting window. It never integrates the delayed system and builds no monodromy matrix.
+  - The dense Q×Q LU of the same M (`D_mill2q`) gives the same numbers.
+
+**Accuracy.**
+* CPU prototype: 30 of 30 test points agree with the RK4 monodromy reference.
+* Midpoint Q = 16 against Q = 64: 0 of 3200 counts differ in Float64.
+* GPU forms against the Float64 Q = 64 reference (160×80 = 12 800 points):
+
+| Q = 16 | differing counts | flagged |
+|---|---|---|
+| Float32 | 11 | 0 |
+| Float16 evaluation (march in Float32) | 38 | 376 (2.9 %) |
+| Float16 + Float32 re-check of the flagged points | 17 | — |
+
+In Float16, 32 of the 38 differing points are flagged. Almost all flags mean that a multiplier lies
+closer to |z| = 1 than Float16 resolves, so the count was decided from the root's side; 270 of the
+376 flagged points lie on the stability boundary. The re-check repeats exactly these points in Float32.
+
+**Speed** (RTX PRO 6000 Blackwell, Colab G4; 1920×1080 = 2.07 M points; `gpu_fast_bench.jl`,
+`fast_kernel_info.jl`):
+
+| | Q = 8 | Q = 16 | registers / spill (Q = 16) |
+|---|---|---|---|
+| Float32 | 36.9 ms (56 Mpts/s) | 69.6 ms (30 Mpts/s) | 167 / 0.9 KB |
+| Float16 evaluation | 10.1 ms (206 Mpts/s) | 17.4 ms (119 Mpts/s) | 120 / 0.3 KB |
+
+The unrolled forms (`D_mill2m`, `D_mill2s`) hit the 255-register limit and spill. The rolled loop and
+compiling the kernels without the refinement code (`Val(:none)`, which removes the extra inlined
+copies of D) brought the 2–4× speed-up over the first GPU version. The interactive server, Q = 16,
+first-order estimate, measured as a whole frame (kernel, colouring and the device-to-host copy of the
+display image):
+
+| | full HD | 4K | 8K |
+|---|---|---|---|
+| Float16 | 19–22 ms (46–53 fps) | 64.5 ms (15 fps) | 243 ms (4 fps) |
+| Float16 + Float32 re-check | 25.6 ms (39 fps; 63 k points re-checked in 6.5 ms) | 85.4 ms (12 fps) | 315 ms (3 fps) |
+| Float32 | 70.0 ms (14 fps) | 248 ms (4 fps) | — |
+
+For comparison, the dense Hill form of the same chart (`D_mill2`, tol 1e−2) takes about 1 s for
+480×270 on the same GPU.
+
 ## Interactive
-`gpu/colab/NyquistGPU_Hill_Interactive.ipynb` (this branch): the three time-independent examples plus
-*delayed Mathieu*, *milling, straight flutes (Test 2)*, *milling, different helix angles (Test 3)* in
-the example dropdown, model constants as sliders (κ, ε; ζ, a/D, K_n/K_t; ζ, a/D, β₂).
+`gpu/colab/NyquistGPU_Hill_Interactive.ipynb` (this branch) adds these time-periodic examples to the
+three time-independent ones:
+* *milling, straight flutes (Test 2, compressed Hill, fast)*: the default; Float16 / Float16 + re-check /
+  Float32 / Float64; full HD.
+* *delayed Mathieu*.
+* *milling, straight flutes (Test 2, dense Hill, slow)*.
+* *milling, different helix angles (Test 3)*.
+
+Model constants are sliders: κ, ε for Mathieu; ζ, a/D, K_n/K_t for Test 2; ζ, a/D, β₂ for Test 3.
 
 ## Not done yet
 * Banded/shifted truncation and Schur-complement ring growth (not needed for Mathieu: N = 9

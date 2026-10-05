@@ -2,7 +2,7 @@
 # that calls Python through google.colab.kernel.invokeFunction. Each request returns its frame
 # directly (no background threads -- Colab does not flush widget updates made from them), and
 # the page keeps at most one request in flight, always sending the newest state next.
-import io, base64, numpy as np
+import io, os, time, base64, numpy as np
 from PIL import Image as PImage
 from IPython.display import HTML, JSON, display
 from google.colab import output
@@ -22,10 +22,17 @@ def _params(q):
 def _render(q):
     try:
         r = srv.ask(_cmd('render', _params(q)))
+        t0 = time.time()
         a = np.fromfile(DISP_FILE, np.uint8, count=3 * r['dw'] * r['dh']).reshape(r['dh'], r['dw'], 3)
         buf = io.BytesIO()
-        PImage.fromarray(a).save(buf, 'PNG', compress_level=1)
-        r['img'] = 'data:image/png;base64,' + base64.b64encode(buf.getvalue()).decode()
+        # the frame travels base64-encoded through the kernel channel: its size, not the GPU,
+        # sets the frame rate -- JPEG is ~5x smaller than PNG for these colour gradients
+        if q.get('enc') == 'png':
+            PImage.fromarray(a).save(buf, 'PNG', compress_level=1)
+        else:
+            PImage.fromarray(a).save(buf, 'JPEG', quality=90, subsampling=0)
+        r['img'] = f"data:image/{'png' if q.get('enc') == 'png' else 'jpeg'};base64," + base64.b64encode(buf.getvalue()).decode()
+        r['t_enc'], r['kb'] = (time.time() - t0) * 1e3, buf.tell() / 1024
         return JSON(r)
     except Exception as err:
         return JSON({'error': str(err)})
@@ -73,6 +80,7 @@ APP = r'''
   <label>example <select id="ex"></select></label>
   <label>format <select id="fmt"></select></label>
   <label>resolution <select id="res"></select></label>
+  <label>image <select id="enc"><option value="jpeg">JPEG (fast transfer)</option><option value="png">PNG (exact pixels)</option></select></label>
  </div>
  <div class="row">
   <label>rightmost root <select id="ref"></select></label>
@@ -147,7 +155,7 @@ APP = r'''
   return {ex: e.key, fmt: $('fmt').value, nx, ny, x0: +$('x0').value, x1: +$('x1').value,
           y0: +$('y0').value, y1: +$('y1').value, c, maxw: 1600, maxh: 900, smin: +$('smin').value,
           flags: $('flg').checked ? 1 : 0, bnd: $('bnd').checked ? 1 : 0,
-          wmax: isF16() ? Math.min(wmax(), META.w16) : wmax(), refine: $('ref').value};
+          wmax: isF16() ? Math.min(wmax(), META.w16) : wmax(), refine: $('ref').value, enc: $('enc').value};
  }
  let busy = false, dirty = false;
  async function go() {
@@ -170,7 +178,8 @@ APP = r'''
       `(${Math.round(r.mpts).toLocaleString()} Mpts/s)${re} | colour + downsample ${r.t_colour.toFixed(2)} ms | ` +
       `read-back ${r.t_read.toFixed(2)} ms${al} | flagged ${r.flagged_pct.toFixed(3)} %` +
       (r.wmax === null ? ' | one period strip (Hill)' : ` | &omega;<sub>max</sub> = ${(+r.wmax.toPrecision(3)).toLocaleString()}`) + `<br>` +
-      `frame round trip ${rt.toFixed(0)} ms (GPU + PNG + transfer to the browser) on ${META.device}`;
+      `frame round trip ${rt.toFixed(0)} ms (~${(1e3 / rt).toFixed(0)} fps): GPU work above, ${p.enc.toUpperCase()} ` +
+      `${r.kb.toFixed(0)} KB encoded in ${r.t_enc.toFixed(1)} ms, the rest is the transfer to the browser; ${META.device}`;
     $('cap').innerHTML = `<b>${e.title}</b> &mdash; horizontal: ${e.xl} &isin; [${fmt(p.x0)}, ${fmt(p.x1)}], vertical: ` +
       `${e.yl} &isin; [${fmt(p.y0)}, ${fmt(p.y1)}] &mdash; red: number of unstable roots (darker = more), ` +
       `purple to yellow: rightmost root &sigma; in the stable domain (yellow = close to the boundary)`;
@@ -184,7 +193,7 @@ APP = r'''
   setView(cx - hx, cx + hx, cy - hy, cy + hy); go(); }
  function pan(dx, dy) { const sx = (+$('x1').value - +$('x0').value) * dx, sy = (+$('y1').value - +$('y0').value) * dy;
   setView(+$('x0').value + sx, +$('x1').value + sx, +$('y0').value + sy, +$('y1').value + sy); go(); }
- $('ex').onchange = reset; $('res').onchange = go; $('ref').onchange = go;
+ $('ex').onchange = reset; $('res').onchange = go; $('ref').onchange = go; $('enc').onchange = go;
  $('fmt').onchange = () => { const e = EX[$('ex').value]; if (e.hill && isF16() && !e.f16) $('fmt').value = 'F32'; defaultW(); go(); };
  $('wm').oninput = () => { showW(); go(); };
  $('smin').oninput = () => { $('sminv').textContent = $('smin').value; go(); };

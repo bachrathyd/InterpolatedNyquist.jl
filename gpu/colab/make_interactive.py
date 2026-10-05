@@ -127,8 +127,10 @@ md("""
 ## 3. The interactive chart
 Move a slider, pick another example / format / resolution, zoom or pan: the chart is recomputed on
 the GPU. The page always shows the newest request (intermediate slider positions are skipped while
-a frame is in flight). The status line gives the GPU times; the frame round trip adds the PNG
-encoding and the transfer to your browser.
+a frame is in flight). The status line gives the GPU times; the frame round trip adds the image
+encoding and the transfer to your browser, which, not the GPU, limits the frame rate of the fast
+examples. The live view is therefore sent as JPEG, about 5× smaller than PNG; choose *PNG* for exact
+pixels. *save full-resolution PNG* always writes the exact chart.
 """)
 code(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "interactive_app.py"),
           encoding="utf-8").read())
@@ -143,8 +145,11 @@ code(r"""
 # srv.close()
 """)
 
-def write(out, branch, extra_md=None):
+def write(out, branch, extra_md=None, default_ex=None):
     cs = json.loads(json.dumps(cells).replace("%BRANCH%", branch))
+    if default_ex:                     # the example shown first (the app reads DEFAULT_EX)
+        app = next(c for c in cs if c["cell_type"] == "code" and any("APP = r'''" in l for l in c["source"]))
+        app["source"].insert(0, f"DEFAULT_EX = '{default_ex}'\n")
     if extra_md:
         cs.insert(1, {"cell_type": "markdown", "metadata": {}, "source": extra_md.strip(chr(10)).splitlines(True)})
     nb = {"cells": cs, "metadata": {"accelerator": "GPU", "colab": {"provenance": [], "gpuType": "G4"},
@@ -160,19 +165,29 @@ def write(out, branch, extra_md=None):
 write("NyquistGPU_Interactive.ipynb", "gpu-cuda")
 write("NyquistGPU_Hill_Interactive.ipynb", "hill-argument-principle", r"""
 ## Time-periodic systems (branch `hill-argument-principle`)
-Besides the three time-independent examples, the dropdown offers three **time-periodic** delayed
+Besides the three time-independent examples, the dropdown offers four **time-periodic** delayed
 systems, decided by a **Hill determinant + argument principle** (no time integration):
-* *delayed Mathieu* x'' + κx' + (δ + ε cos t)x = b x(t − 2π) (axes δ, b);
-* *milling, straight flutes* (Test 2): 1-DOF, z = 2, down milling, f_n = 922 Hz, cutting-force
-  coefficient with a jump at tooth entry (axes: spindle speed [1000 rpm], depth of cut [mm]);
-* *milling, different helix angles* (Test 3): helix 30° and β₂, the delay of every tooth distributed
-  linearly over the axial depth, spindle period.
+* *milling, straight flutes (Test 2, compressed Hill, fast)*, shown first. 1-DOF, z = 2, down milling,
+  f_n = 922 Hz, a cutting-force coefficient with a jump at tooth entry; axes: spindle speed [1000 rpm]
+  and depth of cut [mm].
+  - The infinite Hill determinant is used with all harmonics in closed form. The matrix determinant
+    lemma reduces it to the 16 quadrature nodes of the cutting window, and its semiseparable
+    structure gives that 16×16 determinant in O(16) operations.
+  - The count runs along the unit circle of the Floquet multiplier.
+  - On a G4, a full HD chart takes **18 ms in Float16**, 25 ms with the Float32 re-check of the
+    flagged points, and 70 ms in Float32.
+* *delayed Mathieu* x'' + κx' + (δ + ε cos t)x = b x(t − 2π); axes δ and b.
+* *milling, straight flutes (Test 2, dense Hill, slow)*: the same chart from the truncated dense Hill
+  matrix, the reference implementation.
+* *milling, different helix angles* (Test 3): helix 30° and β₂, with the delay of every tooth
+  distributed linearly over the axial depth; spindle period.
 
-The milling examples are heavy (a dense Hill matrix and its LU per point and frequency sample,
-stored in GPU memory): they start at 480×270 / 320×180 (about a second per frame); higher resolutions
+The dense milling examples are heavy: a dense Hill matrix and its LU per point and frequency sample,
+stored in GPU memory. They start at 480×270 / 320×180, about a second per frame; higher resolutions
 work but take proportionally longer.
 
-Counting: unstable Floquet exponents in one period strip of the imaginary axis, from the phase of the
-row-scaled (pole-free) Hill determinant; the number of harmonics is derived per point from one
-tolerance. Float32/Float64 only; the rightmost-root colouring uses the Newton-polished estimate.
-""")
+How the dense forms count: unstable Floquet exponents in one period strip of the imaginary axis,
+from the phase of the row-scaled (pole-free) Hill determinant. The number of harmonics is derived per
+point from one tolerance. The rightmost-root colouring uses the Newton-polished estimate. Float16 is
+offered for the fast example only.
+""", default_ex="mill2q")
