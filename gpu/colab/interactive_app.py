@@ -2,7 +2,7 @@
 # that calls Python through google.colab.kernel.invokeFunction. Each request returns its frame
 # directly (no background threads -- Colab does not flush widget updates made from them), and
 # the page keeps at most one request in flight, always sending the newest state next.
-import io, os, time, base64, numpy as np
+import io, os, json, time, base64, numpy as np
 from PIL import Image as PImage
 from IPython.display import HTML, JSON, display
 from google.colab import output
@@ -157,35 +157,46 @@ APP = r'''
           flags: $('flg').checked ? 1 : 0, bnd: $('bnd').checked ? 1 : 0,
           wmax: isF16() ? Math.min(wmax(), META.w16) : wmax(), refine: $('ref').value, enc: $('enc').value};
  }
- let busy = false, dirty = false;
+ // Two requests in flight: the kernel channel has a fixed latency of tens of ms per call, so
+ // the next frame is computed while the previous one travels; only the newest state is
+ // queued, and a response older than the frame on screen is dropped.
+ const DEPTH = 2;
+ let inflight = 0, dirty = false, seq = 0, shown = 0, tShown = 0, fps = 0;
  async function go() {
-  if (busy) { dirty = true; return; }
-  busy = true; dirty = false;
-  const p = params(), t0 = performance.now();
+  if (inflight >= DEPTH) { dirty = true; return; }
+  inflight++; dirty = false;
+  const id = ++seq, p = params(), t0 = performance.now();
   const slow = setTimeout(() => $('st').innerHTML = '<i>computing&hellip; (the first use of an example / format ' +
                                   'compiles its kernel, ~10-30 s; a new resolution allocates the plan)</i>', 400);
   try {
    const res = await google.colab.kernel.invokeFunction('nyq.render', [p], {});
    const r = res.data['application/json'];
    clearTimeout(slow);
-   if (r.error) { $('st').innerHTML = '<b style="color:#d33">error:</b> ' + r.error; }
+   if (id < shown) {}                                   // overtaken by a newer frame
+   else if (r.error) { $('st').innerHTML = '<b style="color:#d33">error:</b> ' + r.error; }
    else {
     $('im').src = r.img;
-    const rt = performance.now() - t0, e = EX[p.ex];
+    const now = performance.now(), rt = now - t0, e = EX[p.ex];
+    if (id === shown + 1 && t0 < tShown) {   // sent before the previous frame arrived: continuous updates
+     const f = 1e3 / (now - tShown); fps = fps > 0 ? 0.7 * fps + 0.3 * f : f;
+    } else fps = 0;
+    shown = id; tShown = now;
     const re = p.fmt === 'F16+' ? ` | re-check ${r.n_recheck.toLocaleString()} pts ${r.t_recheck.toFixed(2)} ms` : '';
     const al = r.t_plan > 2 ? ` | plan allocation ${r.t_plan.toFixed(0)} ms` : '';
     $('st').innerHTML = `${p.nx}&times;${p.ny} = ${(r.n / 1e6).toFixed(2)} Mpts | <b>GPU kernel ${r.t_kernel.toFixed(2)} ms</b> ` +
       `(${Math.round(r.mpts).toLocaleString()} Mpts/s)${re} | colour + downsample ${r.t_colour.toFixed(2)} ms | ` +
       `read-back ${r.t_read.toFixed(2)} ms${al} | flagged ${r.flagged_pct.toFixed(3)} %` +
       (r.wmax === null ? ' | one period strip (Hill)' : ` | &omega;<sub>max</sub> = ${(+r.wmax.toPrecision(3)).toLocaleString()}`) + `<br>` +
-      `frame round trip ${rt.toFixed(0)} ms (~${(1e3 / rt).toFixed(0)} fps): GPU work above, ${p.enc.toUpperCase()} ` +
-      `${r.kb.toFixed(0)} KB encoded in ${r.t_enc.toFixed(1)} ms, the rest is the transfer to the browser; ${META.device}`;
+      `frame round trip ${rt.toFixed(0)} ms: GPU work above, ${p.enc.toUpperCase()} ${r.kb.toFixed(0)} KB encoded in ` +
+      `${r.t_enc.toFixed(1)} ms, the rest is the transfer to the browser` +
+      (fps > 0 ? ` | <b>display rate ~${fps.toFixed(1)} fps</b> (while moving a slider, ${DEPTH} frames in flight)` : '') +
+      `; ${META.device}`;
     $('cap').innerHTML = `<b>${e.title}</b> &mdash; horizontal: ${e.xl} &isin; [${fmt(p.x0)}, ${fmt(p.x1)}], vertical: ` +
       `${e.yl} &isin; [${fmt(p.y0)}, ${fmt(p.y1)}] &mdash; red: number of unstable roots (darker = more), ` +
       `purple to yellow: rightmost root &sigma; in the stable domain (yellow = close to the boundary)`;
    }
   } catch (err) { clearTimeout(slow); $('st').textContent = 'error: ' + err; }
-  busy = false;
+  inflight--;
   if (dirty) go();
  }
  function zoom(f) { const cx = (+$('x0').value + +$('x1').value) / 2, cy = (+$('y0').value + +$('y1').value) / 2;
@@ -207,15 +218,38 @@ APP = r'''
   const r = (await google.colab.kernel.invokeFunction(name, [params()], {})).data['application/json'];
   $('st2').innerHTML = r.error ? 'error: ' + r.error : show(r);
  }
- $('bench').onclick = () => extra('nyq.bench', 'benchmarking&hellip;', r =>
+ // whole frames as the page receives them (GPU, encoding, transfer, decoding), `depth` requests in flight
+ async function displayRate(n, depth) {
+  const p = params(); let sent = 0, got = 0; const t0 = performance.now();
+  await new Promise(done => {
+   const one = async () => {
+    sent++;
+    const r = (await google.colab.kernel.invokeFunction('nyq.render', [p], {})).data['application/json'];
+    if (!r.error) $('im').src = r.img;
+    if (++got === n) done(); else if (sent < n) one();
+   };
+   for (let i = 0; i < Math.min(depth, n); i++) one();
+  });
+  return (performance.now() - t0) / n;
+ }
+ $('bench').onclick = async () => {
+  await extra('nyq.bench', 'benchmarking the GPU kernel&hellip;', r =>
    `benchmark: kernel median ${r.med.toFixed(3)} ms, min ${r.min.toFixed(3)} ms over 20 frames ` +
    `(${Math.round(r.n / r.med / 1e3).toLocaleString()} Mpts/s)`);
+  const k = $('st2').innerHTML;
+  $('st2').innerHTML = k + '<br><i>measuring the display rate&hellip;</i>';
+  const d1 = await displayRate(20, 1), d2 = await displayRate(20, DEPTH);
+  $('st2').innerHTML = k + `<br>display (whole frames in this browser, 20 each): ${d1.toFixed(0)} ms per frame ` +
+   `(${(1e3 / d1).toFixed(1)} fps) one at a time, <b>${d2.toFixed(0)} ms (${(1e3 / d2).toFixed(1)} fps) with ${DEPTH} in flight</b>`;
+ };
  $('save').onclick = () => extra('nyq.save', 'saving the full-resolution image&hellip;', r =>
    `saved <tt>${r.file}</tt> (${r.mb.toFixed(1)} MB): Files panel on the left`);
  if (META.default && EX[META.default]) $('ex').value = META.default;   // DEFAULT_EX in Python
  defaultW();
  reset();
+ if (META.autobench) setTimeout(() => $('bench').onclick(), 3000);     // AUTOBENCH = True in Python
 })();
 </script>
 '''
-display(HTML(APP.replace('%META%', json.dumps(dict(META, default=globals().get('DEFAULT_EX'))))))
+display(HTML(APP.replace('%META%', json.dumps(dict(META, default=globals().get('DEFAULT_EX'),
+                                                     autobench=bool(globals().get('AUTOBENCH')))))))
