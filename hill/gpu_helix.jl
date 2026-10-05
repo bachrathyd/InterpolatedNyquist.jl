@@ -112,7 +112,7 @@ function mill3c_prepare(p, cw)
         A[nf(n, 1)] = Complex(t, cn)
         e = exp(r1 * t)
         A[nf(n, 2)] = e
-        A[nf(n, 3)] = cn / e
+        A[nf(n, 3)] = cn * exp(-r1 * t)              # no complex division (Base widens it to Float64)
         pr = real(_cv(A[nf(n, 4)]))
         A[nf(n, 4)] = Complex(pr, wr ? one(TT) : zero(TT))
         if wr

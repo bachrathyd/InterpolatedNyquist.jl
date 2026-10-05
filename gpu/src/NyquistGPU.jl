@@ -606,6 +606,9 @@ end
 # convert the numeric constants to precision T, pass anything else (a WorkSlot) through
 @inline conv_consts(::Type{T}, c::Tuple) where {T} = map(x -> conv_consts(T, x), c)
 @inline conv_consts(::Type{T}, c::NTuple{N, T}) where {N, T} = c    # no map over long tuples in kernels
+# a homogeneous tuple in another precision: ntuple(Val(N)) is unrolled for any N (a map over a
+# tuple longer than 32 entries is not, and does not compile on the GPU)
+@inline conv_consts(::Type{T}, c::NTuple{N, S}) where {T, N, S <: Number} = ntuple(i -> T(@inbounds c[i]), Val(N))
 @inline conv_consts(::Type{T}, x::Number) where {T} = T(x)
 @inline conv_consts(::Type{T}, x) where {T} = x
 
