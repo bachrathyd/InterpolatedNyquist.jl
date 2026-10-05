@@ -61,7 +61,7 @@ import Atomix
 export LowFloat, Float8_E4M3, Float8_E5M2, Float4_E2M1, Float16_emu, BFloat16_emu, format_range
 export SweepPlan, plan_sweep, run!, fetch_result, sweep, grid_points, chart, recheck!,
        check_eltype, simulate_schedule, coprime_stride, colour_field,
-       plan_grid, regrid!, recheck_flagged!
+       plan_grid, regrid!, recheck_flagged!, set_march!
 
 include("lowfloat.jl")
 
@@ -111,6 +111,9 @@ struct MarchParams{T, TE}
     ωband::T
     npow::T      # leading order n of D (D ~ c λ^n)
     maxsteps::Int32
+    newton::Int32  # Newton steps polishing each tracked root after the march (0: first-order estimate)
+    bisect::Int32  # 1: certify the rightmost root of stable points by counting on shifted lines
+    σtol::T        # its tolerance in Re λ
 end
 evaltype(::MarchParams{T, TE}) where {T, TE} = TE
 
@@ -420,8 +423,128 @@ evals_per_step(::Val{:bs3}) = 3
     return Zraw, σd, ωd, st.steps, fl
 end
 
-@inline function store!(Zr, Sg, Om, St, Fl, i, st, mp)
+# Newton polish of one tracked root in the complex plane, in the march
+# precision T (also when D is evaluated in a narrower format during the march):
+# λ ← λ - D/D', with D' = -i dD/dω from the same dual-number evaluation.
+# Steps longer than the trust radius max(|λ|, 1) are shortened to it (damped
+# Newton). Returns (NaN, NaN) if the last full step is not small (not converged).
+@inline function newton_root(D::F, p, c, s::T, w::T, k::Int32) where {F, T}
+    # a seed on the real axis (the ω = 0 minimum): for real-coefficient D, Newton
+    # started there never leaves the axis and cannot reach a complex pair -- start
+    # slightly above it (a real root still attracts the iteration)
+    if abs(w) < T(1e-3) * max(abs(s), one(T))
+        w = T(0.25) * max(abs(s), T(0.1))
+    end
+    qa = T(Inf)
+    for _ in 1:k
+        Dv, Dw = eval_line(D, p, c, s, w, T)
+        q = newton_q(Dv, Dw)
+        qa = abs2(q)
+        isfinite(qa) || return T(NaN), T(NaN)
+        r2 = max(s * s + w * w, one(T))           # trust radius² max(|λ|, 1)²
+        if qa > r2                                # damped: shorten, do not reject
+            q *= sqrt(r2 / qa)
+        end
+        s += imag(q)
+        w -= real(q)
+    end
+    conv = qa <= T(1e-6) * max(s * s + w * w, one(T))
+    return (conv ? s : T(NaN)), (conv ? w : T(NaN))
+end
+
+# the count on the shifted line Re λ = σ (a full march; -1 if it failed)
+@inline function count_at(D::F, p, c, mp::MarchParams{T, TE}, meth, σ::T) where {F, T, TE}
+    m = MarchParams{T, TE}(σ, mp.ω0, mp.ωmax, mp.h0, mp.rtol, mp.atol, mp.hrel, mp.hmax,
+        mp.ωband, mp.npow, mp.maxsteps, Int32(0), Int32(0), mp.σtol)
+    st = seed(D, p, c, m, Val(1))
+    while st.status == Int8(0)
+        st = march_step(D, st, c, m, meth)
+    end
+    st.status == Int8(1) || return Int32(-1)
+    return round(Int32, m.npow / 2 - st.Φ / T(π))
+end
+
+# Rightmost root of a stable point (count 0 on Re λ = σ) by counting: confirm the
+# estimate σ̂ with the counts at σ̂ ± σtol, otherwise bracket and bisect.
+# a count that does not fail on a line through a root (D = 0 on the line):
+# retry on a slightly shifted line
+@inline function count_near(D::F, p, c, mp::MarchParams{T}, meth, σ::T) where {F, T}
+    k = count_at(D, p, c, mp, meth, σ)
+    k >= Int32(0) && return k
+    return count_at(D, p, c, mp, meth, σ - mp.σtol / 7)
+end
+
+@inline function certify_sigma(D::F, p, c, mp::MarchParams{T}, meth, σh::T) where {F, T}
+    σ0 = mp.σ
+    tol = mp.σtol
+    g = isfinite(σh) ? min(σh, σ0) : σ0 - one(T)
+    hi = min(g + tol, σ0)
+    lo = g - tol
+    if (hi >= σ0 || count_near(D, p, c, mp, meth, hi) == Int32(0)) &&
+       count_near(D, p, c, mp, meth, lo) >= Int32(1)
+        return (lo + hi) / 2                              # the estimate was right
+    end
+    hi = σ0                                               # count 0 here (stable point)
+    span = max(abs(g - σ0), T(0.1))
+    lo = σ0 - span
+    found = false
+    for _ in 1:5                                          # bracket: some root right of lo
+        k = count_near(D, p, c, mp, meth, lo)
+        k < 0 && return T(NaN)
+        if k >= 1
+            found = true
+            break
+        end
+        hi = lo
+        span *= 2
+        lo = σ0 - span
+    end
+    found || return T(NaN)
+    for _ in 1:40
+        hi - lo <= tol && break
+        m = (lo + hi) / 2
+        k = count_near(D, p, c, mp, meth, m)
+        k < 0 && return T(NaN)
+        if k >= 1
+            lo = m
+        else
+            hi = m
+        end
+    end
+    return (lo + hi) / 2
+end
+
+# rightmost of the polished roots (NaN if none converged)
+@inline function refined_dominant(D::F, st::MarchState{T, N}, c, mp::MarchParams{T}) where {F, T, N}
+    cT = map(T, c)
+    σd = T(-Inf)
+    ωd = T(NaN)
+    for j in 1:N
+        s0 = st.ds[j]
+        if isfinite(s0)
+            s, w = newton_root(D, st.p, cT, s0, st.dw[j], mp.newton)
+            if isfinite(s) & (s > σd)
+                σd = s
+                ωd = abs(w)
+            end
+        end
+    end
+    return (isfinite(σd) ? σd : T(NaN)), ωd
+end
+
+@inline function store!(Zr, Sg, Om, St, Fl, i, st, mp, D, c, meth)
     z, s, w, n, f = finish(st, mp)
+    if mp.newton > 0
+        s2, w2 = refined_dominant(D, st, c, mp)
+        if isfinite(s2)
+            s, w = s2, w2
+        end
+    end
+    if (mp.bisect > 0) & isfinite(z)
+        if round(z) == 0
+            s = certify_sigma(D, st.p, c, mp, meth, s)
+        end
+    end
     @inbounds Zr[i] = z
     @inbounds Sg[i] = s
     @inbounds Om[i] = w
@@ -440,7 +563,7 @@ end
         while st.status == Int8(0)
             st = march_step(D, st, c, mp, meth)
         end
-        store!(Zr, Sg, Om, St, Fl, i, st, mp)
+        store!(Zr, Sg, Om, St, Fl, i, st, mp, D, c, meth)
     end
 end
 
@@ -460,7 +583,7 @@ end
             if st.status == Int8(0)
                 st = march_step(D, st, c, mp, meth)
             else                                # finished: store and refill the lane
-                store!(Zr, Sg, Om, St, Fl, i, st, mp)
+                store!(Zr, Sg, Om, St, Fl, i, st, mp, D, c, meth)
                 j += lanes
                 i = j < npts ? scramble(j, P, npts) : Int32(0)
                 if i > 0
@@ -484,7 +607,7 @@ end
         if st.status == Int8(0)
             st = march_step(D, st, c, mp, meth)
         else
-            store!(Zr, Sg, Om, St, Fl, i, st, mp)
+            store!(Zr, Sg, Om, St, Fl, i, st, mp, D, c, meth)
             i = next_point!(counter)
             if i <= npts
                 st = seed(D, @inbounds(Pts[i]), c, mp, nr)
@@ -589,6 +712,16 @@ Keywords (defaults in brackets):
   (forces a minimum sampling density over the resonance band; see the notes on
   rational D in PLAN.md)
 - `maxsteps` [`200_000`]
+- `refine` [`0`] -- Newton steps polishing each tracked root after the march (complex
+  plane, march precision; one evaluation each). 0 keeps the first-order estimate of the
+  paper; 3-5 remove its bias deep in the stable domain. A root whose Newton iteration does
+  not converge is discarded (if none converges, the first-order estimate is kept).
+- `certify` [`false`], `σtol` [`1e-3`] -- for every stable point (Z = 0), determine the
+  rightmost root by COUNTING: σ* is where the count on the shifted line Re λ = σ jumps from
+  0 to ≥ 1. The (polished) estimate σ̂ is confirmed with two extra marches at σ̂ ± σtol;
+  where it is wrong -- the tracked |D| minima can miss the rightmost root deep in the
+  stable domain -- a bracket-and-bisect search finds it. Exact up to σtol, independent of
+  the root tracking; `sigma` is NaN if no root lies right of σ = -16(1 + |σ̂|).
 - `lanes` -- persistent threads for `:strided`/`:queue`. GPU: pass
   `#SMs × resident threads per SM` (the benchmark scripts do); default 2^18.
   CPU: one lane per Julia thread (`:queue`) or 8 per thread (`:strided`).
@@ -601,6 +734,7 @@ function plan_sweep(points; backend = CPU(), T::Type = Float32, Teval::Union{Not
                     schedule::Union{Nothing, Symbol} = nothing, nroots::Integer = 4, n_power,
                     σ = 0.0, ω0 = 1e-9, ω_max = nothing, tol = nothing, h0 = 1e-2,
                     hrel = 1.0, hmax = Inf, ωband = 0.0, maxsteps::Integer = 200_000,
+                    refine::Integer = 0, certify::Bool = false, σtol = 1e-3,
                     lanes::Union{Nothing, Integer} = nothing,
                     workgroup::Union{Nothing, Integer} = nothing)
     method in (:unwrap, :bs3) || error("method must be :unwrap or :bs3")
@@ -618,7 +752,7 @@ function plan_sweep(points; backend = CPU(), T::Type = Float32, Teval::Union{Not
     workgroup = something(workgroup, cpu ? (schedule === :pixel ? 64 : 1) : 256)
     TE = something(Teval, T)
     mp = MarchParams{T, TE}(T(σ), T(ω0), T(ω_max), T(h0), T(tol), T(tol), T(hrel), T(hmax),
-        T(ωband), T(n_power), Int32(maxsteps))
+        T(ωband), T(n_power), Int32(maxsteps), Int32(refine), Int32(certify), T(σtol))
     dpts = KernelAbstractions.allocate(backend, eltype(hpts), npts)
     copyto!(dpts, hpts)
     Zraw = KernelAbstractions.zeros(backend, T, npts)
@@ -631,6 +765,26 @@ function plan_sweep(points; backend = CPU(), T::Type = Float32, Teval::Union{Not
                      typeof(dpts)}(
         backend, npts, length(hpts[1]), method, schedule, lanes, workgroup,
         coprime_stride(npts), mp, dpts, Zraw, sig, om, st, fl, ctr)
+end
+
+"""
+    set_march!(plan; ω_max, refine, certify, σtol, σ, tol) -> plan
+
+Change march settings of an existing plan without reallocating (slider-driven
+use): the end of the march `ω_max`, the Newton polish `refine`, the line `σ`,
+the tolerance `tol`. Unspecified settings are kept.
+"""
+function set_march!(p::SweepPlan{T}; ω_max = nothing, refine = nothing, σ = nothing,
+                    tol = nothing, certify = nothing, σtol = nothing) where {T}
+    m = p.mp
+    TE = evaltype(m)
+    t = tol === nothing ? m.atol : T(tol)
+    p.mp = MarchParams{T, TE}(σ === nothing ? m.σ : T(σ), m.ω0,
+        ω_max === nothing ? m.ωmax : T(ω_max), m.h0, p.method === :unwrap ? t : m.rtol, t,
+        m.hrel, m.hmax, m.ωband, m.npow, m.maxsteps,
+        refine === nothing ? m.newton : Int32(refine),
+        certify === nothing ? m.bisect : Int32(certify), σtol === nothing ? m.σtol : T(σtol))
+    return p
 end
 
 """

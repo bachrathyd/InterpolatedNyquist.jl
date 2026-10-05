@@ -165,6 +165,34 @@ D_promoting(λ, p, c) = λ^2 + 0.5 * λ + p[1]                        # Float64 
         @test (fetch_result(h).Z .== ref.Z)[ok] == trues(count(ok))
     end
 
+    @testset "root refinement: Newton polish and certification by counting" begin
+        # roots p1 ± i p2 and -3 ± 2i: the rightmost real part is max(p1, -3)
+        Dq(λ, p, c) = ((λ - p[1])^2 + p[2]^2) * ((λ + 3)^2 + 4)
+        pts = vec([(a, b) for a in range(-2.5, -0.1; length = 9), b in range(0.3, 3.0; length = 7)])
+        exact = [max(a, -3.0) for (a, b) in pts]
+        r0 = sweep(Dq, pts; n_power = 4, T = Float64)
+        rn = sweep(Dq, pts; n_power = 4, T = Float64, refine = 25)
+        rc = sweep(Dq, pts; n_power = 4, T = Float64, refine = 5, certify = true, σtol = 1e-6)
+        rc32 = sweep(Dq, pts; n_power = 4, T = Float32, certify = true, σtol = 1e-4)
+        @test all(r0.Z .== 0)
+        # Newton polishes the tracked roots; where no |D| minimum was tracked at all
+        # (the blind spot of the line-based estimate) it has nothing to polish
+        ok = isfinite.(rn.sigma)
+        @test isnan.(rn.sigma) == isnan.(r0.sigma)
+        # ... and every polished value is a true root, though not always the rightmost
+        # one (its minimum may be the untracked one): only counting guarantees that
+        @test all(min(abs(s - a), abs(s + 3)) < 1e-6 for (s, (a, b)) in zip(rn.sigma[ok], pts[ok]))
+        @test count(abs.(rn.sigma[ok] .- exact[ok]) .> 1e-6) < count(abs.(r0.sigma[ok] .- exact[ok]) .> 1e-6)
+        @test maximum(abs.(rc.sigma .- exact)) <= 1e-6         # counting brackets all of them
+        @test maximum(abs.(rc32.sigma .- exact)) <= 2e-4
+        # set_march! changes the settings in place
+        g = plan_grid((-2.5, -0.1), (0.3, 3.0), 9, 7; n_power = 4, T = Float64)
+        run!(g, Dq)
+        set_march!(g; refine = 5, certify = true, σtol = 1e-6, ω_max = 1e4)
+        @test g.mp.newton == 5 && g.mp.bisect == 1 && g.mp.ωmax == 1e4
+        @test maximum(abs.(fetch_result(run!(g, Dq)).sigma .- exact)) <= 1e-6
+    end
+
     @testset "precision check" begin
         @test check_eltype(D_hayes, (0.0, 0.0), (), Float32)
         @test !check_eltype(D_promoting, (0.0,), (), Float32)

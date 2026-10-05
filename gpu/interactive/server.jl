@@ -40,6 +40,9 @@ const FORMATS = Dict("F16" => (Float32, Float16, true, false),
                      "F16+" => (Float32, Float16, true, true),
                      "F32" => (Float32, Float32, false, false),
                      "F64" => (Float64, Float64, false, false))
+const REFINES = [("count", "exact rightmost root (Newton + counting on shifted lines)"),
+                 ("newton", "Newton ×10 polish of the tracked roots"),
+                 ("none", "first-order estimate (fastest)")]
 const FORMAT_LABELS = [("F16", "Float16 (fastest)"), ("F16+", "Float16 + Float32 re-check of flagged points"),
                        ("F32", "Float32 (exact, ω_max = 1e5)"), ("F64", "Float64 (reference)")]
 
@@ -58,7 +61,9 @@ function meta_json()
         "\"c\":$(jvec(collect(s.c))),\"smin\":$(e.smin),\"knobs\":[$knobs]}"
     end
     fmts = join(["[$(jstr(k)),$(jstr(l))]" for (k, l) in FORMAT_LABELS], ",")
-    return "{\"device\":$(jstr(device_name())),\"examples\":[$(join(exs, ","))],\"formats\":[$fmts]}"
+    refs = join(["[$(jstr(k)),$(jstr(l))]" for (k, l) in REFINES], ",")
+    return "{\"device\":$(jstr(device_name())),\"examples\":[$(join(exs, ","))],\"formats\":[$fmts]," *
+           "\"refines\":[$refs],\"w16\":$(EXAMPLES[1].ω16)}"
 end
 
 # --------------------------------------------------------------------------
@@ -200,6 +205,16 @@ function render(a)
     t0 = time_ns()
     plan, rplan = get_plan(e, fmt, nx, ny, xr, yr)
     tplan = ms(t0)
+    # march settings that need no reallocation: ω_max (Float16: capped at its window) and
+    # the root refinement (first-order / Newton / exact by counting on shifted lines)
+    _, _, w16, _ = FORMATS[fmt]
+    wreq = parse(Float64, get(a, "wmax", string(w16 ? e.ω16 : 1e5)))
+    wmax = w16 ? min(wreq, e.ω16) : wreq
+    ref = get(a, "refine", "count")
+    nr = ref == "none" ? 0 : (ref == "newton" ? 10 : 5)
+    cert = ref == "count"
+    set_march!(plan; ω_max = wmax, refine = nr, certify = cert)
+    rplan === nothing || set_march!(rplan; ω_max = max(wreq, e.ω16), refine = nr, certify = cert)
     t0 = time_ns()
     run!(plan, e.sys.D, c)
     tker = ms(t0)
@@ -224,7 +239,7 @@ function render(a)
     n = nx * ny
     return "{\"dw\":$dw,\"dh\":$dh,\"f\":$f,\"n\":$n,\"t_plan\":$(jt(tplan)),\"t_kernel\":$(jt(tker))," *
            "\"t_recheck\":$(jt(tre)),\"n_recheck\":$nre,\"t_colour\":$(jt(tcol)),\"t_read\":$(jt(tread))," *
-           "\"mpts\":$(jt(n / tker / 1e3)),\"flagged_pct\":$(jt(100nflag / n))}"
+           "\"mpts\":$(jt(n / tker / 1e3)),\"flagged_pct\":$(jt(100nflag / n)),\"wmax\":$(jnum(wmax))}"
 end
 
 function save(a)

@@ -17,7 +17,7 @@ def _params(q):
     return dict(ex=q['ex'], fmt=q['fmt'], nx=int(q['nx']), ny=int(q['ny']), x0=float(q['x0']),
                 x1=float(q['x1']), y0=float(q['y0']), y1=float(q['y1']), c=c, maxw=int(q['maxw']),
                 maxh=int(q['maxh']), smin=float(q['smin']), flags=int(q['flags']), bnd=int(q['bnd']),
-                out=DISP_FILE)
+                wmax=float(q['wmax']), refine=str(q['refine']), out=DISP_FILE)
 
 def _render(q):
     try:
@@ -74,6 +74,10 @@ APP = r'''
   <label>format <select id="fmt"></select></label>
   <label>resolution <select id="res"></select></label>
  </div>
+ <div class="row">
+  <label>rightmost root <select id="ref"></select></label>
+  <label>&omega;<sub>max</sub> <input type="range" id="wm" min="0.3" max="5" step="0.01"><span class="val" id="wmv"></span></label>
+ </div>
  <div class="row" id="knobs"></div>
  <div class="row">
   <label>&sigma; colour floor <input type="range" id="smin" min="-2" max="-0.005" step="0.005"><span class="val" id="sminv"></span></label>
@@ -104,6 +108,12 @@ APP = r'''
  META.examples.forEach(e => $('ex').add(new Option(e.title, e.key)));
  META.formats.forEach(([k, l]) => $('fmt').add(new Option(l, k)));
  RES.forEach(([l, w, h]) => $('res').add(new Option(l, w + 'x' + h)));
+ META.refines.forEach(([k, l]) => $('ref').add(new Option(l, k)));
+ const isF16 = () => $('fmt').value.startsWith('F16');
+ const wmax = () => Math.pow(10, +$('wm').value);
+ function showW() { const w = wmax(), cap = isF16() && w > META.w16;
+   $('wmv').innerHTML = (cap ? META.w16 : +w.toPrecision(3)).toLocaleString() + (cap ? ' (Float16 cap)' : ''); }
+ function defaultW() { $('wm').value = isF16() ? Math.log10(META.w16) : 5; showW(); }
  $('res').value = '1920x1080';
  let knobs = [];
  const fmt = v => Number(v).toPrecision(4);
@@ -130,7 +140,8 @@ APP = r'''
   const [nx, ny] = $('res').value.split('x').map(Number);
   return {ex: e.key, fmt: $('fmt').value, nx, ny, x0: +$('x0').value, x1: +$('x1').value,
           y0: +$('y0').value, y1: +$('y1').value, c, maxw: 1600, maxh: 900, smin: +$('smin').value,
-          flags: $('flg').checked ? 1 : 0, bnd: $('bnd').checked ? 1 : 0};
+          flags: $('flg').checked ? 1 : 0, bnd: $('bnd').checked ? 1 : 0,
+          wmax: isF16() ? Math.min(wmax(), META.w16) : wmax(), refine: $('ref').value};
  }
  let busy = false, dirty = false;
  async function go() {
@@ -151,7 +162,7 @@ APP = r'''
     const al = r.t_plan > 2 ? ` | plan allocation ${r.t_plan.toFixed(0)} ms` : '';
     $('st').innerHTML = `${p.nx}&times;${p.ny} = ${(r.n / 1e6).toFixed(2)} Mpts | <b>GPU kernel ${r.t_kernel.toFixed(2)} ms</b> ` +
       `(${Math.round(r.mpts).toLocaleString()} Mpts/s)${re} | colour + downsample ${r.t_colour.toFixed(2)} ms | ` +
-      `read-back ${r.t_read.toFixed(2)} ms${al} | flagged ${r.flagged_pct.toFixed(3)} %<br>` +
+      `read-back ${r.t_read.toFixed(2)} ms${al} | flagged ${r.flagged_pct.toFixed(3)} % | &omega;<sub>max</sub> = ${(+r.wmax.toPrecision(3)).toLocaleString()}<br>` +
       `frame round trip ${rt.toFixed(0)} ms (GPU + PNG + transfer to the browser) on ${META.device}`;
     $('cap').innerHTML = `<b>${e.title}</b> &mdash; horizontal: ${e.xl} &isin; [${fmt(p.x0)}, ${fmt(p.x1)}], vertical: ` +
       `${e.yl} &isin; [${fmt(p.y0)}, ${fmt(p.y1)}] &mdash; red: number of unstable roots (darker = more), ` +
@@ -166,7 +177,9 @@ APP = r'''
   setView(cx - hx, cx + hx, cy - hy, cy + hy); go(); }
  function pan(dx, dy) { const sx = (+$('x1').value - +$('x0').value) * dx, sy = (+$('y1').value - +$('y0').value) * dy;
   setView(+$('x0').value + sx, +$('x1').value + sx, +$('y0').value + sy, +$('y1').value + sy); go(); }
- $('ex').onchange = reset; $('fmt').onchange = go; $('res').onchange = go;
+ $('ex').onchange = reset; $('res').onchange = go; $('ref').onchange = go;
+ $('fmt').onchange = () => { defaultW(); go(); };
+ $('wm').oninput = () => { showW(); go(); };
  $('smin').oninput = () => { $('sminv').textContent = $('smin').value; go(); };
  $('bnd').onchange = go; $('flg').onchange = go;
  ['x0', 'x1', 'y0', 'y1'].forEach(id => $(id).onchange = go);
@@ -183,6 +196,7 @@ APP = r'''
    `(${Math.round(r.n / r.med / 1e3).toLocaleString()} Mpts/s)`);
  $('save').onclick = () => extra('nyq.save', 'saving the full-resolution image&hellip;', r =>
    `saved <tt>${r.file}</tt> (${r.mb.toFixed(1)} MB): Files panel on the left`);
+ defaultW();
  reset();
 })();
 </script>
