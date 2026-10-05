@@ -33,6 +33,10 @@ const MODELS = Dict{String, Any}(
                  c = mill3c_consts(Q = 8, ns = 4), Dref = D_mill3c, cref = mill3c_consts(Q = 10, ns = 5),
                  xr = (8.0, 30.0), yr = (0.0, 10.0), kw = CIRCLE, formats = ("F32", "F16", "F16+"),
                  res = nothing, ws = true, wslen = mill3c_wslen, zdiv = 1),
+    "mill3h" => (title = "Test 3: helix 30/45 deg, compressed Hill, Hessenberg (D_mill3h, Q = 8, n_s = 4)", D = D_mill3h,
+                 c = mill3c_consts(Q = 8, ns = 4), Dref = D_mill3h, cref = mill3c_consts(Q = 10, ns = 5),
+                 xr = (8.0, 30.0), yr = (0.0, 10.0), kw = CIRCLE, formats = ("F32", "F16", "F16+"),
+                 res = nothing, ws = true, wslen = mill3h_wslen, zdiv = 1),
 )
 @isdefined(EXTRA_MODELS) && merge!(MODELS, EXTRA_MODELS)
 
@@ -64,7 +68,7 @@ function tour(names; res, chk, csv)
         cx, cy = chk
         println("\n== $(m.title): $(nx)x$(ny), check grid $(cx)x$(cy)")
         # Float64 reference on the check grid (same engine, reference form)
-        rp = plan_for((m..., D = m.Dref), m.cref, m.xr, m.yr, cx, cy, Float64, Float64)
+        rp = plan_for((m..., D = m.Dref), m.cref, m.xr, m.yr, cx, cy, Float64, Float64)   # wslen of Dref = of D
         tref = @elapsed run!(rp, m.Dref, m.cref)
         Zref = counts(Array(rp.Zraw), m.zdiv)
         @printf("   reference (Float64): %.1f s, unstable %.1f %%\n", tref, 100count(>(0), Zref) / length(Zref))
@@ -108,7 +112,7 @@ end
 
 if abspath(PROGRAM_FILE) == @__FILE__
     print_device()
-    tour(String.(split(arg("models", "mill2p,mill3c,mill3d"), ','));
+    tour(String.(split(arg("models", "mill2p,mill3h,mill3c,mill3d"), ','));
          res = parse_res(arg("res", "1920x1080")), chk = parse_res(arg("check", "192x108")),
          csv = arg("csv", nothing))
 end

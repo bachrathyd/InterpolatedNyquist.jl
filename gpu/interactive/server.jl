@@ -44,6 +44,7 @@ if isfile(HILL_MODELS)
     include(joinpath(@__DIR__, "..", "..", "hill", "gpu_fast.jl"))
     include(joinpath(@__DIR__, "..", "..", "hill", "gpu_helix.jl"))
     ws_len(::typeof(D_mill3c)) = mill3c_wslen(8, 4, 42)
+    ws_len(::typeof(D_mill3h)) = mill3h_wslen(8, 4, 42)
     const HKW = (ω0 = A_STRIP, ω_max = A_STRIP + 1, h0 = 1e-3, hrel = 0.05)
     const HKWM = (ω0 = A_STRIP, ω_max = A_STRIP + 1, h0 = 1e-3, hrel = 0.1)   # milling: fewer samples
     const MEMO = Dict{Any, Any}()
@@ -72,8 +73,9 @@ if isfile(HILL_MODELS)
          note = "1-DOF milling, two flutes with helix 30° and β₂ (R = 8 mm), delays distributed over the axial depth, " *
                 "spindle period. Compressed Hill determinant on 2 x 4 x 8 Gauss nodes in the workpiece frame (all harmonics " *
                 "in closed form); the regenerative term of every node is the same material node on the previous tooth. " *
-                "Reduced once per point to a 34 x 34 determinant; counted along the unit circle of the Floquet multiplier.",
-         sys = (title = "milling, different helix angles (Test 3, compressed Hill, fast)", D = D_mill3c,
+                "Reduced once per point to a 34 x 34 determinant in Hessenberg form (O(34²) per evaluation); counted " *
+                "along the unit circle of the Floquet multiplier.",
+         sys = (title = "milling, different helix angles (Test 3, compressed Hill, fast)", D = D_mill3h,
                 c = (0.011, 0.05, 45.0), npow = 0, xr = (8.0, 30.0), yr = (0.0, 10.0), xl = "rpm/1000",
                 yl = "a_p [mm]", kw = HKWQ),
          knobs = [(i = 1, name = "damping ζ", lo = 0.002, hi = 0.05), (i = 2, name = "immersion a/D", lo = 0.02, hi = 1.0),

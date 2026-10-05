@@ -279,3 +279,209 @@ if @isdefined(NyquistGPU)
     NyquistGPU.prepare(::typeof(D_mill3c), p, c) = mill3c_prepare(p, c)
 end
 mill3c_ωp(p, c) = p[1] * 1000 / (60 * c[3])         # spindle frequency / f_n (σ scaling)
+
+# =============================================================================================
+# Hessenberg variant D_mill3h (code review, round 2): the same determinant as D_mill3c, with the
+# λ-free block reduced once per point -- per evaluation O(nw²) instead of O(nw³).
+#
+# D_mill3c evaluates, per μ, the (nw+2) x (nw+2) matrix (w = 1/z, q_k = e^{r_k T_s} w, g_k = ρ_k q_k)
+#   M(w) = [ I - w X11              -w (X12a - w X12b)                      ]
+#          [ diag(g) X21            diag(1 - q) + diag(g) (X22a - w X22b)   ]
+# by a dense dual LU. X11 (nw x nw) is λ-free, so once per point (prepare, march precision):
+#   X11 = U H Uᴴ (Householder, H upper Hessenberg),  Y12a = Uᴴ X12a, Y12b = Uᴴ X12b, Y21 = X21 U,
+# and det M = det of the same matrix with (H, Y12a, Y12b, Y21) in place of (X11, X12a, X12b, X21)
+# (a unitary similarity of the leading block). Per evaluation the bordered Hessenberg matrix
+#   [ I - w H      -w (Y12a - w Y12b) ]
+#   [ diag(g) Y21   ...               ]
+# is factored by Gaussian elimination with PARTIAL PIVOTING over the only rows that can be nonzero in
+# column k: three active dense rows (initially row 1 and the two border rows) and the new Hessenberg
+# row k+1 -- i.e. exactly the pivot choices of the dense LU, without its operations on zeros.
+# The pivot row is consumed; the new row is stored into the pivot's buffer. 3 row buffers, O(n²).
+#
+# Workspace: as D_mill3c, but the (LD x LD) LU area is replaced by 3 row buffers of LD entries
+# (the Householder vectors in prepare use the same area).
+
+mill3h_wslen(Q, ns, LD) = 2Q * ns * (NF3 + 2) + LD * LD + 2LD + 3LD
+mill3h_wslen(c::Tuple) = mill3h_wslen(Int(c[7]), Int(c[8]), Int(c[9]))
+
+# prepare: mill3c's reduction, then the Hessenberg reduction of X11 in place (march precision)
+function mill3h_prepare(p, cw)
+    q = mill3c_prepare(p, cw)
+    c, A = cw
+    TT = typeof(q[1])
+    Q = unsafe_trunc(Int, c[7]); ns = unsafe_trunc(Int, c[8]); LD = unsafe_trunc(Int, c[9])
+    N = 2 * ns * Q
+    XOFF = N * NF3 + 2N
+    XBOFF = XOFF + LD * LD
+    VOFF = XBOFF + 2LD                         # Householder vector (the row-buffer area)
+    nw = unsafe_trunc(Int, q[2])
+    nw + 2 <= LD || return q
+    for k in 1:(nw - 2)
+        m = nw - k
+        xm = zero(TT)                          # scale first (entries ~ a_p: squares underflow at a_p -> 0)
+        for i in 1:m
+            x = _cv(A[XOFF + (k + i) + (k - 1) * LD])
+            xm = max(xm, abs(real(x)), abs(imag(x)))
+        end
+        xm > 0 || continue
+        sc = 1 / xm
+        nx2 = zero(TT)
+        for i in 1:m                           # v = x / xm,  x = H[k+1:nw, k]
+            x = _cv(A[XOFF + (k + i) + (k - 1) * LD]) * sc
+            nx2 += real(x) * real(x) + imag(x) * imag(x)
+            A[VOFF + i] = x
+        end
+        nx = sqrt(nx2)
+        x1 = _cv(A[VOFF + 1])
+        a1 = sqrt(real(x1) * real(x1) + imag(x1) * imag(x1))
+        ph = a1 > 0 ? x1 * (1 / a1) : one(x1)  # x1/|x1| without a complex division
+        A[VOFF + 1] = x1 + ph * nx             # v1 = x1 - α, α = -ph |x|  (no cancellation)
+        τ = 1 / (nx * (nx + a1))               # 2 / (vᴴv), scale-free in v
+        # from the left: column k -> α e1; columns k+1..nw of H, Y12a (Xa cols nw+1:nw+2), Y12b (Xb)
+        A[XOFF + (k + 1) + (k - 1) * LD] = -ph * (nx * xm)
+        for i in 2:m
+            A[XOFF + (k + i) + (k - 1) * LD] = zero(x1)
+        end
+        for j in (k + 1):(nw + 4)
+            base = j <= nw + 2 ? XOFF + (j - 1) * LD : XBOFF + (j - nw - 3) * LD
+            s = zero(x1)
+            for i in 1:m
+                s += conj(_cv(A[VOFF + i])) * _cv(A[base + k + i])
+            end
+            s *= τ
+            for i in 1:m
+                A[base + k + i] = _cv(A[base + k + i]) - s * _cv(A[VOFF + i])
+            end
+        end
+        # from the right: columns k+1..nw of rows 1..nw (H) and nw+1..nw+2 (Y21)
+        for r in 1:(nw + 2)
+            s = zero(x1)
+            for i in 1:m
+                s += _cv(A[XOFF + r + (k + i - 1) * LD]) * _cv(A[VOFF + i])
+            end
+            s *= τ
+            for i in 1:m
+                A[XOFF + r + (k + i - 1) * LD] = _cv(A[XOFF + r + (k + i - 1) * LD]) - s * conj(_cv(A[VOFF + i]))
+            end
+        end
+    end
+    return q
+end
+
+# pivot magnitude (value part; Float32 at least, so that Float16 entries > 256 do not overflow)
+@inline _m2p(z, ::Type{P}) where {P} = (x = P(_val(real(z))); y = P(_val(imag(z))); x * x + y * y)
+
+function D_mill3h(μ, q, cw)
+    c, A = cw
+    TT = typeof(q[1])
+    PT = TT === Float16 ? Float32 : TT
+    ζ = c[1]
+    Q = unsafe_trunc(Int, c[7]); ns = unsafe_trunc(Int, c[8]); LD = unsafe_trunc(Int, c[9])
+    N = 2 * ns * Q
+    XOFF = N * NF3 + 2N
+    XBOFF = XOFF + LD * LD
+    BOFF = XBOFF + 2LD                         # 3 row buffers of LD entries
+    nw = unsafe_trunc(Int, q[2])
+    n2 = nw + 2
+    w = exp(-TT(6.283185307179586) * μ)        # 1/z
+    n2 > LD && return w * TT(NaN)
+    E = typeof(w)
+    sζ = sqrt(1 - ζ * ζ)
+    ρ1 = Complex(zero(TT), -1 / (2 * sζ))
+    er = Complex(q[3], q[4])
+    q1 = er * w
+    q2 = conj(er) * w
+    g1 = ρ1 * q1
+    g2 = conj(ρ1) * q2
+    # row i (1..nw) of [I - wH | -w(Y12a - w Y12b)] at column j
+    @inline hrow(i, j) = j <= nw ? (i == j ? one(E) : zero(E)) - w * Complex{TT}(_cv(A[XOFF + i + (j - 1) * LD])) :
+        -w * (Complex{TT}(_cv(A[XOFF + i + (j - 1) * LD])) - w * Complex{TT}(_cv(A[XBOFF + i + (j - nw - 1) * LD])))
+    # border row b (1, 2) at column j
+    @inline brow(b, j) = begin
+        g = b == 1 ? g1 : g2
+        if j <= nw
+            g * Complex{TT}(_cv(A[XOFF + nw + b + (j - 1) * LD]))
+        else
+            v = g * (Complex{TT}(_cv(A[XOFF + nw + b + (j - 1) * LD])) - w * Complex{TT}(_cv(A[XBOFF + nw + b + (j - nw - 1) * LD])))
+            j - nw == b ? v + (b == 1 ? 1 - q1 : 1 - q2) : v
+        end
+    end
+    # active rows: slots 1..3 (buffers), original row indices
+    for j in 1:n2
+        nw >= 1 && (A[BOFF + j] = hrow(1, j))
+        A[BOFF + LD + j] = brow(1, j)
+        A[BOFF + 2LD + j] = brow(2, j)
+    end
+    sA = 1; sB = 2; sC = 3
+    oA = 1; oB = nw + 1; oC = nw + 2
+    if nw == 0                                 # only the two border rows (not reached for two teeth)
+        sA = 2; oA = nw + 1; sB = 3; oB = nw + 2
+    end
+    d = one(E)
+    for k in 1:nw
+        hasnew = k < nw
+        eA = E(A[BOFF + (sA - 1) * LD + k])
+        eB = E(A[BOFF + (sB - 1) * LD + k])
+        eC = E(A[BOFF + (sC - 1) * LD + k])
+        eN = hasnew ? -w * Complex{TT}(_cv(A[XOFF + (k + 1) + (k - 1) * LD])) : zero(E)
+        pv = 1; best = _m2p(eA, PT)
+        mB = _m2p(eB, PT); mC = _m2p(eC, PT); mN = _m2p(eN, PT)
+        if mB > best; best = mB; pv = 2; end
+        if mC > best; best = mC; pv = 3; end
+        if hasnew && mN > best; best = mN; pv = 4; end
+        piv = pv == 1 ? eA : (pv == 2 ? eB : (pv == 3 ? eC : eN))
+        r = pv == 1 ? oA : (pv == 2 ? oB : (pv == 3 ? oC : k + 1))
+        sp = pv == 1 ? sA : (pv == 2 ? sB : sC)            # pivot's buffer (pv ≤ 3)
+        # sign: rows not yet eliminated with a smaller original index than the pivot row
+        cnt = Int(pv != 1 && oA < r) + Int(pv != 2 && oB < r) + Int(pv != 3 && oC < r) +
+              Int(hasnew && pv != 4 && k + 1 < r) + (r > nw ? max(nw - k - 1, 0) : 0)
+        d *= piv
+        isodd(cnt) && (d = -d)
+        ip = cinv(piv)
+        # update targets t1, t2 (in place), t3 (in place if pv == 4, else the new row into sp)
+        t1 = pv == 1 ? sB : sA
+        t2 = pv == 3 ? sB : sC
+        e1 = pv == 1 ? eB : eA
+        e2 = pv == 3 ? eB : eC
+        f1 = e1 * ip; f2 = e2 * ip
+        f3 = (pv == 4 ? eC : eN) * ip
+        t3 = pv == 4 ? sC : sp
+        if pv == 4                                         # targets A, B, C
+            t1 = sA; t2 = sB
+            f1 = eA * ip; f2 = eB * ip
+        end
+        for j in (k + 1):n2
+            pj = pv == 4 ? hrow(k + 1, j) : E(A[BOFF + (sp - 1) * LD + j])
+            A[BOFF + (t1 - 1) * LD + j] = E(A[BOFF + (t1 - 1) * LD + j]) - f1 * pj
+            A[BOFF + (t2 - 1) * LD + j] = E(A[BOFF + (t2 - 1) * LD + j]) - f2 * pj
+            if pv == 4
+                A[BOFF + (t3 - 1) * LD + j] = E(A[BOFF + (t3 - 1) * LD + j]) - f3 * pj
+            elseif hasnew
+                A[BOFF + (t3 - 1) * LD + j] = hrow(k + 1, j) - f3 * pj
+            end
+        end
+        # new active set
+        if pv != 4
+            if hasnew                                      # the new row took the pivot's buffer
+                pv == 1 && (oA = k + 1)
+                pv == 2 && (oB = k + 1)
+                pv == 3 && (oC = k + 1)
+            else                                           # last column: drop the pivot row
+                if pv == 1
+                    sA = sB; oA = oB; sB = sC; oB = oC
+                elseif pv == 2
+                    sB = sC; oB = oC
+                end
+            end
+        end
+    end
+    # the 2 x 2 Schur complement in the rows (A, B), columns nw+1, nw+2
+    a1 = E(A[BOFF + (sA - 1) * LD + nw + 1]); a2 = E(A[BOFF + (sA - 1) * LD + nw + 2])
+    b1 = E(A[BOFF + (sB - 1) * LD + nw + 1]); b2 = E(A[BOFF + (sB - 1) * LD + nw + 2])
+    d2 = a1 * b2 - a2 * b1
+    return oB < oA ? -(d * d2) : d * d2
+end
+
+if @isdefined(NyquistGPU)
+    NyquistGPU.prepare(::typeof(D_mill3h), p, c) = mill3h_prepare(p, c)
+end
