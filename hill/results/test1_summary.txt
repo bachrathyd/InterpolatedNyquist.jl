@@ -1,0 +1,6 @@
+grid 240x120, δ∈[-1,5], b∈[-1.5,1.5], κ=0.1, ε=1, τ=T=2π, tol=1e-04
+Hill+AP: 0.417 s on 12 threads; reference (RK4 monodromy, 80 steps): 63.533 s
+counts differing from reference: 1 / 28800; stability differing: 0
+max |Zraw - round(Zraw)| = 6.87e-07
+N chosen: 9..9; error estimate max 8.14e-05; evals median 24 max 100
+boundary pixels: μ=+1 83, flip 19, Neimark-Sacker 360
