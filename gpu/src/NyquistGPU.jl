@@ -536,7 +536,18 @@ end
     return (isfinite(σd) ? σd : T(NaN)), ωd
 end
 
-@inline function store!(Zr, Sg, Om, St, Fl, i, st, mp, D, c, meth)
+# rm = Val(:none): no refinement code in the kernel at all (the refinement paths inline D
+# several more times -- registers and spills for every kernel, even when switched off)
+@inline function store!(Zr, Sg, Om, St, Fl, i, st, mp, D, c, meth, ::Val{:none})
+    z, s, w, n, f = finish(st, mp)
+    @inbounds Zr[i] = z
+    @inbounds Sg[i] = s
+    @inbounds Om[i] = w
+    @inbounds St[i] = n
+    @inbounds Fl[i] = f
+    return nothing
+end
+@inline function store!(Zr, Sg, Om, St, Fl, i, st, mp, D, c, meth, ::Val{:refine} = Val(:refine))
     z, s, w, n, f = finish(st, mp)
     if mp.newton > 0
         s2, w2 = refined_dominant(D, st, c, mp)
@@ -584,21 +595,21 @@ end
 # ===========================================================================
 # Kernels -- one per schedule. Pts is a device vector of NTuple{K,T}.
 # ===========================================================================
-@kernel function k_pixel!(Zr, Sg, Om, St, Fl, D, c, @Const(Pts), npts, mp, meth, nr)
+@kernel function k_pixel!(Zr, Sg, Om, St, Fl, D, c, @Const(Pts), npts, mp, meth, nr, rm)
     i = @index(Global, Linear)
     if i <= npts
         st = seed(D, @inbounds(Pts[i]), c, mp, nr)
         while st.status == Int8(0)
             st = march_step(D, st, c, mp, meth)
         end
-        store!(Zr, Sg, Om, St, Fl, i, st, mp, D, c, meth)
+        store!(Zr, Sg, Om, St, Fl, i, st, mp, D, c, meth, rm)
     end
 end
 
 # scrambled index: j ↦ (j·P mod n) + 1 is a bijection for gcd(P, n) = 1
 @inline scramble(j, P, n) = Int32(mod(Int64(j) * Int64(P), Int64(n)) + 1)
 
-@kernel function k_strided!(Zr, Sg, Om, St, Fl, D, c0, @Const(Pts), npts, mp, meth, nr, lanes, P, ws)
+@kernel function k_strided!(Zr, Sg, Om, St, Fl, D, c0, @Const(Pts), npts, mp, meth, nr, lanes, P, ws, rm)
     l = @index(Global, Linear)
     c = with_slot(c0, ws, l, lanes)
     if l <= lanes
@@ -612,7 +623,7 @@ end
             if st.status == Int8(0)
                 st = march_step(D, st, c, mp, meth)
             else                                # finished: store and refill the lane
-                store!(Zr, Sg, Om, St, Fl, i, st, mp, D, c, meth)
+                store!(Zr, Sg, Om, St, Fl, i, st, mp, D, c, meth, rm)
                 j += lanes
                 i = j < npts ? scramble(j, P, npts) : Int32(0)
                 if i > 0
@@ -626,7 +637,7 @@ end
 # atomic fetch-and-add; `+=` returns the NEW value = the next 1-based point
 @inline next_point!(counter) = Atomix.@atomic :monotonic counter[1] += Int32(1)
 
-@kernel function k_queue!(Zr, Sg, Om, St, Fl, D, c0, @Const(Pts), npts, mp, meth, nr, counter, ws, lanes)
+@kernel function k_queue!(Zr, Sg, Om, St, Fl, D, c0, @Const(Pts), npts, mp, meth, nr, counter, ws, lanes, rm)
     l = @index(Global, Linear)
     c = with_slot(c0, ws, l, lanes)
     i = next_point!(counter)
@@ -638,7 +649,7 @@ end
         if st.status == Int8(0)
             st = march_step(D, st, c, mp, meth)
         else
-            store!(Zr, Sg, Om, St, Fl, i, st, mp, D, c, meth)
+            store!(Zr, Sg, Om, St, Fl, i, st, mp, D, c, meth, rm)
             i = next_point!(counter)
             if i <= npts
                 st = seed(D, @inbounds(Pts[i]), c, mp, nr)
@@ -849,21 +860,22 @@ function run!(p::SweepPlan{T, N}, D0::F, c = ()) where {T, N, F}
     cT = conv_consts(evaltype(p.mp), Tuple(c))
     meth = Val(p.method)
     p.ws === nothing || p.schedule !== :pixel || error("a workspace needs the :strided or :queue schedule")
+    rm = (p.mp.newton == 0 && p.mp.bisect == 0) ? Val(:none) : Val(:refine)
     nr = Val(N)
     n = Int32(p.npts)
     if p.schedule === :pixel
         k = k_pixel!(be, p.workgroup)
-        k(p.Zraw, p.sigma, p.omega, p.steps, p.flags, D, cT, p.points, n, p.mp, meth, nr;
+        k(p.Zraw, p.sigma, p.omega, p.steps, p.flags, D, cT, p.points, n, p.mp, meth, nr, rm;
             ndrange = p.npts)
     elseif p.schedule === :strided
         k = k_strided!(be, p.workgroup)
         k(p.Zraw, p.sigma, p.omega, p.steps, p.flags, D, cT, p.points, n, p.mp, meth, nr,
-            Int32(p.lanes), Int32(p.stride), p.ws; ndrange = p.lanes)
+            Int32(p.lanes), Int32(p.stride), p.ws, rm; ndrange = p.lanes)
     else
         fill!(p.counter, Int32(0))
         k = k_queue!(be, p.workgroup)
         k(p.Zraw, p.sigma, p.omega, p.steps, p.flags, D, cT, p.points, n, p.mp, meth, nr, p.counter,
-            p.ws, Int32(p.lanes); ndrange = p.lanes)
+            p.ws, Int32(p.lanes), rm; ndrange = p.lanes)
     end
     KernelAbstractions.synchronize(be)
     return p

@@ -313,3 +313,47 @@ function mill2m_as_q(cm)
     ψ = [cm[6] + (i - 1) * cm[5] for i in 1:Q]
     return (cm[1:4]..., ψ..., cm[7:end]...)
 end
+
+# rolled-loop variant of D_mill2m (one copy of the node body; the constants are read with a
+# run-time index) -- smaller code and fewer live values than the fully unrolled form
+function D_mill2r(μ, p, c::NTuple{L, TT}) where {L, TT}
+    Q = L - 6
+    rk, ap = p
+    ζ, w1 = c[1], c[2]
+    twoπ = TT(6.283185307179586)
+    ω = mill2q_ωp(p, c)
+    T = twoπ / ω
+    λ = μ * ω
+    w = w1 * ap
+    sζ = sqrt(1 - ζ * ζ)
+    r1 = Complex(-ζ, sζ)
+    E = exp(-λ * T)
+    α = w * (1 - E)
+    er1 = exp(r1 * T)
+    W1 = er1 * E
+    W2 = conj(er1) * E
+    Tr = T * Complex(zero(TT), -1 / (2 * sζ))
+    k1 = Tr * cinv(1 - W1)
+    k2 = Tr * cinv(1 - W2)
+    δ = c[5] / ω
+    x1 = c[6] / ω
+    el = exp(-λ * δ); er = exp(r1 * δ)
+    ρ1 = el * er; ρ2 = el * conj(er)
+    e1 = exp(-λ * x1); f1 = exp(r1 * x1)
+    u1 = e1 * f1; u2 = e1 * conj(f1)
+    P11 = zero(λ); P12 = zero(λ); P21 = zero(λ); P22 = zero(λ)
+    i = 1
+    while true
+        g = α * @inbounds(c[6 + i])
+        Y1 = k1 * u1 - Tr * (P11 - P21)
+        Y2 = -k2 * u2 - Tr * (P12 - P22)
+        P11 += g * Y1; P12 += g * Y2; P21 += g * Y1; P22 += g * Y2
+        i == Q && break
+        P11 *= ρ1; P12 *= ρ1; P21 *= ρ2; P22 *= ρ2
+        u1 *= ρ1; u2 *= ρ2
+        i += 1
+    end
+    w1v = W1 * cinv(u1)
+    w2v = W2 * cinv(u2)
+    return (1 + w1v * P11) * (1 + w2v * P22) - w1v * P12 * w2v * P21
+end
