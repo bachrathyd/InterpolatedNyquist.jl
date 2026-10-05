@@ -48,9 +48,55 @@ N = 1/2/3/4/5…; the one-ring a-posteriori estimate is ~N/2 below the true dete
 Images: `results/test1_chart.png` (colour = count, black = reference boundary, blue = mismatch),
 `test1_N.png`, `test1_errest.png`, `test1_boundary_type.png` (green μ=+1, red flip, blue NS).
 
+## Tests 2 and 3: milling (`milling_core.jl`, `test2_milling.jl`, `test3_helix.jl`)
+1-DOF milling, time scaled by ω_n, w = a_p K_t/(mω_n²):
+x'' + 2ζx' + x = −(w/L) Σ_j ∫₀^L g(φ_j) f(φ_j) [x(t) − x(t − τ_j(ζ))] dζ,
+f(φ) = sin φ (cos φ + k_r sin φ), g = 1 on the cutting window (jump at tooth entry).
+Hill matrix A_kl = δ_kl p(s_k) + w C_{k−l} K_{k−l}(s_l): C_m are the Fourier coefficients of the
+cutting function (1/m decay because of the jump), K_m the geometry/delay kernel. Dense, so the
+determinant is an LU of the row-scaled (pole-free) (2N+1)² block times the closed-form diagonal tail.
+
+* **Test 2** (Insperger–Stépán benchmark: z = 2, a/D = 0.05 down milling, K_n/K_t = 1/3, ζ = 0.011,
+  f_n = 922 Hz; 5000–25000 rpm, a_p ≤ 5 mm). Straight teeth, uniform pitch → tooth period, one point
+  delay τ = T, delay factor (1 − e^{−λT}) common to all harmonics → closed-form tail exact.
+  Reference: RK4 monodromy on a grid aligned with the cutting window.
+  - 200×100 chart: **16 of 20 000 counts differ** from the reference (15 in stability), all on boundary
+    pixels; 19.9 s (12 threads) vs 160 s for the reference
+  - flip (period-doubling, 419 boundary px) and Neimark–Sacker (562 px) lobes both reproduced
+  - N chosen 3…40 (median 6): grows with the lobe number, i.e. ∝ 1/(spindle speed) — `test2_N.png`
+  - convergence (`test2_convergence.csv`): determinant error ~N⁻³ once N is past the resonant
+    harmonics; at 6000 rpm, a_p = 3 mm the count is wrong for N = 4, 6 and right from N = 8, at
+    15000–22000 rpm from N = 2; the one-ring estimate is 2–8× below the true error
+* **Test 3** (helix 30°/45°, R = 8 mm, same cutting data; 8000–30000 rpm, a_p ≤ 10 mm). The delay of
+  each tooth varies linearly over the axial depth, τ_j(ζ) = (p_j + ζ(tanβ_j − tanβ_{j−1})/R)/Ω, the
+  angular lag ζ tanβ_j/R shifts the cutting window → spindle period, distributed delays, k-dependent
+  delay factors. Kernel: (a) **exact** (closed form: exponential integrals over ζ), (b) **sampled at
+  n_s axial points** (finite-point kernel, the general route).
+  Reference: RK4 monodromy over the spindle period, 32 axial slices, Hermite-interpolated history.
+  - 120×60 chart (exact kernel): 22 s on 8 threads; N 3…22 (median 10)
+  - **0 of 450** reference points differ (sub-grid; 93 s for the reference)
+  - sampled kernel vs exact: 674 / 252 / 44 / 10 / 3 differing points for n_s = 1 / 2 / 4 / 8 / 16
+    (`test3_kernel_approx.csv`) — the finite-point kernel converges to the exact one
+  - boundary types: μ = +1 290 px, flip 10, NS 270 (the helix tool behaves very differently from Test 2)
+
+## GPU (NyquistGPU kernel unchanged, `gpu_models.jl`)
+D as a function of μ = λ/ω_p(point) so every point marches the same strip μ ∈ [a, a+1]; the kernel's
+Z_raw = −Φ/π = 2Z. Milling: dense LU per thread in an `MMatrix` (N ≤ 24 / 26); a priori N calibrated
+on the CPU study, N = ⌈2√(1 + wH_max/√tol)/ω_p⌉ + 3. Complex division and log are written without
+Base's scaled algorithm (it throws on an exact zero for dual numbers — a kernel exception) but scaled
+by the primal magnitude (Float32 underflow otherwise). GPU forms agree with the CPU cores on all test
+points (Mathieu 450, Test 2 288, Test 3 128) in Float64 and Float32.
+
+## Interactive
+`gpu/colab/NyquistGPU_Hill_Interactive.ipynb` (this branch): the three time-independent examples plus
+*delayed Mathieu*, *milling, straight flutes (Test 2)*, *milling, different helix angles (Test 3)* in
+the example dropdown, model constants as sliders (κ, ε; ζ, a/D, K_n/K_t; ζ, a/D, β₂).
+
 ## Not done yet
 * Banded/shifted truncation and Schur-complement ring growth (not needed for Mathieu: N = 9
   everywhere; becomes relevant for milling with many harmonics).
-* Test 2 (straight-fluted milling, 1 DOF, jump in the force coefficient: full Fourier series
-  of h(t) → banded dense Hill matrix, LU instead of the continuant) and Test 3 (helix, kernel
-  approximation).
+* Schur-complement ring growth (N is re-factorized per ring in the a-posteriori check) and the banded
+  (shifted) window: at low spindle speed N reaches 20–40, a band around the resonant harmonics would
+  cut that.
+* A tighter a-posteriori estimate: the one-ring change underestimates the tail (×N/2 for Mathieu,
+  ×2–8 for milling); a tail-sum (Richardson) correction would make it a bound.

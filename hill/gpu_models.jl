@@ -12,6 +12,12 @@ const NM3 = 26          # max harmonics (spindle period, Test 3): matrix 53 x 53
 # a priori N for milling, calibrated against the adaptive (ring-change) N of the CPU study:
 #   N = ⌈2 sqrt(1 + w H_max/√tol) / ω_p⌉ + 3   (the 1/m tail of the cutting harmonics couples
 #   about twice as far as the Mathieu rule)
+# full MMatrix types (with the length parameter: a non-concrete MMatrix makes StaticArrays
+# compute sizes at run time -- dynamic calls that the GPU compiler rejects)
+const NN2 = 2NM2 + 1
+const NN3 = 2NM3 + 1
+const Mat2{T} = MMatrix{NN2, NN2, T, NN2 * NN2}
+const Mat3{T} = MMatrix{NN3, NN3, T, NN3 * NN3}
 
 @inline _val(x::ForwardDiff.Dual) = ForwardDiff.value(x)
 @inline _val(x::Real) = x
@@ -127,7 +133,7 @@ function D_mill2(μ, p, c)
     n = 2N + 1
     E = 1 - exp(-(2 * oftype(ζ, π) / ωp) * λ)
     B = 1 + w * _H(c, 0, 8, NM2) * E
-    A = MMatrix{2NM2 + 1, 2NM2 + 1, typeof(λ)}(undef)
+    A = Mat2{typeof(λ)}(undef)
     for j in 1:n, i in 1:n
         k = i - N - 1
         l = j - N - 1
@@ -180,7 +186,7 @@ function D_mill3(μ, p, c)
     L = ap
     N = min(unsafe_trunc(Int32, 2 * sqrt(1 + w * Cmax / sqrt(tol)) / ωp) + Int32(4), Int32(NM3))
     n = 2N + 1
-    A = MMatrix{2NM3 + 1, 2NM3 + 1, typeof(λ)}(undef)
+    A = Mat3{typeof(λ)}(undef)
     for j in 1:n, i in 1:n
         k = i - N - 1
         l = j - N - 1

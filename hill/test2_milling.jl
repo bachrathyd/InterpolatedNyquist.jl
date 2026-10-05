@@ -37,6 +37,17 @@ wrong = count(Z .!= ZR); wrong_stab = count((Z .== 0) .!= (ZR .== 0))
 @printf("N: %d..%d, median %d; error estimate max %.1e; evals median %d max %d\n", minimum(NN), maximum(NN),
     median(NN), maximum(ER), median(EV), maximum(EV))
 
+# the differing points, re-checked with a finer reference (320 steps) and N + 10 harmonics
+for I in findall(Z .!= ZR)[1:min(end, 16)]
+    i, j = Tuple(I)
+    Ω = Ωof(rpms[i])
+    zf, ρf = ref_tooth(m, Ω, aps[j]; m1 = 160, m2 = 160)
+    zN = mill_count(m, Ω, aps[j]; N = NN[i, j] + 10).Z
+    @printf("   rpm %6.0f ap %.3f: Hill %d (N %d; N+10: %d), reference %d, finer reference %d (rho %.5f)
+",
+        rpms[i], aps[j], Z[i, j], NN[i, j], zN, ZR[i, j], zf, ρf)
+end
+
 # boundary type from the crossing exponent of the tracked |Δ| minimum (μ = Im λ/ω_p mod 1)
 BT = zeros(Int8, nx, ny)
 for j in 1:ny, i in 1:nx
