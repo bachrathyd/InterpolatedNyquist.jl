@@ -35,8 +35,9 @@ end
 @inline cdiv(a, b) = a * cinv(b)
 
 # LU with partial pivoting on the leading n x n block of an MMatrix, returns det
-@inline function lu_det!(A, n)
-    d = one(eltype(A))
+@inline function lu_det!(A, nn)
+    n = Int(nn)                      # Int indices: StaticArrays' fast path (Int32 -> Base's generic
+    d = one(eltype(A))               # indexing, dynamic calls that the GPU compiler rejects)
     for k in 1:n
         p = k
         best = _mag2(@inbounds A[k, k])
@@ -80,7 +81,7 @@ end
 
 # closed-form diagonal factor: Π_k (s_k - z1)(s_k - z2)/(s_k + cs)², s_k = λ + ikω_p (all k)
 @inline function diag_closed(λ, z1, z2, cs, ωp)
-    w = π / ωp
+    w = oftype(ωp, 3.141592653589793) / ωp
     return exp(lsinh(w * (λ - z1)) + lsinh(w * (λ - z2)) - 2 * lsinh(w * (λ + cs)))
 end
 
@@ -93,7 +94,7 @@ function D_mathieu(μ, p, c)
     λ = μ                                         # ω_p = 1
     N = unsafe_trunc(Int32, sqrt(max(δ, zero(δ)) + ε / (2 * sqrt(tol)))) + Int32(2)
     e2 = (ε / 2)^2
-    B = δ - b * exp(-2 * oftype(δ, π) * λ)
+    B = δ - b * exp(-2 * oftype(δ, 3.141592653589793) * λ)
     cc = one(δ)
     s = λ - Complex(zero(δ), oftype(δ, N))
     rprev = (s + cc)^2
@@ -131,12 +132,13 @@ function D_mill2(μ, p, c)
     w = w1 * ap
     N = min(unsafe_trunc(Int32, 2 * sqrt(1 + w * Hmax / sqrt(tol)) / ωp) + Int32(4), Int32(NM2))
     n = 2N + 1
-    E = 1 - exp(-(2 * oftype(ζ, π) / ωp) * λ)
+    E = 1 - exp(-(2 * oftype(ζ, 3.141592653589793) / ωp) * λ)
     B = 1 + w * _H(c, 0, 8, NM2) * E
     A = Mat2{typeof(λ)}(undef)
-    for j in 1:n, i in 1:n
-        k = i - N - 1
-        l = j - N - 1
+    Ni = Int(N)
+    for j in 1:Int(n), i in 1:Int(n)
+        k = i - Ni - 1
+        l = j - Ni - 1
         s = λ + Complex(zero(ζ), k * ωp)
         r = (s + cs)^2
         @inbounds A[i, j] = cdiv(i == j ? s * s + 2ζ * s + B : w * _H(c, k - l, 8, NM2) * E, r)
@@ -166,12 +168,12 @@ mill3_ωp(p, c) = p[1] * 1000 / (60 * c[6])
     T = typeof(Ω)
     acc = zero(s)
     for j in 1:2
-        θ = j == 1 ? zero(T) : -oftype(Ω, π)
+        θ = j == 1 ? zero(T) : -oftype(Ω, 3.141592653589793)
         b = (j == 1 ? tb1 : tb2) / R
         Δ = (j == 1 ? tb1 - tb2 : tb2 - tb1) / R
         a1 = Complex(zero(T), -m * b * L)
         a2 = a1 - s * (Δ * L / Ω)
-        acc += cis(m * θ) * (phi1(a1) - exp(-s * (oftype(Ω, π) / Ω)) * phi1(a2))
+        acc += cis(m * θ) * (phi1(a1) - exp(-s * (oftype(Ω, 3.141592653589793) / Ω)) * phi1(a2))
     end
     return acc
 end
@@ -187,9 +189,10 @@ function D_mill3(μ, p, c)
     N = min(unsafe_trunc(Int32, 2 * sqrt(1 + w * Cmax / sqrt(tol)) / ωp) + Int32(4), Int32(NM3))
     n = 2N + 1
     A = Mat3{typeof(λ)}(undef)
-    for j in 1:n, i in 1:n
-        k = i - N - 1
-        l = j - N - 1
+    Ni = Int(N)
+    for j in 1:Int(n), i in 1:Int(n)
+        k = i - Ni - 1
+        l = j - Ni - 1
         s = λ + Complex(zero(ζ), k * ωp)
         sl = λ + Complex(zero(ζ), l * ωp)
         v = w * _H(c, k - l, 10, NM3) * kernel3(k - l, sl, Ω, L, tb1, tb2, R)
