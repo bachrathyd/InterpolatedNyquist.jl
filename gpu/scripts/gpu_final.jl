@@ -8,7 +8,7 @@
 #   Float32 with the :queue schedule (for comparison)
 #   Float64 / Float32 / Float16 with ω_max = 15 (enough for this model; Float16 needs
 #   it -- its range ends at 65504 -- and uses the centred frequency scaling of
-#   precision_scaled.jl), plus Float16 + Float64 re-check of its flagged points
+#   precision_scaled.jl), plus Float16 + Float32 re-check of its flagged points
 #   a slider loop: a constant (the delay) changes every frame, Float32
 
 include(joinpath(@__DIR__, "common.jl"))
@@ -64,8 +64,9 @@ for (label, kw) in cases
     push!(rows, join([dev, label, round(1e3tmed; digits = 3), round(1e3tmin; digits = 3),
         round(1e3tf; digits = 3), round(N / tmed / 1e6; digits = 2), median(r.evals), wrong, flagged], ','))
     if occursin("Float16", label)
-        # the hybrid: Float16 sweep + Float64 re-check of the flagged points (production settings)
-        rkw = (c = sys.c, backend = BACKEND, T = Float64, n_power = 4, nroots = 4,
+        # the hybrid: Float16 sweep + re-check of the flagged points at production settings,
+        # in Float32 (error-free above) -- Float64 is 1/32-1/64 rate on most GPUs
+        rkw = (c = sys.c, backend = BACKEND, T = Float32, n_power = 4, nroots = 4,
                schedule = :pixel, lanes = default_lanes())
         recheck!(fetch_result(plan), sys.D, pts; rkw...)                 # compile the re-check
         t = timed() do
