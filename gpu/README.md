@@ -34,11 +34,26 @@ Rules for `D(λ, p, c)`:
 |---|---|
 | `method = :unwrap` (default) | unwraps `arg D(σ+iω)` directly: 1 evaluation per step, step control by the consistency of the observed phase increment with the exact derivatives. **30–130 evaluations per point** on the paper's systems (the integrator needs 650–12 000). |
 | `method = :bs3` | the paper's phase ODE with a Bogacki–Shampine 3(2) pair (validated port of the CPU method) |
-| `schedule = :pixel` (GPU default) | one thread per point -- fastest on the T4 |
+| `schedule = :pixel` (GPU default) | one thread per point -- fastest on every GPU tested (T4, L4, A100, RTX PRO 6000) |
 | `schedule = :queue` (CPU default) | persistent threads + atomic work queue; a lane that finishes a point takes the next one inside the same step loop |
 | `schedule = :strided` | persistent threads, static coprime-stride scramble of the points (statistical balancing, no atomics) |
 | `hmax`, `ωband` | step cap h ≤ hmax for ω < ωband. Needed when chains of roots run close to the axis (e.g. regenerative delay in turning: `hmax ≈ π/(2τ_max)`) |
 | `flags` (output) | bit 1: march failed; bit 2: a root closer to the line than the precision resolves was counted by its side (boundary-grazing point); bit 3: integer residual > 0.25 (a root on the line) |
+
+Large charts and zooming: `plan_grid(xr, yr, nx, ny; kw...)` generates the grid on the
+device (no host array, no upload: an 8K chart is 33 M points) and `regrid!(plan, xr, yr, nx, ny)`
+changes the axis ranges without reallocating. `recheck_flagged!(plan, rplan, D, c)` redoes the
+flagged points of a fast (e.g. Float16-evaluated) sweep in a second plan, entirely on the device.
+
+## Interactive charts (up to 8K)
+Open [`colab/NyquistGPU_Interactive.ipynb`](colab/NyquistGPU_Interactive.ipynb) in Colab
+(*File → Open notebook → GitHub*, or
+`https://colab.research.google.com/github/bachrathyd/InterpolatedNyquist.jl/blob/gpu-cuda/gpu/colab/NyquistGPU_Interactive.ipynb`),
+choose a G4 (RTX PRO 6000) runtime and *Run all*: a dropdown for the example (4th-order,
+showcase, turning), the number format (Float16, Float16 + Float32 re-check, Float32, Float64)
+and the resolution (qHD … 8K UHD), sliders for the constants of the model, zoom/pan, and a
+full-resolution PNG export. The Julia server (`interactive/server.jl`) keeps the plan on the
+GPU and colours and box-filters the chart there, so only the display image is copied back.
 
 ## Layout
 ```
@@ -52,7 +67,9 @@ gpu/
                                     validate_vs_package.jl, boundary_stress.jl
   mdbm/                             MDBM.jl with GPU batches (needs MDBM branch vectorized-eval):
                                     mdbm_chart.jl -- boundary by bisection vs brute force
-  colab/                            NyquistGPU_Colab.ipynb (+ make_notebook.py), plot_fields.py
+  interactive/server.jl             persistent GPU server for the interactive charts (one request per line)
+  colab/                            NyquistGPU_Colab.ipynb (+ make_notebook.py), plot_fields.py,
+                                    NyquistGPU_Interactive.ipynb (+ make_interactive.py)
   results/                          logs/CSVs of the runs
   PLAN.md                           findings, projections, roadmap
 ```
