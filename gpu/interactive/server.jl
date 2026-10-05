@@ -46,7 +46,9 @@ if isfile(HILL_MODELS)
     const HKWM = (ω0 = A_STRIP, ω_max = A_STRIP + 1, h0 = 1e-3, hrel = 0.1)   # milling: fewer samples
     const MEMO = Dict{Any, Any}()
     memo(f, k) = get!(() -> f(), MEMO, k)
-    const HKWQ = (ω0 = 1e-9, ω_max = 0.5, h0 = 1e-3, hrel = 0.05)    # half circle |z| = 1
+    # half circle |z| = 1; the step cap of the strip examples is not needed there (same counts
+    # on 12 800 test points, 13.9 instead of 18.3 evaluations per point)
+    const HKWQ = (ω0 = 1e-9, ω_max = 0.5, h0 = 0.05, hrel = 0.25)
     push!(EXAMPLES,
         (key = "mill2q", ω16 = 0.0, smin = -0.04, hill = true, zdiv = 1, f16 = true, ωp = mill2q_ωp,
          cfun = c -> memo(() -> mill2m_consts(ζ = c[1], aD = c[2], kr = c[3], Q = 16), (:m2q, c)), res = "1920x1080",
