@@ -58,3 +58,24 @@ end
 
 "Device synchronization-free wall timer (run! synchronizes)."
 timed(f) = (t0 = time_ns(); f(); (time_ns() - t0) / 1e9)
+
+"""
+    save_field(out, sys, r, nx, ny, ms; tag = "")
+
+Write a chart for plotting (gpu/colab/plot_fields.py): `<base>.f32` (colour
+field: dominant σ where Z == 0, capped Z elsewhere), `<base>.i8` (counts) and
+`<base>.json` (axes, device, time); `r` needs `nx × ny` fields `Z`, `sigma`.
+"""
+function save_field(out, sys, r, nx, ny, ms; tag = "")
+    base = joinpath(out, "field_$(sys.name)$(tag)_$(nx)x$(ny)")
+    write(base * ".f32", Float32.(colour_field(r)))
+    write(base * ".i8", Int8.(clamp.(r.Z, -1, 127)))
+    open(base * ".json", "w") do io
+        print(io, """{"system": "$(sys.name)$(tag)", "title": "$(sys.title)", "nx": $nx, "ny": $ny,
+ "xr": [$(sys.xr[1]), $(sys.xr[2])], "yr": [$(sys.yr[1]), $(sys.yr[2])],
+ "xl": "$(sys.xl)", "yl": "$(sys.yl)", "device": "$(device_name())", "kernel_ms": $ms,
+ "layout": "column-major nx*ny (x fastest): numpy reshape (ny, nx)"}""")
+    end
+    println("    saved ", base, ".{f32,i8,json}")
+    return base
+end

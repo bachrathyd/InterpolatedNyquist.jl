@@ -39,19 +39,6 @@ csv = String["timestamp,device,system,nx,ny,npts,method,T,schedule,lanes,upload_
 md = String["| system | res | method | T | schedule | kernel ms (med) | frame ms | Mpts/s | evals med/max | flagged | Δcount vs F64 |",
             "|---|---|---|---|---|---|---|---|---|---|---|"]
 
-function save_field(sys, r, nx, ny, ms)
-    base = joinpath(OUT, "field_$(sys.name)_$(nx)x$(ny)")
-    write(base * ".f32", Float32.(colour_field(r)))
-    write(base * ".i8", Int8.(clamp.(r.Z, -1, 127)))
-    open(base * ".json", "w") do io
-        print(io, """{"system": "$(sys.name)", "title": "$(sys.title)", "nx": $nx, "ny": $ny,
- "xr": [$(sys.xr[1]), $(sys.xr[2])], "yr": [$(sys.yr[1]), $(sys.yr[2])],
- "xl": "$(sys.xl)", "yl": "$(sys.yl)", "device": "$(device_name())", "kernel_ms": $ms,
- "layout": "column-major nx*ny (x fastest): numpy reshape (ny, nx)"}""")
-    end
-    println("    saved ", base, ".{f32,i8,json}")
-end
-
 function bench_config(sys, pts, nx, ny, ref, meth, T, sched)
     name = sys.name
     kw = (backend = BACKEND, T = T, method = meth, schedule = sched, n_power = sys.npow,
@@ -80,7 +67,7 @@ function bench_config(sys, pts, nx, ny, ref, meth, T, sched)
         name, nx, ny, meth, T, sched, 1e3tmed, 1e3tf, nx * ny / tmed / 1e6,
         ev[1], ev[3], nflag, dcount))
     if (nx, ny) == FIELDS && meth === :unwrap && T === Float32 && sched === :queue
-        save_field(sys, (Z = reshape(r.Z, nx, ny), sigma = reshape(r.sigma, nx, ny)), nx, ny, 1e3tmed)
+        save_field(OUT, sys, (Z = reshape(r.Z, nx, ny), sigma = reshape(r.sigma, nx, ny)), nx, ny, 1e3tmed)
         # slider loop: the last constant (the delay τ, or 2π for turning, i.e. a
         # spindle-speed scale) changes every frame -- no re-upload, no recompile
         c0 = collect(sys.c)

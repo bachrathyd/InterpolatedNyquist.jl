@@ -65,3 +65,74 @@ def plot_all(folder, out_png=None):
         fig.savefig(out_png, dpi=150)
         print("saved", out_png)
     return fig
+
+
+def colour_rgb(C, Z, sigma_min, z_max=6):
+    """RGBA image of a chart (row 0 = lowest y): viridis spectral gap in the
+    stable domain, Reds for the unstable counts, grey for failed points and a
+    one-pixel white stability boundary."""
+    import matplotlib as mpl
+    rgb = np.zeros(C.shape + (4,))
+    st, un, fail = Z == 0, Z > 0, Z < 0
+    rgb[st] = mpl.colormaps["viridis"](np.clip((C[st] - sigma_min) / (0 - sigma_min), 0, 1))
+    rgb[un] = mpl.colormaps["Reds"](np.clip(C[un] / (z_max + 1), 0, 1))
+    rgb[fail] = (0.5, 0.5, 0.5, 1.0)
+    edge = np.zeros_like(st)
+    edge[:-1, :] |= st[:-1, :] != st[1:, :]
+    edge[:, :-1] |= st[:, :-1] != st[:, 1:]
+    rgb[edge] = (1.0, 1.0, 1.0, 1.0)
+    return rgb
+
+
+def _sigma_floor(C, Z):
+    s = C[(Z == 0) & np.isfinite(C)]
+    return min(float(np.percentile(s, 2)), -1e-3) if s.size else -1.0
+
+
+def save_native(base, png):
+    """The chart as a pixel-exact image (nx x ny pixels, no axes)."""
+    meta, C, Z = load_field(base)
+    plt.imsave(png, np.flipud(colour_rgb(C, Z, _sigma_floor(C, Z))))
+    return png
+
+
+def plot_series(bases, out_png, ncols=3):
+    """Panel figure of a resolution series (same chart, increasing nx*ny)."""
+    bases = sorted(bases, key=lambda b: (lambda m: m["nx"] * m["ny"])(load_field(b)[0]))
+    nrows = -(-len(bases) // ncols)
+    fig, axs = plt.subplots(nrows, ncols, figsize=(6 * ncols, 4.4 * nrows), squeeze=False)
+    for ax, b in zip(axs.flat, bases):
+        plot_field(b, ax)
+    for ax in list(axs.flat)[len(bases):]:
+        ax.axis("off")
+    fig.tight_layout()
+    fig.savefig(out_png, dpi=130)
+    plt.close(fig)
+    return out_png
+
+
+def render_all(folder):
+    """Annotated + native PNG for every field in `folder`, and a panel of any
+    resolution series (fields named field_<system>_series_<nx>x<ny>)."""
+    out = []
+    bases = sorted(p[:-5] for p in glob.glob(os.path.join(folder, "field_*.json")))
+    for b in bases:
+        fig, ax = plt.subplots(figsize=(9, 6))
+        plot_field(b, ax)
+        fig.tight_layout()
+        fig.savefig(b + "_chart.png", dpi=150)
+        plt.close(fig)
+        out += [b + "_chart.png", save_native(b, b + "_native.png")]
+    series = [b for b in bases if "_series_" in os.path.basename(b)]
+    if series:
+        out.append(plot_series(series, os.path.join(folder, "resolution_series.png")))
+    for p in out:
+        print("saved", p)
+    return out
+
+
+if __name__ == "__main__":
+    import sys
+    import matplotlib
+    matplotlib.use("Agg")
+    render_all(sys.argv[1] if len(sys.argv) > 1 else ".")
