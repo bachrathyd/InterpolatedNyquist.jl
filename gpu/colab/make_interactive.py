@@ -251,7 +251,7 @@ offered for the fast example only.
 """, default_ex="mill2q")
 write_tour("NyquistGPU_Hill_Tour.ipynb", "hill-argument-principle")
 
-def write_speed(out, branch):
+def write_speed(out, branch, script="hill/warp/speed_ratio.jl --res 480x270", title="Speed of Float64 / Float32 / Float16 relative to Float32 (milling Tests 3 and 2, 480x270)"):
     "Setup + the format speed ratios (F64 / F32 / F16) on a small chart."
     setup = next(c for c in cells if c["cell_type"] == "code")
     cs = [
@@ -272,3 +272,5 @@ def write_speed(out, branch):
     print("written", out)
 
 write_speed("NyquistGPU_Hill_Speed.ipynb", "hill-argument-principle")
+write_speed("NyquistGPU_Lane_Scaling.ipynb", "hill-argument-principle", "gpu/scripts/gpu_lane_scaling.jl",
+            "GPU thread scaling: chart time vs number of GPU threads (Float64), three time-independent examples")
