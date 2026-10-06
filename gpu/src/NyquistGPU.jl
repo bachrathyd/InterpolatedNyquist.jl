@@ -867,11 +867,12 @@ end
 
 # 0: incomplete (a corner is not evaluated), 1: complete, 2: complete and to be refined -- the
 # corner counts differ, a corner is flagged, or a corner is closer to a root than L * (cell side)
-@inline function mark_cell(lev, Zr, Fl, Rh, c, nx, ny, s, L, ncx)
+@inline function mark_cell(lev, Zr, Fl, Rh, c, nx, ny, s, Lc, s0, ncx0, ncx)
     I = (c - 1) % ncx
     J = (c - 1) ÷ ncx
     i0, i1 = cellspan(I, s, nx)
     j0, j1 = cellspan(J, s, ny)
+    L = @inbounds Lc[1 + (I * s) ÷ s0 + ((J * s) ÷ s0) * ncx0]     # the bound of its first-pass cell
     k1 = pix(i0, j0, nx); k2 = pix(i1, j0, nx); k3 = pix(i0, j1, nx); k4 = pix(i1, j1, nx)
     comp = (@inbounds(lev[k1]) > 0) & (@inbounds(lev[k2]) > 0) & (@inbounds(lev[k3]) > 0) &
            (@inbounds(lev[k4]) > 0)
@@ -937,6 +938,54 @@ end
     return m
 end
 
+# local slope bound: the largest |Δρ| per pixel along the edges of EVERY level inside first-pass
+# cell c (nodes i0, i0 + s, ..., i1 as in request_cell!) whose two ends are evaluated and near a
+# root. A first-pass secant cannot see slopes above ρcut/s0 (both ends < ρcut), and ρ oscillates
+# with the stability lobes -- in milling charts their density grows like 1/rpm² -- so the bound
+# of a cell must come from the finest data around it.
+@inline function cell_slope_levels(lev, Rh, c, nx, ny, s0, ncx, ρcut::T, strides) where {T}
+    I = (c - 1) % ncx
+    J = (c - 1) ÷ ncx
+    i0, i1 = cellspan(I, s0, nx)
+    j0, j1 = cellspan(J, s0, ny)
+    m = zero(T)
+    for s in strides
+        j = j0
+        while true
+            i = i0
+            while true
+                k = pix(i, j, nx)
+                if (@inbounds(lev[k]) > 0)
+                    r = @inbounds Rh[k]
+                    if r < ρcut
+                        ii = min(i + s, i1)
+                        if ii > i
+                            k2 = pix(ii, j, nx)
+                            if @inbounds(lev[k2]) > 0
+                                r2 = @inbounds Rh[k2]
+                                r2 < ρcut && (m = max(m, abs(r2 - r) / T(ii - i)))
+                            end
+                        end
+                        jj = min(j + s, j1)
+                        if jj > j
+                            k3 = pix(i, jj, nx)
+                            if @inbounds(lev[k3]) > 0
+                                r3 = @inbounds Rh[k3]
+                                r3 < ρcut && (m = max(m, abs(r3 - r) / T(jj - j)))
+                            end
+                        end
+                    end
+                end
+                i == i1 && break
+                i = min(i + s, i1)
+            end
+            j == j1 && break
+            j = min(j + s, j1)
+        end
+    end
+    return m
+end
+
 @inline function blend4(A, k1, k2, k3, k4, w1::T, w2::T, w3::T, w4::T) where {T}
     num = zero(T); den = zero(T)
     v = @inbounds A[k1]; ((w1 > 0) & isfinite(v)) && (num += w1 * v; den += w1)
@@ -986,10 +1035,32 @@ end
     end
 end
 
-@kernel function k_mark!(mark, @Const(lev), @Const(Zr), @Const(Fl), @Const(Rh), nx, ny, s, L, ncx, ncy)
+@kernel function k_mark!(mark, @Const(lev), @Const(Zr), @Const(Fl), @Const(Rh), nx, ny, s, @Const(Lc), s0, ncx0,
+                         ncx, ncy)
     c = @index(Global, Linear)
     if c <= ncx * ncy
-        @inbounds mark[c] = mark_cell(lev, Zr, Fl, Rh, c, nx, ny, s, L, ncx)
+        @inbounds mark[c] = mark_cell(lev, Zr, Fl, Rh, c, nx, ny, s, Lc, s0, ncx0, ncx)
+    end
+end
+
+@kernel function k_lslope!(sl, @Const(lev), @Const(Rh), nx, ny, s0, ncx, ncy, ρcut, strides)
+    c = @index(Global, Linear)
+    if c <= ncx * ncy
+        @inbounds sl[c] = cell_slope_levels(lev, Rh, c, nx, ny, s0, ncx, ρcut, strides)
+    end
+end
+
+# L of a first-pass cell: Lscale x the largest local slope within `dil` cells, at least Lmin
+@kernel function k_ldil!(Lc, @Const(sl), ncx, ncy, Lscale, dil, Lmin)
+    c = @index(Global, Linear)
+    if c <= ncx * ncy
+        I = (c - 1) % ncx
+        J = (c - 1) ÷ ncx
+        m = zero(eltype(Lc))
+        for b in max(0, J - dil):min(ncy - 1, J + dil), a in max(0, I - dil):min(ncx - 1, I + dil)
+            m = max(m, @inbounds sl[1 + a + b * ncx])
+        end
+        @inbounds Lc[c] = max(Lscale * m, Lmin)
     end
 end
 
@@ -1311,7 +1382,7 @@ end
 
 """
     run_adaptive!(plan, D, c = (); strides = (16, 8, 4, 2, 1), L = nothing, Lscale = 1.5,
-                  ρcut = nothing, dil = 1, warm = false, rplan = nothing) -> NamedTuple
+                  ρcut = nothing, dil = 1, warm = false, rplan = nothing, Lmode = :local) -> NamedTuple
 
 Certified coarse-to-fine chart of a [`plan_grid`](@ref) plan: the same counts as [`run!`](@ref)
 from a fraction of the points. The count changes only where a multiplier / root crosses the
@@ -1325,18 +1396,24 @@ boundaries).
   cells and their `dil` neighbours request their stride-s/next nodes, and the requests of all
   levels form the work list of the next pass ([`run_list!`](@ref)). Until no cell requests.
 * `L = nothing`: self-calibrated after pass 1 as `Lscale` × the largest |Δρ| per pixel along
-  the first-pass edges whose ends both have ρ < `ρcut` (default 0.04 (ω_max - ω0)).
+  the first-pass edges whose ends both have ρ < `ρcut` (default 0.04 (ω_max - ω0)). With
+  `Lmode = :local` (default) that value is only the floor: after every pass each first-pass cell
+  gets `Lscale` × the largest |Δρ| per pixel along the edges of every evaluated level within `dil`
+  cells of it. (A first-pass secant cannot see slopes above ρcut/s0, and ρ oscillates with the
+  stability lobes, whose density grows like 1/rpm² in milling charts: the single bound missed
+  1-pixel-wide lobes at low rpm on a 192 x 108 Test 3 chart.) `Lmode = :global`: the floor only.
 * The pixels never evaluated get the count of their finest complete cell (its corners agree),
   σ, ω, ρ bilinear, steps = 0, flags = 0.
 * `warm = true`: the pixels evaluated by the previous call go into the first pass (slider
   moves: ~2 passes instead of 5). `rplan`: a Float32 plan of the same grid -- the flagged
   points of each pass are re-checked there before the cells are marked (the F16+ format).
-Returns `(passes = points per pass, points, L)`; `plan.aux.lev` holds the pass that evaluated
-each pixel (0: filled).
+Returns `(passes = points per pass, points, L = the floor, Lmax = the largest cell bound)`;
+`plan.aux.lev` holds the pass that evaluated each pixel (0: filled).
 """
 function run_adaptive!(p::SweepPlan{T}, D, c = (); strides = (16, 8, 4, 2, 1), L = nothing,
                        Lscale = 1.5, ρcut = nothing, dil::Integer = 1, warm::Bool = false,
-                       rplan = nothing, maxpasses::Integer = 64) where {T}
+                       rplan = nothing, maxpasses::Integer = 64, Lmode::Symbol = :local) where {T}
+    Lmode in (:local, :global) || error("run_adaptive!: Lmode must be :local or :global")
     nx, ny = p.gridnx, p.gridny
     (nx > 1 && ny > 1 && p.npts == nx * ny) || error("run_adaptive!: needs a plan_grid plan")
     st = Int.(collect(strides))
@@ -1362,6 +1439,11 @@ function run_adaptive!(p::SweepPlan{T}, D, c = (); strides = (16, 8, 4, 2, 1), L
     marks = [KernelAbstractions.zeros(be, UInt8, prod(ncell(s))) for s in st[1:end-1]]
     ρc = T(something(ρcut, 0.04 * (p.mp.ωmax - p.mp.ω0)))
     Lv = L === nothing ? T(NaN) : T(L)
+    ncx0, ncy0 = ncell(s0)
+    Lc = KernelAbstractions.zeros(be, T, ncx0 * ncy0)         # the bound of every first-pass cell
+    sl = KernelAbstractions.zeros(be, T, ncx0 * ncy0)
+    L === nothing || fill!(Lc, Lv)
+    stT = Tuple(Int32.(st))
     passes = Int[]
     while length(passes) < maxpasses
         KernelAbstractions.synchronize(be)
@@ -1374,17 +1456,21 @@ function run_adaptive!(p::SweepPlan{T}, D, c = (); strides = (16, 8, 4, 2, 1), L
         push!(passes, n)
         rplan === nothing || recheck_points!(p, rplan, D, c, idx[findall(!=(Int8(0)), p.flags[idx])])
         if isnan(Lv)                                       # self-calibration on the first-pass grid
-            ncx, ncy = ncell(s0)
-            slope = KernelAbstractions.zeros(be, T, ncx * ncy)
-            k_slope!(be, 256)(slope, lev, p.rho, Int32(nx), Int32(ny), Int32(s0), Int32(ncx), Int32(ncy), ρc;
-                ndrange = ncx * ncy)
+            k_slope!(be, 256)(sl, lev, p.rho, Int32(nx), Int32(ny), Int32(s0), Int32(ncx0), Int32(ncy0), ρc;
+                ndrange = ncx0 * ncy0)
             KernelAbstractions.synchronize(be)
-            Lv = T(Lscale) * maximum(slope)
+            Lv = T(Lscale) * maximum(sl)
+            Lmode === :global && fill!(Lc, Lv)
+        end
+        if L === nothing && Lmode === :local               # local bounds from every level so far
+            k_lslope!(be, 256)(sl, lev, p.rho, Int32(nx), Int32(ny), Int32(s0), Int32(ncx0), Int32(ncy0), ρc,
+                stT; ndrange = ncx0 * ncy0)
+            k_ldil!(be, 256)(Lc, sl, Int32(ncx0), Int32(ncy0), T(Lscale), Int32(dil), Lv; ndrange = ncx0 * ncy0)
         end
         for (k, s) in enumerate(st[1:end-1])
             ncx, ncy = ncell(s)
-            k_mark!(be, 256)(marks[k], lev, p.Zraw, p.flags, p.rho, Int32(nx), Int32(ny), Int32(s), Lv,
-                Int32(ncx), Int32(ncy); ndrange = ncx * ncy)
+            k_mark!(be, 256)(marks[k], lev, p.Zraw, p.flags, p.rho, Int32(nx), Int32(ny), Int32(s), Lc,
+                Int32(s0), Int32(ncx0), Int32(ncx), Int32(ncy); ndrange = ncx * ncy)
             k_request!(be, 256)(need, marks[k], lev, Int32(nx), Int32(ny), Int32(s), Int32(st[k + 1]),
                 Int32(ncx), Int32(ncy), Int32(dil); ndrange = ncx * ncy)
         end
@@ -1392,7 +1478,7 @@ function run_adaptive!(p::SweepPlan{T}, D, c = (); strides = (16, 8, 4, 2, 1), L
     k_fill!(be, 256)(p.Zraw, p.sigma, p.omega, p.steps, p.flags, p.rho, lev, Int32(nx), Int32(ny),
         Tuple(Int32.(reverse(st[1:end-1]))); ndrange = N)
     KernelAbstractions.synchronize(be)
-    return (passes = passes, points = sum(passes), L = Lv)
+    return (passes = passes, points = sum(passes), L = Lv, Lmax = isempty(passes) ? Lv : maximum(Lc))
 end
 
 """

@@ -173,20 +173,41 @@ def write(out, branch, extra_md=None, default_ex=None):
 def write_tour(out, branch):
     "A short notebook: setup (cell 1 of the interactive notebook) + the GPU tour of the milling charts."
     setup = next(c for c in cells if c["cell_type"] == "code")
+
+    def cc(src):
+        return {"cell_type": "code", "metadata": {}, "execution_count": None, "outputs": [],
+                "source": src.strip("\n").splitlines(True)}
     cs = [
         {"cell_type": "markdown", "metadata": {}, "source": [
             "# GPU tour: milling stability charts (branch `hill-argument-principle`)\n",
             "\n",
-            "Runs `hill/gpu_tour_milling.jl` on the GPU of this runtime: every milling model in every number\n",
-            "format (Float32; Float16 evaluation with a Float32 march; Float16 + a Float32 re-check of the\n",
-            "flagged points), timed at full HD and checked against a Float64 reference on a coarse grid.\n",
-            "Pick the GPU under *Runtime → Change runtime type*, then *Run all* (~10 min, mostly the Julia\n",
+            "Times full-HD milling stability charts on the GPU of this runtime, in every number format\n",
+            "(Float32; Float16 evaluation with a Float32 march; Float16 + a Float32 re-check of the flagged\n",
+            "points), each checked against a Float64 reference on a coarse grid:\n",
+            "* `hill/warp/tour_warp3h.jl`: the hardest case (Test 3, helix 30°/45°, 3–30 krpm × 0–10 mm) with\n",
+            "  the warp-cooperative kernel (one warp per point), full chart and adaptive refinement;\n",
+            "* `hill/gpu_tour_milling.jl`: Test 2 (`mill2g`), Test 3 with one thread per point (`mill3h`), and\n",
+            "  the dense Hill reference (`mill3d`, 480×270).\n",
+            "\n",
+            "Pick the GPU under *Runtime → Change runtime type*, then *Run all* (~20–40 min with the Julia\n",
             "setup). **Afterwards: *Runtime → Disconnect and delete runtime*.**\n"]},
         json.loads(json.dumps(setup).replace("%BRANCH%", branch)),
-        {"cell_type": "code", "metadata": {}, "execution_count": None, "outputs": [], "source": [
-            "MODELS = 'mill2g,mill3h,mill3d'   # see MODELS in hill/gpu_tour_milling.jl\n",
-            "sh(f\"cd {REPO_DIR} && julia --project=gpu/scripts hill/gpu_tour_milling.jl --models {MODELS} \"\n",
-            "   f\"--res 1920x1080 --check 192x108 --csv /content/gpu_tour.csv 2>&1\")\n"]},
+        cc(r'''
+# hardest case, warp-cooperative kernel: smoke test (GPU vs CPU-validated reference), then full HD
+sh(f"cd {REPO_DIR} && julia --project=gpu/scripts hill/warp/tour_warp3h.jl --res 320x180 --check 48x27 --adaptive no 2>&1")
+sh(f"cd {REPO_DIR} && julia --project=gpu/scripts hill/warp/tour_warp3h.jl --res 1920x1080 --check 192x108 "
+   f"--csv /content/tour_warp.csv 2>&1")
+'''),
+        cc(r'''
+MODELS, ADAPTIVE = 'mill2g,mill3h,mill3d', 'yes'   # see MODELS in hill/gpu_tour_milling.jl
+sh(f"cd {REPO_DIR} && julia --project=gpu/scripts hill/gpu_tour_milling.jl --models {MODELS} "
+   f"--res 1920x1080 --check 192x108 --adaptive {ADAPTIVE} --csv /content/tour_main.csv 2>&1")
+'''),
+        cc(r'''
+# registers / local memory / occupancy of the warp kernel, and the CSV rows of both tours
+sh(f"cd {REPO_DIR} && julia --project=gpu/scripts hill/warp/kernel_info_warp3h.jl 2>&1")
+sh("cat /content/tour_warp.csv /content/tour_main.csv")
+'''),
     ]
     nb = {"cells": cs, "metadata": {"accelerator": "GPU", "colab": {"provenance": [], "gpuType": "T4"},
                                     "kernelspec": {"display_name": "Python 3", "name": "python3"},

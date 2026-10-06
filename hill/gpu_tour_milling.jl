@@ -3,7 +3,10 @@
 #   formats: F32 (Float32), F16 (D evaluated in Float16, march in Float32),
 #            F16+ (F16, then the flagged points again in Float32 on the device)
 #   julia --project=gpu/scripts hill/gpu_tour_milling.jl [--models mill2p,mill3c,mill3d] [--res 1920x1080]
-#         [--check 192x108] [--csv out.csv]
+#         [--check 192x108] [--csv out.csv] [--adaptive yes|no]
+# Adaptive rows (model "<name>-ad", models with ad = true): the same chart by NyquistGPU.run_adaptive!
+# (certified coarse-to-fine refinement; F16+ re-checks the flagged points of every pass); their
+# check columns compare with the full chart of the same format at EVERY pixel.
 # Counts: the circle models (mill2n, ...) return Z_raw = Z, the strip models (mill3d) 2Z.
 include(joinpath(@__DIR__, "..", "gpu", "scripts", "common.jl"))
 include(joinpath(@__DIR__, "gpu_models.jl"))
@@ -39,11 +42,11 @@ const MODELS = Dict{String, Any}(
     "mill3c" => (title = "Test 3 (hardest case): helix 30/45 deg, compressed Hill (D_mill3c, Q = 8, adaptive n_s <= 6, kink)", D = D_mill3c,
                  c = mill3c_consts(Q = 8), Dref = D_mill3c, cref = mill3c_consts(Q = 10, nsmax = 8),
                  xr = (3.0, 30.0), yr = (0.0, 10.0), kw = circle_kw(84), formats = ("F32", "F16", "F16+"),
-                 res = nothing, ws = true, wslen = mill3c_wslen, zdiv = 1),
+                 res = nothing, ws = true, wslen = mill3c_wslen, zdiv = 1, ad = true),
     "mill3h" => (title = "Test 3 (hardest case): helix 30/45 deg, compressed Hill, Hessenberg (D_mill3h, Q = 8, adaptive n_s <= 6, kink)", D = D_mill3h,
                  c = mill3c_consts(Q = 8), Dref = D_mill3h, cref = mill3c_consts(Q = 10, nsmax = 8),
                  xr = (3.0, 30.0), yr = (0.0, 10.0), kw = circle_kw(84), formats = ("F32", "F16", "F16+"),
-                 res = nothing, ws = true, wslen = mill3h_wslen, zdiv = 1),
+                 res = nothing, ws = true, wslen = mill3h_wslen, zdiv = 1, ad = true),
 )
 @isdefined(EXTRA_MODELS) && merge!(MODELS, EXTRA_MODELS)
 
@@ -66,7 +69,7 @@ end
 
 counts(Zraw, zdiv) = map(z -> isfinite(z) ? round(Int, z / zdiv) : -1, Zraw)
 
-function tour(names; res, chk, csv)
+function tour(names; res, chk, csv, adaptive = true)
     gpu = ON_GPU ? CUDA.name(CUDA.device()) : "CPU"
     rows = String[]
     for name in names
@@ -107,6 +110,21 @@ function tour(names; res, chk, csv)
                 f, 1e3tk, 1e3tr, 1e3(tk + tr), nx * ny / (tk + tr) / 1e6, fl, ndiff, cx * cy, nfail)
             push!(rows, @sprintf("%s,%s,%s,%d,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%d,%d,%d", gpu, name, f, nx, ny,
                 1e3tk, 1e3tr, 1e3(tk + tr), nx * ny / (tk + tr) / 1e6, fl, ndiff, cx * cy, nfail))
+            (adaptive && get(m, :ad, false)) || continue
+            # the same chart, adaptively (same plans): compared with the full chart at every pixel
+            Zfull = counts(Array(p.Zraw), m.zdiv)
+            info = Ref{Any}(nothing)
+            aframe() = timed(() -> (info[] = NG.run_adaptive!(p, m.D, m.c; rplan = rplan)))
+            ta1 = aframe()                                     # compiles the list kernels
+            ta = median([aframe() for _ in 1:(ta1 > 10 ? 1 : 3)])
+            Za = counts(Array(p.Zraw), m.zdiv)
+            nda, nfa = count(Za .!= Zfull), count(<(0), Za)
+            fla = 100 * count(!=(Int8(0)), Array(p.flags)) / (nx * ny)
+            @printf("   %-4s adaptive %7.2f ms (%5.1f %% of the pixels marched, passes %s) | flagged %.2f %% | %d of %d pixels differ from the full chart, %d failed
+",
+                f, 1e3ta, 100 * info[].points / (nx * ny), join(info[].passes, "/"), fla, nda, nx * ny, nfa)
+            push!(rows, @sprintf("%s,%s-ad,%s,%d,%d,%.3f,%.3f,%.3f,%.3f,%.3f,%d,%d,%d", gpu, name, f, nx, ny,
+                1e3ta, 0.0, 1e3ta, nx * ny / ta / 1e6, fla, nda, nx * ny, nfa))
         end
     end
     println("\nCSV")
@@ -121,5 +139,5 @@ if abspath(PROGRAM_FILE) == @__FILE__
     print_device()
     tour(String.(split(arg("models", "mill2g,mill3h,mill3d"), ','));
          res = parse_res(arg("res", "1920x1080")), chk = parse_res(arg("check", "192x108")),
-         csv = arg("csv", nothing))
+         csv = arg("csv", nothing), adaptive = arg("adaptive", "yes") == "yes")
 end

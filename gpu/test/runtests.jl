@@ -303,8 +303,15 @@ D_promoting(λ, p, c) = λ^2 + 0.5 * λ + p[1]                        # Float64 
         info = run_adaptive!(a, D_hayes)                  # strides (16, 8, 4, 2, 1)
         ra = fetch_result(a)
         @test ra.Z == rf.Z
-        @test info.points == sum(info.passes) && info.points < 0.8 * N   # 0.72 N (0.34 N at 481 x 361)
+        @test info.points == sum(info.passes) && info.points <= N
         @test count(>(0), Array(a.aux.lev)) == info.points
+        # the single first-pass bound (Lmode = :global): the same chart here, never more points
+        ag = plan_grid((-3.0, 0.9), (-3.0, 3.0), nx, ny; n_power = 1, T = Float64, schedule = :pixel)
+        infog = run_adaptive!(ag, D_hayes; Lmode = :global)
+        @test fetch_result(ag).Z == rf.Z && infog.points <= info.points && infog.L == info.L
+        @test infog.points < 0.8 * N              # 0.72 N (0.34 N at 481 x 361); local: 0.98 N (0.44 N at 241 x 181)
+        @test info.Lmax >= info.L
+        @test_throws ErrorException run_adaptive!(ag, D_hayes; Lmode = :none)
         # warm restart (slider move without a change): the same chart in fewer passes
         info2 = run_adaptive!(a, D_hayes; warm = true)
         @test fetch_result(a).Z == rf.Z && length(info2.passes) <= length(info.passes)
