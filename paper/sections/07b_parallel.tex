@@ -124,7 +124,10 @@ reference on the GPU rather than as a production format.
   for this model and is required by Float16, whose range ends at $65504$; in
   the Float16 column $\Dfun$ is evaluated in Float16 on a rescaled frequency
   axis while the march runs in Float32. The Float32 chart equals the Float64
-  chart except at one flagged, boundary-grazing point of the two million.}\label{tab:gpu}
+  chart except at one flagged, boundary-grazing point of the two million.
+  The timings of the T4, a passively cooled 70\,W card under thermal clock
+  control, scatter by up to a factor of two between cases (its 8K chart costs
+  half as much per point as its full-HD chart).}\label{tab:gpu}
   \maybeinput{tables/tab_gpu.tex}
 \end{table}
 
@@ -186,7 +189,7 @@ re-checking the flagged points in Float32 -- in place on the device: gather,
 march, scatter -- restores the exact chart. It does not, however, make the
 chart faster: with the kernel compiled as a single inlined loop, the Float16
 evaluation takes $\GpuBestFsixteen$\,ms against $\GpuBestFthirtytwoFifteen$\,ms in
-Float32 on the \GpuBest{} (Table~\ref{tab:gpu}), because the march is limited by
+Float32 on the \GpuBest{}, and on the T4 it is three times slower (Table~\ref{tab:gpu}), because the march is limited by
 the number of instructions issued, not by the width of the arithmetic, and the
 conversions between the formats cost as much as the narrower operations save.
 (An earlier version of the kernel, which passed the dual numbers through local
