@@ -194,18 +194,20 @@ def write_tour(out, branch):
         json.loads(json.dumps(setup).replace("%BRANCH%", branch)),
         cc(r'''
 # hardest case, warp-cooperative kernel: smoke test (GPU vs CPU-validated reference), then full HD
-sh(f"cd {REPO_DIR} && julia --project=gpu/scripts hill/warp/tour_warp3h.jl --res 320x180 --check 48x27 --adaptive no 2>&1")
-sh(f"cd {REPO_DIR} && julia --project=gpu/scripts hill/warp/tour_warp3h.jl --res 1920x1080 --check 192x108 "
-   f"--csv /content/tour_warp.csv 2>&1")
+# (the logs also go to /content/*.log)
+sh(f"set -o pipefail; cd {REPO_DIR} && julia --project=gpu/scripts hill/warp/tour_warp3h.jl --res 320x180 "
+   f"--check 48x27 --adaptive no 2>&1 | tee /content/tour_warp_smoke.log")
+sh(f"set -o pipefail; cd {REPO_DIR} && julia --project=gpu/scripts hill/warp/tour_warp3h.jl --res 1920x1080 "
+   f"--check 192x108 --csv /content/tour_warp.csv 2>&1 | tee /content/tour_warp.log")
 '''),
         cc(r'''
 MODELS, ADAPTIVE = 'mill2g,mill3h,mill3d', 'yes'   # see MODELS in hill/gpu_tour_milling.jl
-sh(f"cd {REPO_DIR} && julia --project=gpu/scripts hill/gpu_tour_milling.jl --models {MODELS} "
-   f"--res 1920x1080 --check 192x108 --adaptive {ADAPTIVE} --csv /content/tour_main.csv 2>&1")
+sh(f"set -o pipefail; cd {REPO_DIR} && julia --project=gpu/scripts hill/gpu_tour_milling.jl --models {MODELS} "
+   f"--res 1920x1080 --check 192x108 --adaptive {ADAPTIVE} --csv /content/tour_main.csv 2>&1 | tee /content/tour_main.log")
 '''),
         cc(r'''
 # registers / local memory / occupancy of the warp kernel, and the CSV rows of both tours
-sh(f"cd {REPO_DIR} && julia --project=gpu/scripts hill/warp/kernel_info_warp3h.jl 2>&1")
+sh(f"set -o pipefail; cd {REPO_DIR} && julia --project=gpu/scripts hill/warp/kernel_info_warp3h.jl 2>&1 | tee /content/kinfo.log")
 sh("cat /content/tour_warp.csv /content/tour_main.csv")
 '''),
     ]
