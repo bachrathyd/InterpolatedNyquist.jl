@@ -59,6 +59,14 @@
   \newcommand{\GpuBestFthirtytwo}{[t]}\newcommand{\GpuBestFsixteen}{[t]}%
   \newcommand{\GpuBestSlider}{[t]}\newcommand{\GpuFsixteenWrong}{[p]}%
   \newcommand{\GpuFsixteenFlagged}{[p]}}
+\providecommand{\GpuEightKFthirtytwo}{[t]}\providecommand{\GpuEightKHybrid}{[t]}
+% parallel scaling (paper/scripts/studies/s15_parallel_scaling.py)
+\IfFileExists{generated/parallel_numbers.tex}{\input{generated/parallel_numbers.tex}}{%
+  \newcommand{\ParCpuOneUs}{[t]}\newcommand{\ParCpuFortyEightSpeedup}{[x]}%
+  \newcommand{\ParCpuSixteenSpeedup}{[x]}\newcommand{\ParGpuOneUsLo}{[t]}%
+  \newcommand{\ParGpuOneUsHi}{[t]}\newcommand{\ParBestNsPerPoint}{[t]}%
+  \newcommand{\ParBestEightKms}{[t]}\newcommand{\ParBestFullHDms}{[t]}%
+  \newcommand{\ParBestPeff}{[n]}\newcommand{\ParBestVsCpu}{[x]}}
 
 \begin{document}
 
@@ -94,6 +102,7 @@ equation \sep automatic differentiation \sep adaptive integration \sep phase unw
 \input{sections/05_extraction.tex}
 \input{sections/06_showcase.tex}
 \input{sections/07_performance.tex}
+\input{sections/07b_parallel.tex}
 \input{sections/08_conclusion.tex}
 
 \appendix

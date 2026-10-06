@@ -1,0 +1,197 @@
+\section{Parallel execution: from one core to a graphics processor}\label{sec:parallel}
+
+The absolute chart times quoted so far depend on the hardware they were
+measured on, and a reader with a different machine cannot transfer them. A
+more useful description separates two numbers: the cost of one parameter point
+on one thread, and how that cost divides among many threads. This section
+measures both, on CPUs and GPUs, and shows that the second is almost ideal --
+which is what makes real-time charts possible, and what lets anyone predict the
+chart time on their own hardware.
+
+\subsection{Why the sweep parallelizes perfectly}\label{sec:parallel-why}
+
+A stability chart is an embarrassingly parallel computation: the parameter
+points are independent, each needs only the user's characteristic function and
+the march of Section~\ref{sec:unwrap}, and nothing is exchanged between them.
+The discrete march adds three properties that a parallel machine rewards: its
+state is a fixed handful of scalars (no allocation, no solver object), every
+step is the same short sequence of operations (one evaluation of $\Dfun$ and
+$\Dfun'$ by dual numbers, a comparison, a step update), and its cost per point
+varies only moderately across a chart -- the median point of the three
+benchmark systems needs $31$, $52$ and $129$ evaluations
+(Table~\ref{tab:unwrap}), and the maximum is a small multiple of the median. The
+same Julia source therefore runs as a multithreaded CPU loop and as a GPU kernel
+with one thread per point; we implemented it once with
+\pkg{KernelAbstractions.jl}, which compiles it for both.
+
+\subsection{Measured scaling}\label{sec:parallel-scaling}
+
+\begin{figure}[tb]
+  \centering
+  \maybefig{fig_parallel_scaling}{\linewidth}
+  \caption{Parallel scaling of the discrete march on the fourth-order benchmark
+  (Appendix~\ref{app:gallery}): time for $10^{6}$ parameter points -- a
+  $1000\times1000$ chart, so that $1$\,s corresponds to $1\,\mu$s per point --
+  versus the number of threads $n$, on two CPUs (Float64; a six-core desktop
+  and a $48$-thread server) and on four GPUs (Google Colab), where exactly $n$
+  GPU threads march the chart (solid: Float32, dashed: Float64). The dotted
+  line is the ideal $1/n$ through the single-thread CPU time; the horizontal
+  lines mark the per-point cost at which a full-HD or an 8K chart is computed
+  thirty times per second.}\label{fig:parallel}
+\end{figure}
+
+\begin{table}[tb]
+  \centering
+  \caption{The quantities behind Fig.~\ref{fig:parallel}: the cost of one point
+  on one thread, the per-point cost of the saturated device, and their ratio,
+  the \emph{effective parallelism} $P_{\mathrm{eff}}$ -- the number of
+  single-thread marches the device completes in the time of one. For the GPUs
+  the number of CUDA cores is given for comparison, with
+  $P_{\mathrm{eff}}/\text{cores}$ in parentheses.}\label{tab:parallel}
+  \maybeinput{tables/tab_parallel.tex}
+\end{table}
+
+Figure~\ref{fig:parallel} shows the time of a chart of $10^{6}$ points as a
+function of the number of threads, and Table~\ref{tab:parallel} extracts the
+characteristic numbers. On the CPU the result is what the independence of the
+points promises. One thread needs $\ParCpuOneUs\,\mu$s per point; every
+doubling of the threads halves the time, so that $16$ threads are
+$\ParCpuSixteenSpeedup$ times faster and $48$ threads $\ParCpuFortyEightSpeedup$
+times -- the small deficit coming from hyper-threading, where two threads share
+one core. The six-core desktop follows the same line up to its six cores
+($5.6$ times) and gains another factor of $1.6$ from its twelve hardware
+threads. A chart that takes $3.8$\,s on one core ($10^{6}$ points of the
+fourth-order benchmark) thus takes $0.1$\,s on a $48$-thread server.
+
+On the GPU the same picture holds, shifted by a constant factor. A single GPU
+thread is slower than a CPU thread -- $\ParGpuOneUsLo$--$\ParGpuOneUsHi\,\mu$s
+per point in Float32, five to eight times the CPU time, because a GPU core runs
+at a lower clock and executes one instruction at a time without the
+speculation and large caches of a CPU core. From there the time again falls in
+proportion to the number of threads, over four decades, until the device is
+saturated. Two short deviations from the ideal line are instructive. Below
+$32$ threads the gain is sublinear, because a GPU executes threads in groups of
+$32$ (a \emph{warp}) in lockstep: the threads of one warp advance together, and
+a warp is only as fast as its slowest point. Between $64$ and $256$ threads the
+curve flattens, because a single thread block runs on one multiprocessor; the
+ideal slope resumes as soon as the blocks spread over the device. Beyond some
+$10^{4}$--$10^{5}$ threads every multiprocessor is busy and the curves level
+off at the saturated cost of each card.
+
+\subsection{A performance model for any hardware}\label{sec:parallel-model}
+
+The measurements condense into a model with two hardware numbers. If one
+thread needs $t_1$ per point and the device sustains $P_{\mathrm{eff}}$
+concurrent marches, a chart of $N$ points on $n$ threads takes
+\begin{equation}\label{eq:parmodel}
+  T(N,n) \approx \frac{N\,t_1}{\min\{n,\,P_{\mathrm{eff}}\}} .
+\end{equation}
+On a CPU, $P_{\mathrm{eff}}$ is the number of cores (plus a fraction for
+hardware threads). On the four GPUs it is $1.2$ to $2.6$ times the number of
+CUDA cores in Float32 (Table~\ref{tab:parallel}): a GPU core can keep more than
+one march in flight because it switches between warps while one waits for
+memory or for the result of a long instruction. Since $t_1$ in Float32 differs
+by less than a factor of two between the four cards, the saturated chart time
+is set almost entirely by the number of cores -- the chart is
+compute-bound, not memory-bound, which is expected for a method whose state fits
+in registers. The model thus predicts the time on an unlisted card from its core
+count and the per-point cost measured once on any GPU, within a factor of
+about two; clock rate, register pressure (which limits the number of resident
+warps) and the per-point variation of the step count account for the
+remainder. The per-point cost itself scales with the cost of one evaluation of
+$\Dfun$ and with the number of evaluations: the two-mode turning model, with
+four times the evaluations of the fourth-order benchmark, saturates the
+RTX PRO 6000 at $3.0$\,ns instead of $\ParBestNsPerPoint$\,ns per point.
+
+Float64 follows the same model with a larger $t_1$, and Fig.~\ref{fig:parallel}
+shows the consequence of the hardware design. Graphics-oriented cards (T4, L4,
+RTX PRO 6000) execute double-precision operations at $1/32$--$1/64$ of the
+single-precision rate, so their saturated Float64 time is $23$--$41$ times the
+Float32 time, whereas the A100, built for scientific computing, pays a factor of
+three. Since Float32 gives the same chart as Float64 point for point
+(Table~\ref{tab:gpu}), Float64 serves as a reference on the GPU rather than as
+a production format.
+
+\subsection{Real-time charts at 8K resolution}\label{sec:parallel-realtime}
+
+\begin{table}[tb]
+  \centering
+  \caption{Full-HD brute-force charts ($1920\times1080\approx2.07\cdot10^{6}$
+  points, one GPU thread per point) of the fourth-order benchmark with the
+  discrete march on four NVIDIA GPUs (Google Colab): median kernel time in
+  milliseconds over ten repetitions. $\wmax=10^{5}$ is the production window;
+  $\wmax=15$ suffices for this model and is required by Float16, whose range
+  ends at $65504$; in the Float16 column $\Dfun$ is evaluated in Float16 on a
+  rescaled frequency axis while the march runs in Float32. Float64 and Float32
+  give identical charts; the last column is the Float16 throughput in million
+  points per second.}\label{tab:gpu}
+  \maybeinput{tables/tab_gpu.tex}
+\end{table}
+
+\begin{table}[tb]
+  \centering
+  \caption{The discrete march with $\Dfun$ evaluated in narrow number formats
+  ($400\times400$ chart of the fourth-order benchmark, $\wmax=15$, best of four
+  frequency scalings $\lam=\Omega\mu$ per format; the march itself runs in
+  Float32). \emph{Flagged} points carry a sub-resolution or residual flag and
+  are re-checked in a wider format; \emph{failed} points did not reach $\wmax$.
+  $^\ast$Emulated: every operation is rounded to the format.}\label{tab:precision}
+  \maybeinput{tables/tab_precision.tex}
+\end{table}
+
+The horizontal lines of Fig.~\ref{fig:parallel} translate the per-point cost
+into frame rates. A chart refreshed thirty times per second leaves
+$33$\,ms per frame; for a full-HD chart ($2.07\cdot10^{6}$ points) this needs
+$16$\,ns per point, and for an 8K chart ($7680\times4320\approx3.3\cdot10^{7}$
+points) $1$\,ns per point. A single CPU core is more than two orders of
+magnitude above the first line, and even the $48$-thread server is a factor of
+six above it (a full-HD chart in $0.2$\,s, i.e.\ five frames per second, or
+real time at a quarter of the resolution). Every one of the four GPUs is
+below it, and the fastest card, at $\ParBestNsPerPoint$\,ns per point --
+$\ParBestVsCpu$ times the throughput of one CPU core, an effective parallelism of
+$\ParBestPeff$ -- is below the 8K line as well: a full-HD chart takes
+$\ParBestFullHDms$\,ms and an 8K chart $\ParBestEightKms$\,ms. The chart can
+therefore be recomputed \emph{while a slider is being moved}: the delay, a gain
+or a damping ratio is changed, and the complete chart -- here more than thirty
+million stability decisions with the rightmost root of each -- follows the
+motion of the hand without visible delay. Table~\ref{tab:gpu} gives the complete
+full-HD timings with the production settings; measured at 8K on the RTX PRO 6000,
+the kernel takes $\GpuEightKFthirtytwo$\,ms in Float32 and
+$\GpuEightKHybrid$\,ms with the Float16 evaluation and the Float32 re-check
+described below, which yields the same chart. A complete interactive frame --
+kernel, colouring and transfer of the display image -- adds a few milliseconds
+(\code{gpu/results/interactive\_G4.csv}).
+
+It must be stressed that these frame rates belong to the given problem. The
+cost per point is proportional to the cost of one evaluation of $\Dfun$ and to
+the number of evaluations, so a model whose $\Dfun$ is a large determinant or
+whose phase ripple decays slowly (Table~\ref{tab:evals}) moves all curves of
+Fig.~\ref{fig:parallel} upwards by the corresponding factor -- the two-mode
+turning model, for instance, runs at about ten frames per second at 8K and
+above $150$ frames per second at full HD on the same card. What does not
+change is the slope: whatever the characteristic function, the chart time
+divides by the number of threads, from a single core to tens of thousands of
+GPU cores.
+
+\paragraph{Narrow number formats.} Since the march needs only the
+\emph{phase} of $\Dfun$ to a fraction of a radian, the characteristic function
+can even be evaluated in half precision (Table~\ref{tab:precision}). Float16
+is accurate wherever no root is close to the line: after rescaling the
+frequency into its range it computes the chart up to several times faster than
+Float32 on cards with a fast half-precision path, with
+$\GpuFsixteenWrong\,\%$ wrong counts that are \emph{all} flagged, and
+$\GpuFsixteenFlagged\,\%$ flagged points in total. Re-checking the flagged
+points in Float32 restores the exact chart, and done in place on the device --
+gather the flagged points, march them in Float32, scatter the results back --
+the second pass is cheap. The gain depends on the system: for the lightly
+damped two-mode turning model a third of the points are flagged in Float16, and
+the hybrid is barely faster than Float32. BFloat16, with only seven mantissa
+bits, flags $14\,\%$ of the chart, and the 8-bit and 4-bit formats are useless
+for this purpose: with two or three mantissa bits even the \emph{parameters} of
+a chart are quantized to a handful of distinct values per octave, so that
+$95$--$100\,\%$ of the points are flagged and up to one in ten counts is
+wrong; Float4 gets every count wrong. Load balancing, finally, turned out to be
+unnecessary: a dynamic work queue, in which threads that finish early fetch new
+points, was not faster than one thread per point on any card, because the cost
+per point varies only moderately and the hardware scheduler absorbs the
+difference.

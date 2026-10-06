@@ -244,77 +244,9 @@ measured with the integration back-ends, on an earlier machine; their
 Table~\ref{tab:gridtimings} are now one to two orders of magnitude above what
 the package delivers by default.
 
-\subsection{GPU sweeps and number formats}\label{sec:performance-gpu}
-
-\begin{table}[tb]
-  \centering
-  \caption{Full-HD brute-force charts ($1920\times1080\approx2.07\cdot10^{6}$
-  points, one GPU thread per point) of the fourth-order benchmark with the
-  discrete march on four NVIDIA GPUs (Google Colab): median kernel time in
-  milliseconds over ten repetitions. $\wmax=10^{5}$ is the production window;
-  $\wmax=15$ suffices for this model and is required by Float16, whose range
-  ends at $65504$; in the Float16 column $\Dfun$ is evaluated in Float16 on a
-  rescaled frequency axis while the march runs in Float32. Float64 and Float32
-  give identical charts; the last column is the Float16 throughput in million
-  points per second.}\label{tab:gpu}
-  \maybeinput{tables/tab_gpu.tex}
-\end{table}
-
-\begin{table}[tb]
-  \centering
-  \caption{The discrete march with $\Dfun$ evaluated in narrow number formats
-  ($400\times400$ chart of the fourth-order benchmark, $\wmax=15$, best of four
-  frequency scalings $\lam=\Omega\mu$ per format; the march itself runs in
-  Float32). \emph{Flagged} points carry a sub-resolution or residual flag and
-  are re-checked in a wider format; \emph{failed} points did not reach $\wmax$.
-  $^\ast$Emulated: every operation is rounded to the format.}\label{tab:precision}
-  \maybeinput{tables/tab_precision.tex}
-\end{table}
-
-The discrete march is a fixed-size loop of identical scalar steps, so the
-parameter points of a chart -- or of any $N$-dimensional point list -- map
-one-to-one onto GPU threads. We implemented it as a portable kernel
-with \pkg{KernelAbstractions.jl} -- the same code also runs on CPU threads -- that
-evaluates a user-written $\Dfun$ with dual numbers, exactly as on the CPU.
-Table~\ref{tab:gpu} reports full-HD charts of the fourth-order benchmark. On
-the fastest card, the \GpuBest, a complete $1920\times1080$ chart in Float32
-takes $\GpuBestFthirtytwo$\,ms -- some seven hundred times the speed of the
-twelve-thread CPU of Table~\ref{tab:unwrap}, and identical to the Float64
-chart point for point -- and a slider loop that changes the delay and copies
-the result back to the host for every frame runs at $\GpuBestSlider$\,ms per
-frame. The ranking of the cards follows their single-precision rate:
-consumer and graphics-oriented cards run Float64 at $1/32$--$1/64$ of the
-Float32 rate, so Float64 is a reference rather than a production format
-(only the A100, with full-rate Float64, narrows the gap to a factor of two).
-Load balancing turned out not to be an issue: a dynamic work queue, in which
-threads that finish early fetch new points, was slower on every card than one
-thread per point, because the per-point cost varies only moderately across a chart and the
-hardware scheduler absorbs the difference.
-
-Narrower formats pay off only to a point (Table~\ref{tab:precision}). Since
-the march needs only the \emph{phase} of $\Dfun$ to a fraction of a radian,
-Float16 is accurate enough wherever no root is close to the line: after
-rescaling the frequency into its range, it computes the chart another $1.2$--$6$
-times faster than Float32 (the gain is largest on cards with a fast
-half-precision path) ($\GpuBestFsixteen$\,ms on the \GpuBest), with
-$\GpuFsixteenWrong\,\%$ wrong counts that are \emph{all} flagged, and
-$\GpuFsixteenFlagged\,\%$ flagged points in total. Re-checking the flagged
-points in Float32 restores the exact chart, and done in place on the device
--- gather the flagged points, march them in Float32, scatter the results
-back -- the second pass is cheap: for an 8K chart ($7680\times4320\approx
-3.3\cdot10^{7}$ points) on the same card, the Float16 sweep takes
-$14.8$\,ms and the re-check of its $5.8\cdot10^{5}$ flagged points
-$2.6$\,ms, against $43.8$\,ms for the Float32 sweep: an exact chart
-$2.5$ times faster than in Float32, and an interactive frame rate at 8K
-(\code{gpu/results/interactive\_G4.csv}). The gain depends on the system:
-for the lightly damped two-mode turning model a third of the points are
-flagged in Float16, and the hybrid ($197$\,ms) is barely faster than Float32
-($235$\,ms). BFloat16, with only seven mantissa bits, flags
-$14\,\%$ of the chart, and the 8-bit and 4-bit formats are useless for this
-purpose: with two or three mantissa bits even the \emph{parameters} of a
-chart are quantized to a handful of distinct values per octave, so that
-$95$--$100\,\%$ of the points are flagged and up to one in ten counts is
-wrong; Float4 gets every count wrong.
+How the per-point cost of the discrete march divides among CPU and GPU threads,
+and what that means for the chart time on any hardware, is the subject of
+Section~\ref{sec:parallel}.
 
 \subsection{Comparison with semi-discretization}\label{sec:performance-sd}
 

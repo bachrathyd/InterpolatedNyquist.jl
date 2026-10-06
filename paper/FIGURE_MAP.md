@@ -68,6 +68,7 @@ one chart.
 | `tab_evals` (march vs quadrature evaluations) | `s11_diagnostics.jl` | the systems and `ω_max` values probed |
 | `data/wmax_scaling.csv` | `s11_diagnostics.jl` | the `ω_max` ladder 1e6/1e8/1e10 |
 | `data/peak_repair.csv`, `generated/repair_numbers.tex` (peak-repair callback, §6.3/§7.4) | `s12_peak_repair.jl` | `DP_LADDER` (±1e-2…1e-10 around the D=1.5 Hopf point); self-asserting: errors out if any quoted claim stops holding |
+| `fig_parallel_scaling`, `tab_parallel`, `generated/parallel_numbers.tex` (Section 8, parallel scaling) | `s15_parallel_scaling.py` (Python + matplotlib) | inputs in `data/parallel/` measured by `gpu/scripts/thread_scaling.jl` (CPU threads) and `gpu/scripts/gpu_lane_scaling.jl` (GPU threads, Colab); `SYS` = shown example |
 | `generated/machine.tex` | `scripts/machine_info.jl` | CPU/threads/RAM/versions, auto-detected |
 
 ## The two settings that dominate cost

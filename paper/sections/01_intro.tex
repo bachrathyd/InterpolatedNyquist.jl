@@ -110,10 +110,12 @@ quadratures either miss the peak or need excessive refinement; the infinite
 frequency range poses an additional truncation problem.
 
 This paper revisits the integration-based Nyquist criterion and turns it into
-a fast and robust tool with \emph{interpolable} output -- fast enough that a
-complete chart regenerates in tens of milliseconds on a desktop processor
-and a full-HD chart in milliseconds on a graphics processor, i.e., at
-real-time, interactive rates. The contributions are the
+a fast and robust tool with \emph{interpolable} output. Its speed is best
+stated in a hardware-independent way: a parameter point costs a few
+microseconds on one processor thread, and this cost divides almost exactly
+by the number of threads, from one CPU core to tens of thousands of GPU
+cores, so that a full-HD chart is computed in about a millisecond and an 8K
+chart in real time on a current graphics processor. The contributions are the
 following. (i)~The winding integral is reformulated as a scalar ordinary
 differential equation for the phase, marched by a high-order adaptive
 integrator~\cite{verner2010numerically,tsitouras2011runge,rackauckas2017differentialequations}
@@ -129,8 +131,10 @@ This integration-free march needs one evaluation of $\Dfun$ per step and
 tens of evaluations per parameter point, is one to two orders of magnitude
 faster than the phase ODE on the CPU and more robust near the boundary, and
 -- consisting of identical scalar steps on a fixed-size state -- maps
-directly onto GPUs, where full-HD charts are computed in milliseconds in
-single and half precision.
+directly onto GPUs, in single and even half precision. Measured on two CPUs
+and four GPUs, its chart time scales linearly with the number of threads up
+to the saturation of the device, and a two-parameter model (single-thread
+cost and effective parallelism) predicts it for any hardware.
 (iii)~The location of the
 characteristic root closest to the integration line -- normally the rightmost
 root -- is estimated \emph{during the same sweep} at negligible extra cost; the
@@ -178,8 +182,9 @@ charts. Section~\ref{sec:extraction} describes the automatic extraction of
 $\Dfun(\lam)$ from a time-domain model. Section~\ref{sec:showcase} walks
 through the complete workflow on a constrained two-degree-of-freedom system
 with delayed control, Section~\ref{sec:performance} quantifies accuracy, CPU
-time and memory, including a comparison with the semi-discretization method
-and GPU timings in several number formats,
+time and memory, including a comparison with the semi-discretization method,
+Section~\ref{sec:parallel} measures how the cost divides among CPU and GPU
+threads and what that means for real-time charts and for number formats,
 and Section~\ref{sec:conclusion} concludes. Appendix~\ref{app:gallery} collects twelve
 further case studies from all supported system classes, and
 Appendix~\ref{app:unwrap} lists the discrete march in algorithmic form.
