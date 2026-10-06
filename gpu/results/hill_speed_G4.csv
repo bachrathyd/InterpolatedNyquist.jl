@@ -1,0 +1,7 @@
+gpu,model,format,nx,ny,ms,ratio_to_F32
+NVIDIA RTX PRO 6000 Blackwell Server Edition,mill3w,F64,480,270,639.263,11.8590
+NVIDIA RTX PRO 6000 Blackwell Server Edition,mill3w,F32,480,270,53.905,1.0000
+NVIDIA RTX PRO 6000 Blackwell Server Edition,mill3w,F16,480,270,60.014,1.1133
+NVIDIA RTX PRO 6000 Blackwell Server Edition,mill2g,F64,480,270,6.278,25.3183
+NVIDIA RTX PRO 6000 Blackwell Server Edition,mill2g,F32,480,270,0.248,1.0000
+NVIDIA RTX PRO 6000 Blackwell Server Edition,mill2g,F16,480,270,0.209,0.8440
