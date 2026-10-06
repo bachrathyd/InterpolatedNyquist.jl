@@ -45,6 +45,13 @@ if isfile(HILL_MODELS)
     include(joinpath(@__DIR__, "..", "..", "hill", "gpu_helix.jl"))
     ws_len(::typeof(D_mill3c)) = mill3c_wslen(mill3c_consts())     # layout for the maximal n_s (6)
     ws_len(::typeof(D_mill3h)) = mill3h_wslen(mill3c_consts())
+    # Test 3 on the GPU: the warp-cooperative D_mill3h (hill/warp: one warp per point, ~12x faster than
+    # one thread per point; no root refinement -- the first-order σ estimate colours the chart)
+    if ON_GPU
+        include(joinpath(@__DIR__, "..", "..", "hill", "warp", "warp3h.jl"))
+        include(joinpath(@__DIR__, "..", "..", "hill", "warp", "warp3h_kernel.jl"))
+    end
+    const D_TEST3 = ON_GPU ? W3h() : D_mill3h
     const HKW = (ω0 = A_STRIP, ω_max = A_STRIP + 1, h0 = 1e-3, hrel = 0.05)
     const HKWM = (ω0 = A_STRIP, ω_max = A_STRIP + 1, h0 = 1e-3, hrel = 0.1)   # milling: fewer samples
     const MEMO = Dict{Any, Any}()
@@ -71,7 +78,7 @@ if isfile(HILL_MODELS)
                 yl = "a_p [mm]", kw = HKWQ2),
          knobs = [(i = 1, name = "damping ζ", lo = 0.002, hi = 0.05), (i = 2, name = "immersion a/D", lo = 0.02, hi = 1.0),
                   (i = 3, name = "K_n/K_t", lo = 0.0, hi = 1.0)]),
-        (key = "mill3c", ω16 = 0.0, smin = -0.03, hill = true, zdiv = 1, f16 = true, ωp = mill3c_ωp,
+        (key = "mill3c", ω16 = 0.0, smin = -0.03, hill = true, zdiv = 1, f16 = true, ωp = mill3c_ωp, norefine = ON_GPU,
          cfun = c -> memo(() -> mill3c_consts(ζ = c[1], aD = c[2], β2 = c[3], Q = 8), (:m3c, c)),
          res = "960x540",
          note = "1-DOF milling, two flutes with helix 30° and β₂ (R = 8 mm), delays distributed over the axial depth, " *
@@ -79,8 +86,9 @@ if isfile(HILL_MODELS)
                 "by the helix lag across the depth; diagonal kink correction; all harmonics " *
                 "in closed form); the regenerative term of every node is the same material node on the previous tooth. " *
                 "Reduced once per point to an (n_w + 2)-square determinant (n_w ≈ 8 n_s wrapped nodes) in Hessenberg form (O(n_w²) per evaluation); counted " *
-                "along the unit circle of the Floquet multiplier.",
-         sys = (title = "milling, different helix angles (Test 3, compressed Hill, fast)", D = D_mill3h,
+                "along the unit circle of the Floquet multiplier. On the GPU one warp (32 threads) per point." *
+                " Full HD: 0.74 s on a G4.",
+         sys = (title = "milling, different helix angles (Test 3, compressed Hill, fast)", D = D_TEST3,
                 c = (0.011, 0.05, 45.0), npow = 0, xr = (3.0, 30.0), yr = (0.0, 10.0), xl = "rpm/1000",
                 yl = "a_p [mm]", kw = HKWQ3),
          knobs = [(i = 1, name = "damping ζ", lo = 0.002, hi = 0.05), (i = 2, name = "immersion a/D", lo = 0.02, hi = 1.0),
@@ -302,6 +310,7 @@ function render(a)
     if ishill(e)                  # fixed strip; counting on shifted lines would meet the row-scale poles
         cert = false
         ref == "count" && (nr = 10)
+        hasproperty(e, :norefine) && e.norefine && (nr = 0)    # the warp kernel: first-order σ estimate
         wmax = NaN
         set_march!(plan; refine = nr, certify = false)
     else
