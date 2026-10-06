@@ -28,11 +28,12 @@ function kpx!(Zr, Sg, Om, St, Fl, D, c, Pts, npts, mp, meth, nr, rm)
     return nothing
 end
 V(T) = DevVec{T}
-for (name, D, c, ws) in (("D_mill3h", D_mill3h, mill3c_consts(), true), ("D_mill3c", D_mill3c, mill3c_consts(), true), ("D_mill2g", D_mill2g, mill2g_consts(Q = 8), false), ("D_mill2p", D_mill2p, mill2m_consts(Q = 16), false),
+for (name, D, c, ws) in (("D_mill3h", D_mill3h, mill3c_consts(), true), ("D_mill3c", D_mill3c, mill3c_consts(), true),
+                         ("D_mill2g", D_mill2g, mill2g_consts(Q = 8), false), ("D_mill2g Q32", D_mill2g, mill2g_consts(Q = 32), false),
+                         ("D_mill2p", D_mill2p, mill2m_consts(Q = 16), false), ("D_mill2s Q64", D_mill2s, mill2q_consts(Q = 64), false),
                          ("D_mill3", D_mill3, mill3_consts(), true))
-    for TE in (Float32, Float16)
-        T = Float32
-        name == "D_mill3" && TE === Float16 && continue
+    for (T, TE) in ((Float32, Float32), (Float32, Float16), (Float64, Float64))
+        (name == "D_mill3" || endswith(name, "64")) && TE === Float16 && continue
         C = typeof(map(T, c))
         mpT = NG.MarchParams{T, TE}
         rm = Val{:none}

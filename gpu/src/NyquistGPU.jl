@@ -159,7 +159,7 @@ const FLAG_NEG0 = Int8(64)
 @inline function eval_line(D::F, p, c, σ::T, ω::T, ::Type{TE}) where {F, T, TE}
     w = ForwardDiff.Dual{PhaseTag}(TE(ω), one(TE))
     s = ForwardDiff.Dual{PhaseTag}(TE(σ), zero(TE))
-    v = D(Complex(s, w), map(TE, p), c)
+    v = D(Complex(s, w), conv_consts(TE, p), c)     # unrolled for any length (a prepared q may be long)
     re, im = real(v), imag(v)
     Dv = Complex{T}(T(ForwardDiff.value(re)), T(ForwardDiff.value(im)))
     Dw = Complex{T}(T(ForwardDiff.partials(re, 1)), T(ForwardDiff.partials(im, 1)))
