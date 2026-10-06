@@ -127,8 +127,25 @@ struct MarchParams{T, TE}
     newton::Int32  # Newton steps polishing each tracked root after the march (0: first-order estimate)
     bisect::Int32  # 1: certify the rightmost root of stable points by counting on shifted lines
     σtol::T        # its tolerance in Re λ
+    zmax::T        # largest possible count (e.g. the degree of a polynomial D); larger -> flag 8
+    qtrust::T      # trust radius of the one-step root estimates: |Newton step| <= qtrust·h
+    circle::Int32  # 1: half-circle march of a real-symmetric D(z): ω0 ≈ 0 and ωmax are z = ±1,
+                   #    |D| is mirror-symmetric at BOTH ends (end rule at ωmax, as the seed's at ω0)
+    parity::Int32  # 1 (circle marches): flag 16 unless Z ≡ [D(z=1) < 0] + [D(z=-1) < 0] (mod 2)
 end
+# the constructor of the first 14 fields (scripts that build MarchParams by hand)
+MarchParams{T, TE}(σ, ω0, ωmax, h0, rtol, atol, hrel, hmax, ωband, npow, maxsteps, newton, bisect,
+                   σtol) where {T, TE} =
+    MarchParams{T, TE}(σ, ω0, ωmax, h0, rtol, atol, hrel, hmax, ωband, npow, maxsteps, newton, bisect,
+                       σtol, T(Inf), T(4), Int32(0), Int32(0))
 evaltype(::MarchParams{T, TE}) where {T, TE} = TE
+
+# flag bits (fetch_result): 1 failed march, 2 sub-resolution decision, 4 integer residual,
+# 8 impossible count (Z < 0 or Z > zmax), 16 parity mismatch (circle marches);
+# FLAG_NEG0 is internal (the sign of D at ω0, kept for the parity rule; cleared in finish)
+const FLAG_IMPOSSIBLE = Int8(8)
+const FLAG_PARITY = Int8(16)
+const FLAG_NEG0 = Int8(64)
 
 # ===========================================================================
 # One evaluation: D and dD/dω on the line λ = σ + iω (one dual-number call)
@@ -208,7 +225,7 @@ end
 # Returns (depth |D_min|, σ_est, ω_est).
 @inline function dip_root(Da::Complex{T}, Dwa::Complex{T}, sa::T,
                           Db::Complex{T}, Dwb::Complex{T}, sb::T,
-                          a::T, h::T, σ::T) where {T}
+                          a::T, h::T, σ::T, ct::T) where {T}
     sc = inv(max(sa, sb))
     A = Da * sc
     Aw = Dwa * sc
@@ -241,10 +258,11 @@ end
     sp = max(abs(real(p)), abs(imag(p)))
     depth = sp * sqrt((real(p) / sp)^2 + (imag(p) / sp)^2) / sc
     ωm = a + t * h
-    # trust region (as the package's refine_roots): a Newton step longer than
-    # max(|λ_seed|, 1) has left the basin -- typically a degenerate minimum
-    # with D' ≈ 0 in a flat tail -- and would report a garbage root
-    trusted = abs2(q) <= max(σ * σ + ωm * ωm, one(T))
+    # trust region: the estimate extrapolates from a minimum that the march resolved with
+    # steps of size h; a Newton step much longer than h (a degenerate minimum with D' ≈ 0, a
+    # flat tail) leaves the sampled region and would report a garbage root. (The former
+    # radius max(|λ|, 1) grew with the frequency and accepted such roots far up the axis.)
+    trusted = abs2(q) <= (ct * h)^2
     return (trusted ? depth : T(NaN)), σ + imag(q), ωm - real(q)
 end
 
@@ -309,12 +327,15 @@ end
     if g > 0
         q = newton_q(Dv, Dw)
         depth = s * sqrt(real(u)^2 + imag(u)^2)
-        trusted = abs2(q) <= max(mp.σ * mp.σ, one(T))
+        # trust radius: qtrust × the step cap at ω0 (the step the march takes from here is
+        # not known yet; the cap is the scale on which it will sample)
+        trusted = abs2(q) <= (mp.qtrust * mp.hrel * max(ω, one(T)))^2
         trusted && ((dd, ds, dw) = insert_root(dd, ds, dw, depth, mp.σ + imag(q), zero(T)))
     end
     ok = isfinite(th) & isfinite(s) & (s > 0)
+    neg0 = real(Dv) < 0 ? FLAG_NEG0 : Int8(0)          # D(z = 1) < 0 (parity rule)
     return MarchState{T, N, P}(p, ω, mp.h0, zero(T), Dv, Dw, u, s, th, g,
-        Int32(0), ok ? Int8(0) : Int8(2), Int8(0), dd, ds, dw)
+        Int32(0), ok ? Int8(0) : Int8(2), neg0, dd, ds, dw)
 end
 
 # common accept/reject bookkeeping
@@ -324,11 +345,21 @@ end
     steps = st.steps + Int32(1)
     if accept
         dd, ds, dw = st.dd, st.ds, st.dw
+        last = b >= mp.ωmax
         if (st.ga < 0) & (gb > 0)
-            depth, se, we = dip_root(st.Da, st.Dwa, st.sa, Db, Dwb, sb, st.ω, h, mp.σ)
+            depth, se, we = dip_root(st.Da, st.Dwa, st.sa, Db, Dwb, sb, st.ω, h, mp.σ, mp.qtrust)
             dd, ds, dw = insert_root(dd, ds, dw, depth, se, we)
+        elseif last & (mp.circle != Int32(0)) & (gb < 0)
+            # end rule of a half-circle march (mirror of the seed's rule at ω0): |D| is
+            # symmetric about ωmax (z = -1), so a |D| still falling there has its minimum AT
+            # ωmax -- a real (flip) multiplier near z = -1; one Newton step from the sample
+            q = newton_q(Db, Dwb)
+            depth = sb * sqrt(real(ub)^2 + imag(ub)^2)
+            hs = max(h, min(st.h, mp.hrel * max(st.ω, one(T))))   # the last step may be a short rest
+            trusted = abs2(q) <= (mp.qtrust * hs)^2
+            trusted && ((dd, ds, dw) = insert_root(dd, ds, dw, depth, mp.σ + imag(q), mp.ωmax))
         end
-        status = b >= mp.ωmax ? Int8(1) : (steps >= mp.maxsteps ? Int8(2) : Int8(0))
+        status = last ? Int8(1) : (steps >= mp.maxsteps ? Int8(2) : Int8(0))
         return MarchState{T, N, P}(st.p, b, hn, Φn, Db, Dwb, ub, sb, thb, gb,
             steps, status, st.flags | fl, dd, ds, dw)
     else
@@ -432,11 +463,24 @@ evals_per_step(::Val{:bs3}) = 3
         end
     end
     σd = isfinite(σd) ? σd : T(NaN)
-    fl = st.flags | (st.status == Int8(2) ? Int8(1) : Int8(0))
+    fl = (st.flags & ~FLAG_NEG0) | (st.status == Int8(2) ? Int8(1) : Int8(0))
     # the paper's integer residual: Z_raw far from an integer means a root ON
     # the line (e.g. D(σ) = 0 exactly gives Z_raw = k + 1/2) or a truncation
     # problem -- the count is not trustworthy either way
     fl |= (abs(Zraw - round(Zraw)) > T(0.25)) ? Int8(4) : Int8(0)
+    # impossible counts: a count is never negative for an entire D (no poles in the counted
+    # region), and never above zmax (e.g. the degree of a polynomial characteristic function)
+    Z = round(Zraw)
+    fl |= (isfinite(Zraw) & ((Z < 0) | (Z > mp.zmax))) ? FLAG_IMPOSSIBLE : Int8(0)
+    # parity of a half-circle march of a real-symmetric D(z) (D → 1 as |z| → ∞, no poles in
+    # |z| > 1): complex zeros outside the circle come in pairs, real ones on (1, ∞) and
+    # (-∞, -1) are odd in number exactly when D(1) < 0, resp. D(-1) < 0. Both end samples
+    # are on the real axis (ω0 ≈ 0 and ωmax): free, and catches an odd number of lost or
+    # spurious π-jumps.
+    if (mp.parity != Int32(0)) & (st.status == Int8(1)) & isfinite(Zraw)
+        par = Int32((st.flags & FLAG_NEG0) != Int8(0)) + Int32(real(st.Da) < 0)
+        fl |= ((unsafe_trunc(Int32, Z) - par) & Int32(1)) != Int32(0) ? FLAG_PARITY : Int8(0)
+    end
     return Zraw, σd, ωd, st.steps, fl
 end
 
@@ -475,7 +519,8 @@ end
 # points are flagged -- would scatter the certified σ.
 @inline function count_at(D::F, p, c, mp::MarchParams{T, TE}, meth, σ::T) where {F, T, TE}
     m = MarchParams{T, T}(σ, mp.ω0, mp.ωmax, mp.h0, mp.rtol, mp.atol, mp.hrel, mp.hmax,
-        mp.ωband, mp.npow, mp.maxsteps, Int32(0), Int32(0), mp.σtol)
+        mp.ωband, mp.npow, mp.maxsteps, Int32(0), Int32(0), mp.σtol, mp.zmax, mp.qtrust,
+        Int32(0), Int32(0))
     cT = conv_consts(T, c)
     st = seed_q(D, p, cT, m, Val(1))                      # p: the prepared point of the march
     while st.status == Int8(0)
@@ -664,10 +709,10 @@ end
         cE = evalconsts(mp, c)
         j = Int32(l - 1)                       # this lane's k-th point: j = l-1 + k*lanes
         i = j < npts ? scramble(j, P, npts) : Int32(0)
-        st = blank_state(prepare(D, @inbounds(Pts[1]), c), typeof(mp.σ), nr)
-        if i > 0
-            st = seed(D, @inbounds(Pts[i]), c, cE, mp, nr)
-        end
+        # the first point seeds the state directly (a blank state needed a prepare() of Pts[1]
+        # only for its type -- a full, workspace-writing setup per lane for nothing); an idle
+        # lane (i = 0) never enters the loop
+        st = seed(D, @inbounds(Pts[max(i, Int32(1))]), c, cE, mp, nr)
         while i > 0
             if st.status == Int8(0)
                 st = march_step(D, st, cE, mp, meth)
@@ -691,10 +736,7 @@ end
     c = with_slot(c0, ws, l, lanes)
     cE = evalconsts(mp, c)
     i = next_point!(counter)
-    st = blank_state(prepare(D, @inbounds(Pts[1]), c), typeof(mp.σ), nr)
-    if i <= npts
-        st = seed(D, @inbounds(Pts[i]), c, cE, mp, nr)
-    end
+    st = seed(D, @inbounds(Pts[min(i, npts)]), c, cE, mp, nr)   # idle lanes never use it
     while i <= npts
         if st.status == Int8(0)
             st = march_step(D, st, cE, mp, meth)
@@ -832,6 +874,15 @@ Keywords (defaults in brackets):
 - `workgroup` -- GPU: 256. CPU: 1 for the lane schedules (each lane is its own
   task -- a CPU workgroup runs its items one after another, so a bigger group
   would let one item drain the whole queue), 64 for `:pixel`.
+- `zmax` [`Inf`] -- largest possible count (e.g. the degree of a polynomial D; 2Q + 2 for
+  `D_mill2p`); a count below 0 or above `zmax` is flagged (bit 8)
+- `qtrust` [`4`] -- trust radius of the one-step root estimates (|D| minima): a Newton step
+  longer than `qtrust` × the march step that resolved the minimum is discarded
+- `circle` [`false`] -- the march is a half circle μ ∈ [0, ω_max] of a real-symmetric D(z)
+  (ω0 ≈ 0 and ω_max are z = 1 and z = -1): a |D| still falling at ω_max has its minimum
+  there (end rule, the mirror of the rule at ω0 -- e.g. a flip multiplier near z = -1)
+- `parity` [`false`] -- circle marches: flag (bit 16) a count whose parity disagrees with
+  [D(1) < 0] + [D(-1) < 0] (needs D → 1 as |z| → ∞ and no poles in |z| > 1)
 """
 function plan_sweep(points; backend = CPU(), T::Type = Float32, Teval::Union{Nothing, Type} = nothing,
                     method::Symbol = :unwrap,
@@ -841,7 +892,8 @@ function plan_sweep(points; backend = CPU(), T::Type = Float32, Teval::Union{Not
                     refine::Integer = 0, certify::Bool = false, σtol = 1e-3,
                     workspace = nothing,
                     lanes::Union{Nothing, Integer} = nothing,
-                    workgroup::Union{Nothing, Integer} = nothing)
+                    workgroup::Union{Nothing, Integer} = nothing,
+                    zmax = Inf, qtrust = 4.0, circle::Bool = false, parity::Bool = false)
     method in (:unwrap, :bs3) || error("method must be :unwrap or :bs3")
     schedule = something(schedule, backend isa CPU ? :queue : :pixel)
     schedule in (:pixel, :strided, :queue) || error("schedule must be :pixel, :strided or :queue")
@@ -857,7 +909,8 @@ function plan_sweep(points; backend = CPU(), T::Type = Float32, Teval::Union{Not
     workgroup = something(workgroup, cpu ? (schedule === :pixel ? 64 : 1) : 256)
     TE = something(Teval, T)
     mp = MarchParams{T, TE}(T(σ), T(ω0), T(ω_max), T(h0), T(tol), T(tol), T(hrel), T(hmax),
-        T(ωband), T(n_power), Int32(maxsteps), Int32(refine), Int32(certify), T(σtol))
+        T(ωband), T(n_power), Int32(maxsteps), Int32(refine), Int32(certify), T(σtol),
+        T(zmax), T(qtrust), Int32(circle), Int32(parity))
     dpts = KernelAbstractions.allocate(backend, eltype(hpts), npts)
     copyto!(dpts, hpts)
     Zraw = KernelAbstractions.zeros(backend, T, npts)
@@ -884,14 +937,16 @@ function alloc_workspace!(p::SweepPlan, ::Type{TW}, len::Integer) where {TW}
 end
 
 """
-    set_march!(plan; ω_max, refine, certify, σtol, σ, tol) -> plan
+    set_march!(plan; ω_max, refine, certify, σtol, σ, tol, zmax, qtrust, circle, parity) -> plan
 
 Change march settings of an existing plan without reallocating (slider-driven
 use): the end of the march `ω_max`, the Newton polish `refine`, the line `σ`,
-the tolerance `tol`. Unspecified settings are kept.
+the tolerance `tol`, the checks `zmax`, `circle`, `parity` (e.g. zmax = 2Q + 2 when Q
+changes). Unspecified settings are kept.
 """
 function set_march!(p::SweepPlan{T}; ω_max = nothing, refine = nothing, σ = nothing,
-                    tol = nothing, certify = nothing, σtol = nothing) where {T}
+                    tol = nothing, certify = nothing, σtol = nothing, zmax = nothing,
+                    qtrust = nothing, circle = nothing, parity = nothing) where {T}
     m = p.mp
     TE = evaltype(m)
     t = tol === nothing ? m.atol : T(tol)
@@ -899,7 +954,9 @@ function set_march!(p::SweepPlan{T}; ω_max = nothing, refine = nothing, σ = no
         ω_max === nothing ? m.ωmax : T(ω_max), m.h0, p.method === :unwrap ? t : m.rtol, t,
         m.hrel, m.hmax, m.ωband, m.npow, m.maxsteps,
         refine === nothing ? m.newton : Int32(refine),
-        certify === nothing ? m.bisect : Int32(certify), σtol === nothing ? m.σtol : T(σtol))
+        certify === nothing ? m.bisect : Int32(certify), σtol === nothing ? m.σtol : T(σtol),
+        zmax === nothing ? m.zmax : T(zmax), qtrust === nothing ? m.qtrust : T(qtrust),
+        circle === nothing ? m.circle : Int32(circle), parity === nothing ? m.parity : Int32(parity))
     return p
 end
 
@@ -950,7 +1007,9 @@ NaN if none), `omega`, `steps`, `evals` (D evaluations per point), and
 `flags`: bit 1 = the march failed (step underflow / `maxsteps`), bit 2 = a
 root closer to the line than the precision can resolve was counted by its
 side (a boundary-grazing point: its count is a decision, not a measurement),
-bit 3 = integer residual |Zraw - round(Zraw)| > 0.25 (a root on the line).
+bit 3 = integer residual |Zraw - round(Zraw)| > 0.25 (a root on the line),
+bit 4 (value 8) = impossible count (Z < 0 or Z > `zmax`), bit 5 (value 16) = parity
+mismatch of a circle march (`parity = true`).
 """
 function fetch_result(p::SweepPlan)
     Zraw = Array(p.Zraw)

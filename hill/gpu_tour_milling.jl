@@ -11,7 +11,10 @@ include(joinpath(@__DIR__, "gpu_fast.jl"))
 include(joinpath(@__DIR__, "gpu_helix.jl"))
 const NG = NyquistGPU
 
-const CIRCLE = (n_power = 0, ω0 = 1e-9, ω_max = 0.5, h0 = 0.05, hrel = 0.25, nroots = 1)
+const CIRCLE = (n_power = 0, ω0 = 1e-9, ω_max = 0.5, h0 = 0.05, hrel = 0.25, nroots = 1, circle = true, parity = true)
+# impossible counts are flagged: the pole-free compressed determinants are polynomials of degree
+# <= 2Q + 2 (Test 2) and <= nw + 4 (Test 3) in 1/z
+circle_kw(zmax) = (CIRCLE..., zmax = zmax)
 const STRIP = (n_power = 0, ω0 = A_STRIP, ω_max = A_STRIP + 1, h0 = 1e-3, hrel = 0.1, nroots = 1)
 
 # name => (title, D, c, reference D and c (evaluated in Float64), axes, march, formats, resolution
@@ -19,15 +22,15 @@ const STRIP = (n_power = 0, ω0 = A_STRIP, ω_max = A_STRIP + 1, h0 = 1e-3, hrel
 const MODELS = Dict{String, Any}(
     "mill2g" => (title = "Test 2: straight flutes, compressed Hill, Gauss + kink (D_mill2g, Q = 8)", D = D_mill2g,
                  c = mill2g_consts(Q = 8), Dref = D_mill2g, cref = mill2g_consts(Q = 32),
-                 xr = (5.0, 25.0), yr = (0.0, 5.0), kw = CIRCLE, formats = ("F32", "F16", "F16+"),
+                 xr = (5.0, 25.0), yr = (0.0, 5.0), kw = circle_kw(66), formats = ("F32", "F16", "F16+"),
                  res = nothing, ws = false, wslen = nothing, zdiv = 1),
     "mill2p" => (title = "Test 2: straight flutes, compressed Hill, pole-free (D_mill2p, Q = 16)", D = D_mill2p,
                  c = mill2m_consts(Q = 16), Dref = D_mill2s, cref = mill2q_consts(Q = 64),
-                 xr = (5.0, 25.0), yr = (0.0, 5.0), kw = CIRCLE, formats = ("F32", "F16", "F16+"),
+                 xr = (5.0, 25.0), yr = (0.0, 5.0), kw = circle_kw(130), formats = ("F32", "F16", "F16+"),
                  res = nothing, ws = false, wslen = nothing, zdiv = 1),
     "mill2n" => (title = "Test 2: straight flutes, compressed Hill (D_mill2n, Q = 16)", D = D_mill2n,
                  c = mill2m_consts(Q = 16), Dref = D_mill2s, cref = mill2q_consts(Q = 64),
-                 xr = (5.0, 25.0), yr = (0.0, 5.0), kw = CIRCLE, formats = ("F32", "F16", "F16+"),
+                 xr = (5.0, 25.0), yr = (0.0, 5.0), kw = circle_kw(130), formats = ("F32", "F16", "F16+"),
                  res = nothing, ws = false, wslen = nothing, zdiv = 1),
     "mill3d" => (title = "Test 3: helix 30/45 deg, dense Hill (D_mill3, tol 1e-2)", D = D_mill3,
                  c = mill3_consts(tol = 1e-2), Dref = D_mill3, cref = mill3_consts(tol = 1e-4),
@@ -35,11 +38,11 @@ const MODELS = Dict{String, Any}(
                  res = (480, 270), ws = true, wslen = c -> ws_len(D_mill3), zdiv = 2),
     "mill3c" => (title = "Test 3: helix 30/45 deg, compressed Hill (D_mill3c, Q = 8, n_s = 4)", D = D_mill3c,
                  c = mill3c_consts(Q = 8, ns = 4), Dref = D_mill3c, cref = mill3c_consts(Q = 10, ns = 5),
-                 xr = (8.0, 30.0), yr = (0.0, 10.0), kw = CIRCLE, formats = ("F32", "F16", "F16+"),
+                 xr = (8.0, 30.0), yr = (0.0, 10.0), kw = circle_kw(64), formats = ("F32", "F16", "F16+"),
                  res = nothing, ws = true, wslen = mill3c_wslen, zdiv = 1),
     "mill3h" => (title = "Test 3: helix 30/45 deg, compressed Hill, Hessenberg (D_mill3h, Q = 8, n_s = 4)", D = D_mill3h,
                  c = mill3c_consts(Q = 8, ns = 4), Dref = D_mill3h, cref = mill3c_consts(Q = 10, ns = 5),
-                 xr = (8.0, 30.0), yr = (0.0, 10.0), kw = CIRCLE, formats = ("F32", "F16", "F16+"),
+                 xr = (8.0, 30.0), yr = (0.0, 10.0), kw = circle_kw(64), formats = ("F32", "F16", "F16+"),
                  res = nothing, ws = true, wslen = mill3h_wslen, zdiv = 1),
 )
 @isdefined(EXTRA_MODELS) && merge!(MODELS, EXTRA_MODELS)

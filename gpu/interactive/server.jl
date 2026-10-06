@@ -54,7 +54,11 @@ if isfile(HILL_MODELS)
     end
     # half circle |z| = 1; the step cap of the strip examples is not needed there (same counts
     # on 12 800 test points, 13.9 instead of 18.3 evaluations per point)
-    const HKWQ = (ω0 = 1e-9, ω_max = 0.5, h0 = 0.05, hrel = 0.25)
+    const HKWQ = (ω0 = 1e-9, ω_max = 0.5, h0 = 0.05, hrel = 0.25, circle = true, parity = true)
+    # impossible counts (flagged): the pole-free compressed determinants are polynomials of degree
+    # <= 2Q + 2 (Test 2) and <= nw + 4 (Test 3) in 1/z
+    const HKWQ2 = (HKWQ..., zmax = 2 * 8 + 2)
+    const HKWQ3 = (HKWQ..., zmax = 42 + 2)
     push!(EXAMPLES,
         (key = "mill2q", ω16 = 0.0, smin = -0.04, hill = true, zdiv = 1, f16 = true, ωp = mill2q_ωp,
          cfun = c -> memo(() -> mill2g_consts(ζ = c[1], aD = c[2], kr = c[3], Q = 8), (:m2g, c)), res = "1920x1080",
@@ -64,7 +68,7 @@ if isfile(HILL_MODELS)
                 "of the Floquet multiplier (half circle by symmetry).",
          sys = (title = "milling, straight flutes (Test 2, compressed Hill, fast)", D = D_mill2g,
                 c = (0.011, 0.05, 1 / 3), npow = 0, xr = (5.0, 25.0), yr = (0.0, 5.0), xl = "rpm/1000",
-                yl = "a_p [mm]", kw = HKWQ),
+                yl = "a_p [mm]", kw = HKWQ2),
          knobs = [(i = 1, name = "damping ζ", lo = 0.002, hi = 0.05), (i = 2, name = "immersion a/D", lo = 0.02, hi = 1.0),
                   (i = 3, name = "K_n/K_t", lo = 0.0, hi = 1.0)]),
         (key = "mill3c", ω16 = 0.0, smin = -0.03, hill = true, zdiv = 1, f16 = true, ωp = mill3c_ωp,
@@ -77,7 +81,7 @@ if isfile(HILL_MODELS)
                 "along the unit circle of the Floquet multiplier.",
          sys = (title = "milling, different helix angles (Test 3, compressed Hill, fast)", D = D_mill3h,
                 c = (0.011, 0.05, 45.0), npow = 0, xr = (8.0, 30.0), yr = (0.0, 10.0), xl = "rpm/1000",
-                yl = "a_p [mm]", kw = HKWQ),
+                yl = "a_p [mm]", kw = HKWQ3),
          knobs = [(i = 1, name = "damping ζ", lo = 0.002, hi = 0.05), (i = 2, name = "immersion a/D", lo = 0.02, hi = 1.0),
                   (i = 3, name = "helix β₂ [°]", lo = 0.0, hi = 60.0)]),
         (key = "mathieu", ω16 = 0.0, smin = -0.3, hill = true, ωp = mathieu_ωp,
