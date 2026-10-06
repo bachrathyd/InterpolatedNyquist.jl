@@ -26,20 +26,57 @@
 # Workspace (per lane, complex dual entries; real data in the values, zero partials):
 #   node fields (NF per node), running sums (2 per sorted position), Xa (LD x LD), Xb (LD x 2),
 #   the LU matrix (LD x LD). LD = maximal nw + 2; points with more wrapped nodes return NaN (flagged).
+#   The layout is that of the MAXIMAL axial count NS = c[8] (fixed offsets for every point), so that
+#   D_mill3c / D_mill3h read the same offsets whatever n_s the point uses.
+#
+# v2 (math review, round 2b) -- two changes, both in prepare only (no cost per evaluation):
+# * Diagonal kink correction. Every row has a slope kink of the causal Green's function G at its own
+#   node (G(0) = 0, G'(0+) = 1); the window rule integrates the ramp (φ - φ_i)_+ with the error
+#   E^φ_i = (φ_ex - φ_i)²/2 - Σ_{k>i} Wφ_k (φ_k - φ_i). Adding ε_n = w1 a_p wz_l f(φ_i) E^φ_i / Ω² to the
+#   diagonal of S_z C, i.e. using (I - P(z))(S_z C + diag ε), removes that error. The correction is
+#   λ-free and real: A0 = I + (I - P0)(G C + diag ε) is lower triangular with pivots 1 + ε_n (forward
+#   sweep: y_n = (… + ε_π(n) y_π(n)) / (1 + ε_n) for a non-wrapped row), and a wrapped row of R picks up
+#   ε_π(n) y_π(n). The off-node (oblique) kinks on the other slices are not corrected.
+# * Adaptive axial count per point: n_s = clamp(ceil(2 + κ_ns a_p b_max/(2πΩ)), 2, NS)
+#   (b_max = max tanβ/R; a_p b_max/(2πΩ) = the helix lag across the depth in natural periods);
+#   Gauss tables for n_s = 2..NS in the constants. ns_fixed > 0 gives a fixed n_s (as v1).
 
-# c = (ζ, w1, f_n, R, tanβ1, tanβ2, Q, n_s, LD, φ_1..φ_Q, Wf_1..Wf_Q, x_1..x_ns, wz_1..wz_ns)
-#   Wf_i = Wφ_i f(φ_i) (Gauss on the cutting window), x_l, wz_l: Gauss on [0, 1] (ζ = a_p x_l)
+# c = (ζ, w1, f_n, R, tanβ1, tanβ2, Q, NS, LD, ns_fixed, kink, κ_ns,
+#      φ_1..φ_Q, Wf_1..Wf_Q, Ef_1..Ef_Q, [x_1..x_n, wz_1..wz_n for n = 2..NS])
+#   Wf_i = Wφ_i f(φ_i) (Gauss on the cutting window), Ef_i = f(φ_i) E^φ_i (kink), x_l, wz_l: Gauss on
+#   [0, 1] (ζ = a_p x_l); the table of n starts after c[mill3c_tab(Q, n)].
 function mill3c_consts(; ζ = 0.011, aD = 0.05, kr = 1 / 3, down = true, β1 = 30.0, β2 = 45.0, R = 8.0,
-                       w1 = 0.4478, fn = 922.0, Q = 8, ns = 4, LD = ns * Q + 2 + 8)
+                       w1 = 0.4478, fn = 922.0, Q = 8, ns = 0, nsmax = ns > 0 ? ns : 6, kink = true,
+                       κns = 1.6, LD = nsmax * Q + 2 + 8)
+    ns <= nsmax || error("mill3c_consts: ns > nsmax")
     φen, φex = down ? (acos(2aD - 1), Float64(π)) : (0.0, acos(1 - 2aD))
     xg, wg = gl_nodes_weights(Q)
     φ = (φex - φen) / 2 .* xg .+ (φex + φen) / 2
-    Wf = (φex - φen) / 2 .* wg .* sin.(φ) .* (cos.(φ) .+ kr .* sin.(φ))
-    xz, wz = gl_nodes_weights(ns)
-    return (ζ, w1, fn, R, tand(β1), tand(β2), Float64(Q), Float64(ns), Float64(LD),
-            φ..., Wf..., ((xz .+ 1) ./ 2)..., (wz ./ 2)...)
+    Wφ = (φex - φen) / 2 .* wg
+    f = sin.(φ) .* (cos.(φ) .+ kr .* sin.(φ))
+    Wf = Wφ .* f
+    Eφ = [(φex - φ[i])^2 / 2 - sum((Wφ[k] * (φ[k] - φ[i]) for k in (i + 1):Q); init = 0.0) for i in 1:Q]
+    tab = Float64[]
+    for n in 2:nsmax
+        xz, wz = gl_nodes_weights(n)
+        append!(tab, (xz .+ 1) ./ 2); append!(tab, wz ./ 2)
+    end
+    return (ζ, w1, fn, R, tand(β1), tand(β2), Float64(Q), Float64(nsmax), Float64(LD), Float64(ns),
+            kink ? 1.0 : 0.0, κns, φ..., Wf..., (f .* Eφ)..., tab...)
 end
 gl_nodes_weights(n) = gl(n)                     # Gauss-Legendre nodes, weights on [-1, 1]
+@inline mill3c_tab(Q, n) = 12 + 3Q + n * n - n - 2   # c[mill3c_tab(Q, n) + l] = x_l, + n + l: wz_l
+
+"axial count of a point (rule of the machining review; NS = c[8] the maximum)"
+@inline function mill3c_ns(rk, ap, c)
+    TT = typeof(rk)
+    NS = unsafe_trunc(Int, c[8]); nsf = unsafe_trunc(Int, c[10])
+    nsf > 0 && return nsf
+    Ω = rk * (TT(1000) / (60 * c[3]))
+    bmax = max(abs(c[5]), abs(c[6])) / c[4]
+    x = 2 + c[12] * max(ap, zero(TT)) * bmax / (TT(6.283185307179586) * Ω)
+    return clamp(unsafe_trunc(Int, ceil(x)), 2, NS)
+end
 
 const NF3 = 8                                   # node fields
 mill3c_wslen(Q, ns, LD) = 2Q * ns * (NF3 + 2) + 2LD * LD + 2LD
@@ -48,7 +85,8 @@ mill3c_wslen(c::Tuple) = mill3c_wslen(Int(c[7]), Int(c[8]), Int(c[9]))
 @inline _cv(z) = Complex(_val(real(z)), _val(imag(z)))      # value of a stored entry
 
 # node fields: 1 (t_n, c_n)   2 a1 = e^{r1 t}   3 b1c = e^{-r1 t} c   4 (partner, wrapped)
-#              5 (ψ_n, Ωτ_n)  6 (perm[s], rank[n])   7 y (current column)   8 (W_i, wi[n])
+#              5 (ψ_n, Ωτ_n), after step 3: (ε_n, 1/(1 + ε_n))   6 (perm[s], rank[n])
+#              7 y (current column)   8 (W_i, wi[n])
 @inline nf(n, f) = (n - 1) * NF3 + f
 
 # prepare: nodes, time origin, order, the reduced matrices -- all λ-free, march precision
@@ -57,10 +95,14 @@ function mill3c_prepare(p, cw)
     rk, ap = p
     TT = typeof(rk)
     ζ, w1, fn, R, tb1, tb2 = c[1], c[2], c[3], c[4], c[5], c[6]
-    Q = unsafe_trunc(Int, c[7]); ns = unsafe_trunc(Int, c[8]); LD = unsafe_trunc(Int, c[9])
+    Q = unsafe_trunc(Int, c[7]); NS = unsafe_trunc(Int, c[8]); LD = unsafe_trunc(Int, c[9])
+    kink = c[11] > 0
+    ns = mill3c_ns(rk, ap, c)                   # axial nodes of this point (≤ NS)
+    T0 = mill3c_tab(Q, ns)
     N = 2 * ns * Q
-    SOFF = N * NF3
-    XOFF = SOFF + 2N
+    NM = 2 * NS * Q                             # the layout is that of NS (fixed offsets)
+    SOFF = NM * NF3
+    XOFF = SOFF + 2NM
     XBOFF = XOFF + LD * LD
     twoπ = TT(6.283185307179586)
     πT = TT(3.141592653589793)
@@ -74,7 +116,7 @@ function mill3c_prepare(p, cw)
     # 1. nodes: angle, arc length to the partner, weight
     for j in 1:2, l in 1:ns, i in 1:Q
         n = ((j - 1) * ns + (l - 1)) * Q + i
-        φ = c[9 + i]; Wf = c[9 + Q + i]; x = c[9 + 2Q + l]; wz = c[9 + 2Q + ns + l]
+        φ = c[12 + i]; Wf = c[12 + Q + i]; x = c[T0 + l]; wz = c[T0 + ns + l]
         ζl = L * x
         bj = j == 1 ? b1 : b2
         bp = j == 1 ? b2 : b1
@@ -93,34 +135,35 @@ function mill3c_prepare(p, cw)
         cnt = 0
         for n in 1:N
             a = _cv(A[nf(n, 5)])
-            cnt += Int(mod(real(a) - ψk, twoπ) < imag(a))
+            d = real(a) - ψk                       # both in [0, 2π): no mod (review: 4096 fmod per point)
+            d += d < 0 ? twoπ : zero(TT)
+            cnt += Int(d < imag(a))
         end
         if cnt < best
             best = cnt; kb = k
         end
     end
-    nw = best
     ψ0 = real(_cv(A[nf(kb, 5)]))
-    # 3. times, wrapped flags, exponentials
-    wcount = 0
+    # 3. times and exponentials (the wrapped flags follow from the time order, after step 4)
     for n in 1:N
         a = _cv(A[nf(n, 5)])
-        d = mod(real(a) - ψ0, twoπ)
+        d = real(a) - ψ0
+        d += d < 0 ? twoπ : zero(TT)
         t = d / Ω
-        wr = d < imag(a)
         cn = imag(_cv(A[nf(n, 1)]))
         A[nf(n, 1)] = Complex(t, cn)
         e = exp(r1 * t)
         A[nf(n, 2)] = e
         A[nf(n, 3)] = cn * exp(-r1 * t)              # no complex division (Base widens it to Float64)
-        pr = real(_cv(A[nf(n, 4)]))
-        A[nf(n, 4)] = Complex(pr, wr ? one(TT) : zero(TT))
-        if wr
-            wcount += 1
-            A[nf(wcount, 8)] = Complex(TT(n), imag(_cv(A[nf(wcount, 8)])))   # W_i = n
-            A[nf(n, 8)] = Complex(real(_cv(A[nf(n, 8)])), TT(wcount))       # wi[n]
-        end
         A[nf(n, 6)] = Complex(TT(n), zero(TT))                              # perm = identity
+        # kink correction of the node (field 5 is free from here on)
+        ε = zero(TT)
+        if kink
+            i = (n - 1) % Q + 1
+            l = ((n - 1) ÷ Q) % ns + 1
+            ε = w1 * (L * c[T0 + ns + l]) * c[12 + 2Q + i] / (Ω * Ω)
+        end
+        A[nf(n, 5)] = Complex(ε, 1 / (1 + ε))
     end
     # 4. sort by time (insertion sort on perm), then rank
     for s in 2:N
@@ -138,6 +181,22 @@ function mill3c_prepare(p, cw)
     for s in 1:N
         m = unsafe_trunc(Int, real(_cv(A[nf(s, 6)])))
         A[nf(m, 6)] = Complex(real(_cv(A[nf(m, 6)])), TT(s))
+    end
+    # wrapped flags from the time ORDER: the sweep needs "not wrapped <=> the partner is earlier".
+    # At a tie (the partner at the time origin) the angle test above and the sort can disagree by
+    # rounding -- then a sweep read a stale running sum (found in the GPU review). Both readings
+    # are the same delayed time, so the order decides; nw and the wrapped numbering are recounted.
+    nw = 0
+    for n in 1:N
+        pw = _cv(A[nf(n, 4)])
+        pn = unsafe_trunc(Int, real(pw))
+        wr = imag(_cv(A[nf(pn, 6)])) > imag(_cv(A[nf(n, 6)]))
+        A[nf(n, 4)] = Complex(real(pw), wr ? one(TT) : zero(TT))
+        if wr
+            nw += 1
+            A[nf(nw, 8)] = Complex(TT(n), imag(_cv(A[nf(nw, 8)])))                # W_i = n
+            A[nf(n, 8)] = Complex(real(_cv(A[nf(n, 8)])), TT(nw))                  # wi[n]
+        end
     end
     # 5. columns of A0⁻¹ [E_W, u0, u1] by forward sweeps; the reduced matrices
     n2 = nw + 2
@@ -169,6 +228,11 @@ function mill3c_prepare(p, cw)
                 if !wr                                  # the partner is earlier in time
                     sp = unsafe_trunc(Int, imag(_cv(A[nf(pn, 6)])))
                     y += ρ1 * ap1 * _cv(A[SOFF + 2sp - 1]) + conj(ρ1) * conj(ap1) * _cv(A[SOFF + 2sp])
+                    kink && (y += real(_cv(A[nf(pn, 5)])) * _cv(A[nf(pn, 7)]))   # + ε_π y_π
+                end
+                if kink                                 # pivot 1 + ε_n
+                    y *= imag(_cv(A[nf(n, 5)]))
+                    A[nf(n, 7)] = y
                 end
                 bc = _cv(A[nf(n, 3)])
                 S1 += bc * y
@@ -182,6 +246,7 @@ function mill3c_prepare(p, cw)
                 sp = unsafe_trunc(Int, imag(_cv(A[nf(pn, 6)])))
                 ap1 = _cv(A[nf(pn, 2)])
                 v = ρ1 * ap1 * _cv(A[SOFF + 2sp - 1]) + conj(ρ1) * conj(ap1) * _cv(A[SOFF + 2sp])
+                kink && (v += real(_cv(A[nf(pn, 5)])) * _cv(A[nf(pn, 7)]))      # + ε_π y_π
                 if col <= nw + 2
                     A[XOFF + i + (jc - 1) * LD] = v
                 else
@@ -198,7 +263,7 @@ function mill3c_prepare(p, cw)
         end
     end
     er = exp(r1 * Ts)
-    return (Ts, TT(nw), real(er), imag(er))
+    return (Ts, TT(nw), real(er), imag(er), TT(ns))   # q[5] = n_s (diagnostics; the D's read q[1:4])
 end
 
 # LU determinant with leading dimension LD at offset off (dual numbers, partial pivoting), in the

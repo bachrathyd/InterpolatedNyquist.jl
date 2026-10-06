@@ -43,8 +43,8 @@ if isfile(HILL_MODELS)
     include(HILL_MODELS)
     include(joinpath(@__DIR__, "..", "..", "hill", "gpu_fast.jl"))
     include(joinpath(@__DIR__, "..", "..", "hill", "gpu_helix.jl"))
-    ws_len(::typeof(D_mill3c)) = mill3c_wslen(8, 4, 42)
-    ws_len(::typeof(D_mill3h)) = mill3h_wslen(8, 4, 42)
+    ws_len(::typeof(D_mill3c)) = mill3c_wslen(mill3c_consts())     # layout for the maximal n_s (6)
+    ws_len(::typeof(D_mill3h)) = mill3h_wslen(mill3c_consts())
     const HKW = (ω0 = A_STRIP, ω_max = A_STRIP + 1, h0 = 1e-3, hrel = 0.05)
     const HKWM = (ω0 = A_STRIP, ω_max = A_STRIP + 1, h0 = 1e-3, hrel = 0.1)   # milling: fewer samples
     const MEMO = Dict{Any, Any}()
@@ -58,7 +58,7 @@ if isfile(HILL_MODELS)
     # impossible counts (flagged): the pole-free compressed determinants are polynomials of degree
     # <= 2Q + 2 (Test 2) and <= nw + 4 (Test 3) in 1/z
     const HKWQ2 = (HKWQ..., zmax = 2 * 8 + 2)
-    const HKWQ3 = (HKWQ..., zmax = 42 + 2)
+    const HKWQ3 = (HKWQ..., zmax = 6 * 8 + 4)
     push!(EXAMPLES,
         (key = "mill2q", ω16 = 0.0, smin = -0.04, hill = true, zdiv = 1, f16 = true, ωp = mill2q_ωp,
          cfun = c -> memo(() -> mill2g_consts(ζ = c[1], aD = c[2], kr = c[3], Q = 8), (:m2g, c)), res = "1920x1080",
@@ -72,15 +72,16 @@ if isfile(HILL_MODELS)
          knobs = [(i = 1, name = "damping ζ", lo = 0.002, hi = 0.05), (i = 2, name = "immersion a/D", lo = 0.02, hi = 1.0),
                   (i = 3, name = "K_n/K_t", lo = 0.0, hi = 1.0)]),
         (key = "mill3c", ω16 = 0.0, smin = -0.03, hill = true, zdiv = 1, f16 = true, ωp = mill3c_ωp,
-         cfun = c -> memo(() -> mill3c_consts(ζ = c[1], aD = c[2], β2 = c[3], Q = 8, ns = 4), (:m3c, c)),
+         cfun = c -> memo(() -> mill3c_consts(ζ = c[1], aD = c[2], β2 = c[3], Q = 8), (:m3c, c)),
          res = "960x540",
          note = "1-DOF milling, two flutes with helix 30° and β₂ (R = 8 mm), delays distributed over the axial depth, " *
-                "spindle period. Compressed Hill determinant on 2 x 4 x 8 Gauss nodes in the workpiece frame (all harmonics " *
+                "spindle period. Compressed Hill determinant on 2 x n_s x 8 Gauss nodes in the workpiece frame (n_s = 2..6 " *
+                "by the helix lag across the depth; diagonal kink correction; all harmonics " *
                 "in closed form); the regenerative term of every node is the same material node on the previous tooth. " *
-                "Reduced once per point to a 34 x 34 determinant in Hessenberg form (O(34²) per evaluation); counted " *
+                "Reduced once per point to an (n_w + 2)-square determinant (n_w ≈ 8 n_s wrapped nodes) in Hessenberg form (O(n_w²) per evaluation); counted " *
                 "along the unit circle of the Floquet multiplier.",
          sys = (title = "milling, different helix angles (Test 3, compressed Hill, fast)", D = D_mill3h,
-                c = (0.011, 0.05, 45.0), npow = 0, xr = (8.0, 30.0), yr = (0.0, 10.0), xl = "rpm/1000",
+                c = (0.011, 0.05, 45.0), npow = 0, xr = (3.0, 30.0), yr = (0.0, 10.0), xl = "rpm/1000",
                 yl = "a_p [mm]", kw = HKWQ3),
          knobs = [(i = 1, name = "damping ζ", lo = 0.002, hi = 0.05), (i = 2, name = "immersion a/D", lo = 0.02, hi = 1.0),
                   (i = 3, name = "helix β₂ [°]", lo = 0.0, hi = 60.0)]),

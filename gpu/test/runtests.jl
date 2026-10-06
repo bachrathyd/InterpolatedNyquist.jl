@@ -261,7 +261,7 @@ D_promoting(λ, p, c) = λ^2 + 0.5 * λ + p[1]                        # Float64 
             Int32(1000), Int32(0), Int32(0), 1e-3, Inf, 4.0, Int32(1), Int32(1))
         st = NyquistGPU.blank_state((0.0,), Float64, Val(1))
         mk(Φ, Dend, neg0) = NyquistGPU.MarchState{Float64, 1, Tuple{Float64}}(st.p, 0.5, 0.1, Φ, Dend, st.Dwa,
-            st.ua, 1.0, 0.0, 0.0, Int32(5), Int8(1), neg0 ? NyquistGPU.FLAG_NEG0 : Int8(0), st.dd, st.ds, st.dw)
+            st.ua, 1.0, 0.0, 0.0, Int32(5), Int8(1), neg0 ? NyquistGPU.FLAG_NEG0 : Int8(0), st.dd, st.ds, st.dw, st.ρ2, st.rej)
         @test NyquistGPU.finish(mk(-π, complex(-1.0), true), mp)[5] == 16         # Z = 1, parity 0
         @test NyquistGPU.finish(mk(-π, complex(+1.0), true), mp)[5] == 0          # Z = 1, parity 1
         @test NyquistGPU.finish(mk(-2π, complex(-1.0), true), mp)[5] == 0         # Z = 2, parity 0
@@ -276,5 +276,45 @@ D_promoting(λ, p, c) = λ^2 + 0.5 * λ + p[1]                        # Float64 
         @test isfinite(d_wide) && qlen > 4 * 0.01                      # longer than 4 steps ...
         @test isnan(NyquistGPU.dip_root(args..., 4.0)[1])              # ... so discarded at qtrust = 4
         @test qlen^2 <= max(0.2^2, 1.0)                                # (the old radius kept it)
+    end
+
+    @testset "adaptive engine: run_list!, run_adaptive!, rho certificate, stepctl" begin
+        nx, ny = 61, 47
+        N = nx * ny
+        full = plan_grid((-3.0, 0.9), (-3.0, 3.0), nx, ny; n_power = 1, T = Float64, schedule = :pixel)
+        rf = fetch_result(run!(full, D_hayes))
+        @test all(isfinite, rf.rho) && all(>(0), rf.rho)
+        # run_list!: the listed points get the results of the full run, the others are untouched
+        idx = collect(Int32, 5:7:N)
+        rest = setdiff(1:N, idx)
+        for (sched, kw) in ((:pixel, (;)), (:strided, (lanes = 13,)), (:queue, (lanes = 3,)))
+            g = plan_grid((-3.0, 0.9), (-3.0, 3.0), nx, ny; n_power = 1, T = Float64, schedule = sched, kw...)
+            run_list!(g, D_hayes, (), idx, length(idx))
+            r = fetch_result(g)
+            @test r.Z[idx] == rf.Z[idx] && r.steps[idx] == rf.steps[idx] && isequal(r.rho[idx], rf.rho[idx])
+            @test all(==(0), r.steps[rest])
+        end
+        # the certificate rho = min |D/D'| is small only near the boundary (a root near the line)
+        pts = Array(full.points)
+        near = [!hayes_safe(p...; d = 0.1) for p in pts]
+        @test maximum(rf.rho[.!near]) > 10 * minimum(rf.rho)
+        # run_adaptive!: the counts of the full chart from a fraction of the points
+        a = plan_grid((-3.0, 0.9), (-3.0, 3.0), nx, ny; n_power = 1, T = Float64, schedule = :pixel)
+        info = run_adaptive!(a, D_hayes)                  # strides (16, 8, 4, 2, 1)
+        ra = fetch_result(a)
+        @test ra.Z == rf.Z
+        @test info.points == sum(info.passes) && info.points < 0.8 * N   # 0.72 N (0.34 N at 481 x 361)
+        @test count(>(0), Array(a.aux.lev)) == info.points
+        # warm restart (slider move without a change): the same chart in fewer passes
+        info2 = run_adaptive!(a, D_hayes; warm = true)
+        @test fetch_result(a).Z == rf.Z && length(info2.passes) <= length(info.passes)
+        # the damped step controller: the same counts away from the boundary
+        d = plan_grid((-3.0, 0.9), (-3.0, 3.0), nx, ny; n_power = 1, T = Float64, schedule = :pixel,
+                      stepctl = :damped)
+        rd = fetch_result(run!(d, D_hayes))
+        ok = [hayes_safe(p...) for p in pts]
+        @test (rd.Z .== rf.Z)[ok] == trues(count(ok))
+        @test d.mp.growmax == 2 && d.mp.hold == 1
+        @test_throws ErrorException plan_grid((0, 1), (0, 1), 4, 4; n_power = 1, stepctl = :fast)
     end
 end

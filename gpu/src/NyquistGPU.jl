@@ -61,7 +61,7 @@ import Atomix
 export LowFloat, Float8_E4M3, Float8_E5M2, Float4_E2M1, Float16_emu, BFloat16_emu, format_range
 export SweepPlan, plan_sweep, run!, fetch_result, sweep, grid_points, chart, recheck!,
        check_eltype, simulate_schedule, coprime_stride, colour_field,
-       plan_grid, regrid!, recheck_flagged!, set_march!, WorkSlot
+       plan_grid, regrid!, recheck_flagged!, set_march!, WorkSlot, run_list!, run_adaptive!
 
 include("lowfloat.jl")
 
@@ -132,13 +132,30 @@ struct MarchParams{T, TE}
     circle::Int32  # 1: half-circle march of a real-symmetric D(z): ω0 ≈ 0 and ωmax are z = ±1,
                    #    |D| is mirror-symmetric at BOTH ends (end rule at ωmax, as the seed's at ω0)
     parity::Int32  # 1 (circle marches): flag 16 unless Z ≡ [D(z=1) < 0] + [D(z=-1) < 0] (mod 2)
+    growmax::T     # :unwrap step control: largest step growth after an accepted step (classic: 4)
+    hold::Int32    # :unwrap step control: 1 = no growth on the step right after a rejection
 end
-# the constructor of the first 14 fields (scripts that build MarchParams by hand)
+# the constructors of the first 14 / 18 fields (scripts that build MarchParams by hand)
 MarchParams{T, TE}(σ, ω0, ωmax, h0, rtol, atol, hrel, hmax, ωband, npow, maxsteps, newton, bisect,
                    σtol) where {T, TE} =
     MarchParams{T, TE}(σ, ω0, ωmax, h0, rtol, atol, hrel, hmax, ωband, npow, maxsteps, newton, bisect,
                        σtol, T(Inf), T(4), Int32(0), Int32(0))
+MarchParams{T, TE}(σ, ω0, ωmax, h0, rtol, atol, hrel, hmax, ωband, npow, maxsteps, newton, bisect,
+                   σtol, zmax, qtrust, circle, parity) where {T, TE} =
+    MarchParams{T, TE}(σ, ω0, ωmax, h0, rtol, atol, hrel, hmax, ωband, npow, maxsteps, newton, bisect,
+                       σtol, zmax, qtrust, circle, parity, T(4), Int32(0))
 evaltype(::MarchParams{T, TE}) where {T, TE} = TE
+
+# step controller of the :unwrap march (plan_sweep(...; stepctl)):
+#   :classic -- growth up to 4x after every accepted step (the original controller)
+#   :damped  -- growth up to 2x, none right after a rejection. Near a root the classic controller
+#               alternates accept / reject (each accepted step costs two evaluations). Same
+#               acceptance test; measured on 8 full-HD Test 2 charts (D_mill2p, engine bdfc332):
+#               6-8 % fewer evaluations, ~20 % fewer at boundary pixels; counts differ from
+#               :classic only at flagged (side-decided) points, except at a/D = 0.2, where it
+#               removes 65 of the 67 unflagged 2π slips of :classic (Z = -1 instead of 1)
+stepctl_params(s::Symbol) = s === :classic ? (4.0, Int32(0)) : s === :damped ? (2.0, Int32(1)) :
+    error("stepctl must be :classic or :damped")
 
 # flag bits (fetch_result): 1 failed march, 2 sub-resolution decision, 4 integer residual,
 # 8 impossible count (Z < 0 or Z > zmax), 16 parity mismatch (circle marches);
@@ -301,6 +318,8 @@ struct MarchState{T, N, P}
     dd::NTuple{N, T}     # depths of the tracked minima (ascending)
     ds::NTuple{N, T}     # their σ estimates
     dw::NTuple{N, T}     # their ω estimates
+    ρ2::T                # min over the accepted samples of |D/D'|² (distance-to-root certificate)
+    rej::Bool            # the last trial step was rejected (step control, MarchParams.hold)
 end
 
 @inline function blank_state(p::P, ::Type{T}, ::Val{N}) where {P, T, N}
@@ -308,8 +327,21 @@ end
     cz = Complex(z, z)
     nan = ntuple(_ -> T(NaN), Val(N))
     return MarchState{T, N, P}(p, z, z, z, cz, cz, cz, z, z, z, Int32(0), Int8(1), Int8(0),
-        ntuple(_ -> T(Inf), Val(N)), nan, nan)
+        ntuple(_ -> T(Inf), Val(N)), nan, nan, T(Inf), false)
 end
+
+# |q|² = |D/D'|² of a sample: the squared length of the Newton step from the contour, i.e. a
+# first-order distance from the sample to the nearest root (one division; Inf/NaN where D' = 0,
+# which the min below ignores). Over a march, ρ = min |q| is a root-agnostic, smooth distance
+# field over the parameter plane with V-shaped valleys exactly on the stability boundaries --
+# the certificate of run_adaptive!.
+@inline function rho2_sample(Dv::Complex{T}, Dw::Complex{T}) where {T}
+    isw = inv(max(abs(real(Dw)), abs(imag(Dw))))
+    ar = real(Dv) * isw; ai = imag(Dv) * isw
+    vr = real(Dw) * isw; vi = imag(Dw) * isw
+    return (ar * ar + ai * ai) / (vr * vr + vi * vi)
+end
+@inline rho2_min(a::T, b::T) where {T} = ifelse(b < a, b, a)     # NaN-safe (b = NaN keeps a)
 
 # p: the point, cM: constants in the march precision, cE: in the evaluation precision
 @inline seed(D::F, p, cM, cE, mp::MarchParams, nr) where {F} = seed_q(D, prepare(D, p, cM), cE, mp, nr)
@@ -335,7 +367,7 @@ end
     ok = isfinite(th) & isfinite(s) & (s > 0)
     neg0 = real(Dv) < 0 ? FLAG_NEG0 : Int8(0)          # D(z = 1) < 0 (parity rule)
     return MarchState{T, N, P}(p, ω, mp.h0, zero(T), Dv, Dw, u, s, th, g,
-        Int32(0), ok ? Int8(0) : Int8(2), neg0, dd, ds, dw)
+        Int32(0), ok ? Int8(0) : Int8(2), neg0, dd, ds, dw, rho2_min(T(Inf), rho2_sample(Dv, Dw)), false)
 end
 
 # common accept/reject bookkeeping
@@ -361,12 +393,12 @@ end
         end
         status = last ? Int8(1) : (steps >= mp.maxsteps ? Int8(2) : Int8(0))
         return MarchState{T, N, P}(st.p, b, hn, Φn, Db, Dwb, ub, sb, thb, gb,
-            steps, status, st.flags | fl, dd, ds, dw)
+            steps, status, st.flags | fl, dd, ds, dw, rho2_min(st.ρ2, rho2_sample(Db, Dwb)), false)
     else
         stuck = hn <= hfloor(st.ω, mp)
         status = (stuck | (steps >= mp.maxsteps)) ? Int8(2) : Int8(0)
         return MarchState{T, N, P}(st.p, st.ω, hn, st.Φ, st.Da, st.Dwa, st.ua, st.sa,
-            st.tha, st.ga, steps, status, st.flags, st.dd, st.ds, st.dw)
+            st.tha, st.ga, steps, status, st.flags, st.dd, st.ds, st.dw, st.ρ2, true)
     end
 end
 
@@ -399,7 +431,8 @@ end
     tol = mp.atol
     valid = isfinite(thb) & (sb > 0) & isfinite(Δ)
     accept = (err <= tol) & valid
-    fac = clamp(T(0.9) * cbrt(tol / max(err, floatmin(T))), T(0.2), T(4))
+    fmax = ((mp.hold != Int32(0)) & st.rej) ? one(T) : mp.growmax
+    fac = clamp(T(0.9) * cbrt(tol / max(err, floatmin(T))), T(0.2), fmax)
     hn = h * fac
     if !accept & valid & (hn <= hfloor(st.ω, mp))
         # A root so close to the line that its ±π phase transition is narrower
@@ -520,7 +553,7 @@ end
 @inline function count_at(D::F, p, c, mp::MarchParams{T, TE}, meth, σ::T) where {F, T, TE}
     m = MarchParams{T, T}(σ, mp.ω0, mp.ωmax, mp.h0, mp.rtol, mp.atol, mp.hrel, mp.hmax,
         mp.ωband, mp.npow, mp.maxsteps, Int32(0), Int32(0), mp.σtol, mp.zmax, mp.qtrust,
-        Int32(0), Int32(0))
+        Int32(0), Int32(0), mp.growmax, mp.hold)
     cT = conv_consts(T, c)
     st = seed_q(D, p, cT, m, Val(1))                      # p: the prepared point of the march
     while st.status == Int8(0)
@@ -629,6 +662,13 @@ end
     @inbounds Fl[i] = f
     return nothing
 end
+# the same, plus the distance-to-root certificate ρ = min |D/D'| over the accepted samples
+# (the kernels of this module; the 12-argument methods above stay for external kernels)
+@inline function store!(Zr, Sg, Om, St, Fl, Rh, i, st, mp, D, c, meth, rm::Val)
+    store!(Zr, Sg, Om, St, Fl, i, st, mp, D, c, meth, rm)
+    @inbounds Rh[i] = sqrt(st.ρ2)
+    return nothing
+end
 
 # ===========================================================================
 # Per-lane workspace (plan_sweep(...; workspace = (eltype, len))): characteristic
@@ -664,7 +704,7 @@ end
 # certification use them as they are) and convert them to the evaluation precision once.
 @inline evalconsts(::MarchParams{T, TE}, c) where {T, TE} = conv_consts(TE, c)
 
-@kernel function k_pixel!(Zr, Sg, Om, St, Fl, D, c, @Const(Pts), npts, mp, meth, nr, rm)
+@kernel function k_pixel!(Zr, Sg, Om, St, Fl, Rh, D, c, @Const(Pts), npts, mp, meth, nr, rm)
     i = @index(Global, Linear)
     if i <= npts
         cE = evalconsts(mp, c)
@@ -672,7 +712,7 @@ end
         while st.status == Int8(0)
             st = march_step(D, st, cE, mp, meth)
         end
-        store!(Zr, Sg, Om, St, Fl, i, st, mp, D, c, meth, rm)
+        store!(Zr, Sg, Om, St, Fl, Rh, i, st, mp, D, c, meth, rm)
     end
 end
 
@@ -682,7 +722,7 @@ end
 # the slowest lane than 32 pixels of a row (simulated SIMT efficiency ~0.87 against ~0.73).
 const TILE_W = 4
 const TILE_H = 8
-@kernel function k_tile!(Zr, Sg, Om, St, Fl, D, c, @Const(Pts), nx, ny, ntx, mp, meth, nr, rm)
+@kernel function k_tile!(Zr, Sg, Om, St, Fl, Rh, D, c, @Const(Pts), nx, ny, ntx, mp, meth, nr, rm)
     I = @index(Global, Linear)
     w = (I - 1) ÷ (TILE_W * TILE_H)
     l = (I - 1) % (TILE_W * TILE_H)
@@ -695,14 +735,14 @@ const TILE_H = 8
         while st.status == Int8(0)
             st = march_step(D, st, cE, mp, meth)
         end
-        store!(Zr, Sg, Om, St, Fl, i, st, mp, D, c, meth, rm)
+        store!(Zr, Sg, Om, St, Fl, Rh, i, st, mp, D, c, meth, rm)
     end
 end
 
 # scrambled index: j ↦ (j·P mod n) + 1 is a bijection for gcd(P, n) = 1
 @inline scramble(j, P, n) = Int32(mod(Int64(j) * Int64(P), Int64(n)) + 1)
 
-@kernel function k_strided!(Zr, Sg, Om, St, Fl, D, c0, @Const(Pts), npts, mp, meth, nr, lanes, P, ws, rm)
+@kernel function k_strided!(Zr, Sg, Om, St, Fl, Rh, D, c0, @Const(Pts), npts, mp, meth, nr, lanes, P, ws, rm)
     l = @index(Global, Linear)
     c = with_slot(c0, ws, l, lanes)
     if l <= lanes
@@ -717,7 +757,7 @@ end
             if st.status == Int8(0)
                 st = march_step(D, st, cE, mp, meth)
             else                                # finished: store and refill the lane
-                store!(Zr, Sg, Om, St, Fl, i, st, mp, D, c, meth, rm)
+                store!(Zr, Sg, Om, St, Fl, Rh, i, st, mp, D, c, meth, rm)
                 j += lanes
                 i = j < npts ? scramble(j, P, npts) : Int32(0)
                 if i > 0
@@ -731,7 +771,7 @@ end
 # atomic fetch-and-add; `+=` returns the NEW value = the next 1-based point
 @inline next_point!(counter) = Atomix.@atomic :monotonic counter[1] += Int32(1)
 
-@kernel function k_queue!(Zr, Sg, Om, St, Fl, D, c0, @Const(Pts), npts, mp, meth, nr, counter, ws, lanes, rm)
+@kernel function k_queue!(Zr, Sg, Om, St, Fl, Rh, D, c0, @Const(Pts), npts, mp, meth, nr, counter, ws, lanes, rm)
     l = @index(Global, Linear)
     c = with_slot(c0, ws, l, lanes)
     cE = evalconsts(mp, c)
@@ -741,12 +781,236 @@ end
         if st.status == Int8(0)
             st = march_step(D, st, cE, mp, meth)
         else
-            store!(Zr, Sg, Om, St, Fl, i, st, mp, D, c, meth, rm)
+            store!(Zr, Sg, Om, St, Fl, Rh, i, st, mp, D, c, meth, rm)
             i = next_point!(counter)
             if i <= npts
                 st = seed(D, @inbounds(Pts[i]), c, cE, mp, nr)
             end
         end
+    end
+end
+
+# ===========================================================================
+# Work lists: march only the points idx[1..n] of a plan; the results land at the positions
+# idx[t] of the full-resolution buffers (the passes of run_adaptive!). One kernel per schedule,
+# so that workspace models (lane schedules) and the prepare hook work as in a full sweep.
+# ===========================================================================
+@kernel function k_list!(Zr, Sg, Om, St, Fl, Rh, D, c, @Const(Pts), @Const(idx), n, mp, meth, nr, rm)
+    t = @index(Global, Linear)
+    if t <= n
+        i = @inbounds idx[t]
+        cE = evalconsts(mp, c)
+        st = seed(D, @inbounds(Pts[i]), c, cE, mp, nr)
+        while st.status == Int8(0)
+            st = march_step(D, st, cE, mp, meth)
+        end
+        store!(Zr, Sg, Om, St, Fl, Rh, i, st, mp, D, c, meth, rm)
+    end
+end
+
+@kernel function k_list_strided!(Zr, Sg, Om, St, Fl, Rh, D, c0, @Const(Pts), @Const(idx), n, mp, meth, nr,
+                                 lanes, P, ws, rm)
+    l = @index(Global, Linear)
+    c = with_slot(c0, ws, l, lanes)
+    if l <= lanes
+        cE = evalconsts(mp, c)
+        j = Int32(l - 1)                       # this lane's k-th list entry: j = l-1 + k*lanes
+        t = j < n ? scramble(j, P, n) : Int32(0)
+        # seeded directly, as k_strided! (n >= 1: an idle lane seeds idx[1] and never uses it)
+        st = seed(D, @inbounds(Pts[@inbounds(idx[max(t, Int32(1))])]), c, cE, mp, nr)
+        while t > 0
+            if st.status == Int8(0)
+                st = march_step(D, st, cE, mp, meth)
+            else                                # finished: store and refill the lane
+                store!(Zr, Sg, Om, St, Fl, Rh, @inbounds(idx[t]), st, mp, D, c, meth, rm)
+                j += lanes
+                t = j < n ? scramble(j, P, n) : Int32(0)
+                if t > 0
+                    st = seed(D, @inbounds(Pts[@inbounds(idx[t])]), c, cE, mp, nr)
+                end
+            end
+        end
+    end
+end
+
+@kernel function k_list_queue!(Zr, Sg, Om, St, Fl, Rh, D, c0, @Const(Pts), @Const(idx), n, mp, meth, nr,
+                               counter, ws, lanes, rm)
+    l = @index(Global, Linear)
+    c = with_slot(c0, ws, l, lanes)
+    cE = evalconsts(mp, c)
+    t = next_point!(counter)
+    st = seed(D, @inbounds(Pts[@inbounds(idx[min(t, n)])]), c, cE, mp, nr)   # idle lanes never use it
+    while t <= n
+        if st.status == Int8(0)
+            st = march_step(D, st, cE, mp, meth)
+        else
+            store!(Zr, Sg, Om, St, Fl, Rh, @inbounds(idx[t]), st, mp, D, c, meth, rm)
+            t = next_point!(counter)
+            if t <= n
+                st = seed(D, @inbounds(Pts[@inbounds(idx[t])]), c, cE, mp, nr)
+            end
+        end
+    end
+end
+
+# ===========================================================================
+# Certified coarse-to-fine refinement of a chart (run_adaptive!). The cells of stride s:
+# cell (I, J) (0-based) spans the pixels 1 + I s .. min(1 + (I + 1) s, nx) in x (the last cell
+# may be partial; there are cld(nx - 1, s) cells per row), the same in y. lev[k]: the pass that
+# evaluated pixel k (0: not evaluated). The helpers hold the kernel bodies (PTX checks).
+# ===========================================================================
+@inline cellspan(I, s, n) = (1 + I * s, min(1 + (I + 1) * s, n))
+@inline pix(i, j, nx) = i + (j - 1) * nx
+# integer key of a stored Z_raw: equal counts <=> equal keys (any non-finite value is its own key)
+@inline zkey(z::T) where {T} =
+    isfinite(z) ? unsafe_trunc(Int32, clamp(round(z), T(-1.0e6), T(1.0e6))) : Int32(-2_000_000)
+
+# 0: incomplete (a corner is not evaluated), 1: complete, 2: complete and to be refined -- the
+# corner counts differ, a corner is flagged, or a corner is closer to a root than L * (cell side)
+@inline function mark_cell(lev, Zr, Fl, Rh, c, nx, ny, s, L, ncx)
+    I = (c - 1) % ncx
+    J = (c - 1) ÷ ncx
+    i0, i1 = cellspan(I, s, nx)
+    j0, j1 = cellspan(J, s, ny)
+    k1 = pix(i0, j0, nx); k2 = pix(i1, j0, nx); k3 = pix(i0, j1, nx); k4 = pix(i1, j1, nx)
+    comp = (@inbounds(lev[k1]) > 0) & (@inbounds(lev[k2]) > 0) & (@inbounds(lev[k3]) > 0) &
+           (@inbounds(lev[k4]) > 0)
+    comp || return UInt8(0)
+    z = zkey(@inbounds Zr[k1])
+    dif = (zkey(@inbounds Zr[k2]) != z) | (zkey(@inbounds Zr[k3]) != z) | (zkey(@inbounds Zr[k4]) != z)
+    fl = (@inbounds(Fl[k1]) != 0) | (@inbounds(Fl[k2]) != 0) | (@inbounds(Fl[k3]) != 0) |
+         (@inbounds(Fl[k4]) != 0)
+    lim = L * max(i1 - i0, j1 - j0)
+    near = (@inbounds(Rh[k1]) < lim) | (@inbounds(Rh[k2]) < lim) | (@inbounds(Rh[k3]) < lim) |
+           (@inbounds(Rh[k4]) < lim)
+    return (dif | fl | near) ? UInt8(2) : UInt8(1)
+end
+
+# a complete cell within `dil` cells of a marked one requests its stride-sn nodes that are not
+# evaluated yet (all writers write 1: no race)
+@inline function request_cell!(need, mark, lev, c, nx, ny, s, sn, ncx, ncy, dil)
+    @inbounds(mark[c]) == UInt8(0) && return nothing
+    I = (c - 1) % ncx
+    J = (c - 1) ÷ ncx
+    hot = false
+    for b in max(0, J - dil):min(ncy - 1, J + dil), a in max(0, I - dil):min(ncx - 1, I + dil)
+        hot |= @inbounds(mark[1 + a + b * ncx]) == UInt8(2)
+    end
+    hot || return nothing
+    i0, i1 = cellspan(I, s, nx)
+    j0, j1 = cellspan(J, s, ny)
+    j = j0
+    while true
+        i = i0
+        while true
+            k = pix(i, j, nx)
+            if @inbounds(lev[k]) == 0
+                @inbounds need[k] = UInt8(1)
+            end
+            i == i1 && break
+            i = min(i + sn, i1)
+        end
+        j == j1 && break
+        j = min(j + sn, j1)
+    end
+    return nothing
+end
+
+# self-calibration of L: the largest |Δρ| per pixel along the edges of the first-pass cells whose
+# two ends are both near a root (ρ < ρcut: there ρ is a distance; far from roots |D/D'| is not)
+@inline function cell_slope(lev, Rh, c, nx, ny, s, ncx, ρcut::T) where {T}
+    I = (c - 1) % ncx
+    J = (c - 1) ÷ ncx
+    i0, i1 = cellspan(I, s, nx)
+    j0, j1 = cellspan(J, s, ny)
+    k1 = pix(i0, j0, nx); k2 = pix(i1, j0, nx); k3 = pix(i0, j1, nx)
+    m = zero(T)
+    if (@inbounds(lev[k1]) > 0) & (@inbounds(lev[k2]) > 0) & (@inbounds(lev[k3]) > 0)
+        r1 = @inbounds Rh[k1]; r2 = @inbounds Rh[k2]; r3 = @inbounds Rh[k3]
+        if (r1 < ρcut) & (r2 < ρcut)
+            m = max(m, abs(r2 - r1) / T(i1 - i0))
+        end
+        if (r1 < ρcut) & (r3 < ρcut)
+            m = max(m, abs(r3 - r1) / T(j1 - j0))
+        end
+    end
+    return m
+end
+
+@inline function blend4(A, k1, k2, k3, k4, w1::T, w2::T, w3::T, w4::T) where {T}
+    num = zero(T); den = zero(T)
+    v = @inbounds A[k1]; ((w1 > 0) & isfinite(v)) && (num += w1 * v; den += w1)
+    v = @inbounds A[k2]; ((w2 > 0) & isfinite(v)) && (num += w2 * v; den += w2)
+    v = @inbounds A[k3]; ((w3 > 0) & isfinite(v)) && (num += w3 * v; den += w3)
+    v = @inbounds A[k4]; ((w4 > 0) & isfinite(v)) && (num += w4 * v; den += w4)
+    return den > 0 ? num / den : T(NaN)
+end
+
+# every unevaluated pixel from the corners of its finest complete cell (finest stride first):
+# the count of the cell (its corners agree -- a cell with differing corners was refined), σ, ω, ρ
+# bilinear over the finite corner values; steps = 0 and flags = 0 (nothing was evaluated)
+@inline function fill_pixel!(Zr, Sg, Om, St, Fl, Rh, lev, k, nx, ny, strides)
+    @inbounds(lev[k]) == 0 || return nothing
+    T = eltype(Zr)
+    i = (k - 1) % nx + 1
+    j = (k - 1) ÷ nx + 1
+    for s in strides
+        i0 = 1 + ((i - 1) ÷ s) * s; i1 = min(i0 + s, nx)
+        j0 = 1 + ((j - 1) ÷ s) * s; j1 = min(j0 + s, ny)
+        tx = i1 > i0 ? T(i - i0) / T(i1 - i0) : zero(T)
+        ty = j1 > j0 ? T(j - j0) / T(j1 - j0) : zero(T)
+        k1 = pix(i0, j0, nx); k2 = pix(i1, j0, nx); k3 = pix(i0, j1, nx); k4 = pix(i1, j1, nx)
+        w1 = (1 - tx) * (1 - ty); w2 = tx * (1 - ty); w3 = (1 - tx) * ty; w4 = tx * ty
+        ok = ((w1 == 0) | (@inbounds(lev[k1]) > 0)) & ((w2 == 0) | (@inbounds(lev[k2]) > 0)) &
+             ((w3 == 0) | (@inbounds(lev[k3]) > 0)) & ((w4 == 0) | (@inbounds(lev[k4]) > 0))
+        if ok
+            kz = w1 >= max(w2, w3, w4) ? k1 : (w2 >= max(w3, w4) ? k2 : (w3 >= w4 ? k3 : k4))
+            @inbounds Zr[k] = Zr[kz]
+            @inbounds Sg[k] = blend4(Sg, k1, k2, k3, k4, w1, w2, w3, w4)
+            @inbounds Om[k] = blend4(Om, k1, k2, k3, k4, w1, w2, w3, w4)
+            @inbounds Rh[k] = blend4(Rh, k1, k2, k3, k4, w1, w2, w3, w4)
+            @inbounds St[k] = Int32(0)
+            @inbounds Fl[k] = Int8(0)
+            return nothing
+        end
+    end
+    return nothing
+end
+
+@kernel function k_coarse!(need, nx, ny, s, ncx1, ncy1)       # the (ncx + 1) x (ncy + 1) nodes
+    c = @index(Global, Linear)
+    if c <= ncx1 * ncy1
+        I = (c - 1) % ncx1
+        J = (c - 1) ÷ ncx1
+        @inbounds need[pix(min(1 + I * s, nx), min(1 + J * s, ny), nx)] = UInt8(1)
+    end
+end
+
+@kernel function k_mark!(mark, @Const(lev), @Const(Zr), @Const(Fl), @Const(Rh), nx, ny, s, L, ncx, ncy)
+    c = @index(Global, Linear)
+    if c <= ncx * ncy
+        @inbounds mark[c] = mark_cell(lev, Zr, Fl, Rh, c, nx, ny, s, L, ncx)
+    end
+end
+
+@kernel function k_request!(need, @Const(mark), @Const(lev), nx, ny, s, sn, ncx, ncy, dil)
+    c = @index(Global, Linear)
+    if c <= ncx * ncy
+        request_cell!(need, mark, lev, c, nx, ny, s, sn, ncx, ncy, dil)
+    end
+end
+
+@kernel function k_slope!(slope, @Const(lev), @Const(Rh), nx, ny, s, ncx, ncy, ρcut)
+    c = @index(Global, Linear)
+    if c <= ncx * ncy
+        @inbounds slope[c] = cell_slope(lev, Rh, c, nx, ny, s, ncx, ρcut)
+    end
+end
+
+@kernel function k_fill!(Zr, Sg, Om, St, Fl, Rh, @Const(lev), nx, ny, strides)
+    k = @index(Global, Linear)
+    if k <= nx * ny
+        fill_pixel!(Zr, Sg, Om, St, Fl, Rh, lev, k, nx, ny, strides)
     end
 end
 
@@ -824,6 +1088,8 @@ mutable struct SweepPlan{T, N, B, A, AI, AF, AP}
     wlen::Int
     gridnx::Int          # plan_grid: the chart size (0 for a point list) -- full charts run one
     gridny::Int          # warp per TILE_W x TILE_H pixel tile instead of 32 pixels of a row
+    rho::A               # distance-to-root certificate ρ = min |D/D'| over the accepted samples
+    aux::Any             # run_adaptive! buffers (nothing until its first call)
 end
 
 """
@@ -883,6 +1149,9 @@ Keywords (defaults in brackets):
   there (end rule, the mirror of the rule at ω0 -- e.g. a flip multiplier near z = -1)
 - `parity` [`false`] -- circle marches: flag (bit 16) a count whose parity disagrees with
   [D(1) < 0] + [D(-1) < 0] (needs D → 1 as |z| → ∞ and no poles in |z| > 1)
+- `stepctl` [`:classic`] -- `:unwrap` step controller: `:classic` (growth up to 4x after
+  each accepted step) or `:damped` (up to 2x, none right after a rejection: fewer
+  evaluations near roots, the same acceptance test)
 """
 function plan_sweep(points; backend = CPU(), T::Type = Float32, Teval::Union{Nothing, Type} = nothing,
                     method::Symbol = :unwrap,
@@ -890,6 +1159,7 @@ function plan_sweep(points; backend = CPU(), T::Type = Float32, Teval::Union{Not
                     σ = 0.0, ω0 = 1e-9, ω_max = nothing, tol = nothing, h0 = 1e-2,
                     hrel = 1.0, hmax = Inf, ωband = 0.0, maxsteps::Integer = 200_000,
                     refine::Integer = 0, certify::Bool = false, σtol = 1e-3,
+                    stepctl::Symbol = :classic,
                     workspace = nothing,
                     lanes::Union{Nothing, Integer} = nothing,
                     workgroup::Union{Nothing, Integer} = nothing,
@@ -908,9 +1178,10 @@ function plan_sweep(points; backend = CPU(), T::Type = Float32, Teval::Union{Not
     lanes = min(lanes, npts)
     workgroup = something(workgroup, cpu ? (schedule === :pixel ? 64 : 1) : 256)
     TE = something(Teval, T)
+    gm, hold = stepctl_params(stepctl)
     mp = MarchParams{T, TE}(T(σ), T(ω0), T(ω_max), T(h0), T(tol), T(tol), T(hrel), T(hmax),
         T(ωband), T(n_power), Int32(maxsteps), Int32(refine), Int32(certify), T(σtol),
-        T(zmax), T(qtrust), Int32(circle), Int32(parity))
+        T(zmax), T(qtrust), Int32(circle), Int32(parity), T(gm), hold)
     dpts = KernelAbstractions.allocate(backend, eltype(hpts), npts)
     copyto!(dpts, hpts)
     Zraw = KernelAbstractions.zeros(backend, T, npts)
@@ -918,11 +1189,12 @@ function plan_sweep(points; backend = CPU(), T::Type = Float32, Teval::Union{Not
     om = KernelAbstractions.zeros(backend, T, npts)
     st = KernelAbstractions.zeros(backend, Int32, npts)
     fl = KernelAbstractions.zeros(backend, Int8, npts)
+    rh = KernelAbstractions.zeros(backend, T, npts)
     ctr = KernelAbstractions.zeros(backend, Int32, 1)
     plan = SweepPlan{T, Int(nroots), typeof(backend), typeof(Zraw), typeof(st), typeof(fl),
                      typeof(dpts)}(
         backend, npts, length(hpts[1]), method, schedule, lanes, workgroup,
-        coprime_stride(npts), mp, dpts, Zraw, sig, om, st, fl, ctr, nothing, 0, 0, 0)
+        coprime_stride(npts), mp, dpts, Zraw, sig, om, st, fl, ctr, nothing, 0, 0, 0, rh, nothing)
     if workspace !== nothing
         schedule === :pixel && error("a workspace needs the :strided or :queue schedule")
         alloc_workspace!(plan, workspace[1], workspace[2])
@@ -937,26 +1209,28 @@ function alloc_workspace!(p::SweepPlan, ::Type{TW}, len::Integer) where {TW}
 end
 
 """
-    set_march!(plan; ω_max, refine, certify, σtol, σ, tol, zmax, qtrust, circle, parity) -> plan
+    set_march!(plan; ω_max, refine, certify, σtol, σ, tol, zmax, qtrust, circle, parity, stepctl) -> plan
 
 Change march settings of an existing plan without reallocating (slider-driven
 use): the end of the march `ω_max`, the Newton polish `refine`, the line `σ`,
 the tolerance `tol`, the checks `zmax`, `circle`, `parity` (e.g. zmax = 2Q + 2 when Q
-changes). Unspecified settings are kept.
+changes), the step controller `stepctl`. Unspecified settings are kept.
 """
 function set_march!(p::SweepPlan{T}; ω_max = nothing, refine = nothing, σ = nothing,
                     tol = nothing, certify = nothing, σtol = nothing, zmax = nothing,
-                    qtrust = nothing, circle = nothing, parity = nothing) where {T}
+                    qtrust = nothing, circle = nothing, parity = nothing, stepctl = nothing) where {T}
     m = p.mp
     TE = evaltype(m)
     t = tol === nothing ? m.atol : T(tol)
+    gm, hold = stepctl === nothing ? (m.growmax, m.hold) : stepctl_params(stepctl)
     p.mp = MarchParams{T, TE}(σ === nothing ? m.σ : T(σ), m.ω0,
         ω_max === nothing ? m.ωmax : T(ω_max), m.h0, p.method === :unwrap ? t : m.rtol, t,
         m.hrel, m.hmax, m.ωband, m.npow, m.maxsteps,
         refine === nothing ? m.newton : Int32(refine),
         certify === nothing ? m.bisect : Int32(certify), σtol === nothing ? m.σtol : T(σtol),
         zmax === nothing ? m.zmax : T(zmax), qtrust === nothing ? m.qtrust : T(qtrust),
-        circle === nothing ? m.circle : Int32(circle), parity === nothing ? m.parity : Int32(parity))
+        circle === nothing ? m.circle : Int32(circle), parity === nothing ? m.parity : Int32(parity),
+        T(gm), hold)
     return p
 end
 
@@ -979,24 +1253,146 @@ function run!(p::SweepPlan{T, N}, D0::F, c = ()) where {T, N, F}
     if p.schedule === :pixel && p.gridnx > 0 && p.npts == p.gridnx * p.gridny
         ntx, nty = cld(p.gridnx, TILE_W), cld(p.gridny, TILE_H)
         k = k_tile!(be, p.workgroup)
-        k(p.Zraw, p.sigma, p.omega, p.steps, p.flags, D, cT, p.points, Int32(p.gridnx),
+        k(p.Zraw, p.sigma, p.omega, p.steps, p.flags, p.rho, D, cT, p.points, Int32(p.gridnx),
             Int32(p.gridny), Int32(ntx), p.mp, meth, nr, rm; ndrange = ntx * nty * TILE_W * TILE_H)
     elseif p.schedule === :pixel
         k = k_pixel!(be, p.workgroup)
-        k(p.Zraw, p.sigma, p.omega, p.steps, p.flags, D, cT, p.points, n, p.mp, meth, nr, rm;
+        k(p.Zraw, p.sigma, p.omega, p.steps, p.flags, p.rho, D, cT, p.points, n, p.mp, meth, nr, rm;
             ndrange = p.npts)
     elseif p.schedule === :strided
         k = k_strided!(be, p.workgroup)
-        k(p.Zraw, p.sigma, p.omega, p.steps, p.flags, D, cT, p.points, n, p.mp, meth, nr,
+        k(p.Zraw, p.sigma, p.omega, p.steps, p.flags, p.rho, D, cT, p.points, n, p.mp, meth, nr,
             Int32(p.lanes), Int32(p.stride), p.ws, rm; ndrange = p.lanes)
     else
         fill!(p.counter, Int32(0))
         k = k_queue!(be, p.workgroup)
-        k(p.Zraw, p.sigma, p.omega, p.steps, p.flags, D, cT, p.points, n, p.mp, meth, nr, p.counter,
+        k(p.Zraw, p.sigma, p.omega, p.steps, p.flags, p.rho, D, cT, p.points, n, p.mp, meth, nr, p.counter,
             p.ws, Int32(p.lanes), rm; ndrange = p.lanes)
     end
     KernelAbstractions.synchronize(be)
     return p
+end
+
+"""
+    run_list!(plan, D, c, idx, n) -> plan
+
+March only the points `idx[1:n]` of the plan (`idx`: a device vector of `Int32` indices into
+its points); the results are written at those positions of the plan's buffers, the other
+entries are left alone. Every schedule is supported -- the lane schedules of workspace models
+(`:strided`, `:queue`) and the `prepare` hook work as in [`run!`](@ref).
+"""
+function run_list!(p::SweepPlan{T, N}, D0::F, c, idx, n::Integer) where {T, N, F}
+    n == 0 && return p
+    be = p.backend
+    D = D0 isa CharFn ? D0 : CharFn(D0)
+    cT = conv_consts(T, Tuple(c))
+    meth = Val(p.method)
+    rm = (p.mp.newton == 0 && p.mp.bisect == 0) ? Val(:none) : Val(:refine)
+    nr = Val(N)
+    n32 = Int32(n)
+    if p.schedule === :pixel
+        p.ws === nothing || error("a workspace needs the :strided or :queue schedule")
+        k_list!(be, p.workgroup)(p.Zraw, p.sigma, p.omega, p.steps, p.flags, p.rho, D, cT, p.points,
+            idx, n32, p.mp, meth, nr, rm; ndrange = n)
+    elseif p.schedule === :strided
+        lanes = min(p.lanes, n)
+        P = p.stride == 1 ? 1 : coprime_stride(n)           # stride 1: neighbouring lanes, neighbouring points
+        k_list_strided!(be, p.workgroup)(p.Zraw, p.sigma, p.omega, p.steps, p.flags, p.rho, D, cT,
+            p.points, idx, n32, p.mp, meth, nr, Int32(lanes), Int32(P), p.ws, rm; ndrange = lanes)
+    else
+        lanes = min(p.lanes, n)
+        fill!(p.counter, Int32(0))
+        k_list_queue!(be, p.workgroup)(p.Zraw, p.sigma, p.omega, p.steps, p.flags, p.rho, D, cT,
+            p.points, idx, n32, p.mp, meth, nr, p.counter, p.ws, Int32(lanes), rm; ndrange = lanes)
+    end
+    KernelAbstractions.synchronize(be)
+    return p
+end
+
+"""
+    run_adaptive!(plan, D, c = (); strides = (16, 8, 4, 2, 1), L = nothing, Lscale = 1.5,
+                  ρcut = nothing, dil = 1, warm = false, rplan = nothing) -> NamedTuple
+
+Certified coarse-to-fine chart of a [`plan_grid`](@ref) plan: the same counts as [`run!`](@ref)
+from a fraction of the points. The count changes only where a multiplier / root crosses the
+contour, and every march returns ρ = min |D/D'| over its samples, a distance from the contour to
+the nearest root that is smooth over the parameter plane (V-shaped valleys exactly on the
+boundaries).
+* Pass 1 marches the stride-`strides[1]` grid. After every pass, for every level s of
+  `strides`, a cell whose 4 corners are evaluated is refined if its corner counts differ, a
+  corner is flagged, or a corner has ρ < L·(cell side in pixels) (the ρ certificate: no root
+  can reach the contour inside the cell if roots move slower than L per pixel); the refined
+  cells and their `dil` neighbours request their stride-s/next nodes, and the requests of all
+  levels form the work list of the next pass ([`run_list!`](@ref)). Until no cell requests.
+* `L = nothing`: self-calibrated after pass 1 as `Lscale` × the largest |Δρ| per pixel along
+  the first-pass edges whose ends both have ρ < `ρcut` (default 0.04 (ω_max - ω0)).
+* The pixels never evaluated get the count of their finest complete cell (its corners agree),
+  σ, ω, ρ bilinear, steps = 0, flags = 0.
+* `warm = true`: the pixels evaluated by the previous call go into the first pass (slider
+  moves: ~2 passes instead of 5). `rplan`: a Float32 plan of the same grid -- the flagged
+  points of each pass are re-checked there before the cells are marked (the F16+ format).
+Returns `(passes = points per pass, points, L)`; `plan.aux.lev` holds the pass that evaluated
+each pixel (0: filled).
+"""
+function run_adaptive!(p::SweepPlan{T}, D, c = (); strides = (16, 8, 4, 2, 1), L = nothing,
+                       Lscale = 1.5, ρcut = nothing, dil::Integer = 1, warm::Bool = false,
+                       rplan = nothing, maxpasses::Integer = 64) where {T}
+    nx, ny = p.gridnx, p.gridny
+    (nx > 1 && ny > 1 && p.npts == nx * ny) || error("run_adaptive!: needs a plan_grid plan")
+    st = Int.(collect(strides))
+    (st[end] == 1 && all(k -> st[k] > st[k + 1] && st[k] % st[k + 1] == 0, 1:length(st) - 1)) ||
+        error("run_adaptive!: strides must decrease to 1, each dividing the previous one")
+    be = p.backend
+    N = nx * ny
+    if p.aux === nothing || length(p.aux.lev) != N
+        p.aux = (lev = KernelAbstractions.zeros(be, Int8, N), need = KernelAbstractions.zeros(be, UInt8, N))
+        warm = false
+    end
+    lev, need = p.aux.lev, p.aux.need
+    if warm
+        need .= ifelse.(lev .> Int8(0), UInt8(1), UInt8(0))
+    else
+        fill!(need, UInt8(0))
+    end
+    fill!(lev, Int8(0))
+    ncell(s) = (cld(nx - 1, s), cld(ny - 1, s))
+    s0 = st[1]
+    n1x, n1y = ncell(s0) .+ 1
+    k_coarse!(be, 256)(need, Int32(nx), Int32(ny), Int32(s0), Int32(n1x), Int32(n1y); ndrange = n1x * n1y)
+    marks = [KernelAbstractions.zeros(be, UInt8, prod(ncell(s))) for s in st[1:end-1]]
+    ρc = T(something(ρcut, 0.04 * (p.mp.ωmax - p.mp.ω0)))
+    Lv = L === nothing ? T(NaN) : T(L)
+    passes = Int[]
+    while length(passes) < maxpasses
+        KernelAbstractions.synchronize(be)
+        idx = findall(==(UInt8(1)), need)                  # the work list (stream compaction)
+        n = length(idx)
+        n == 0 && break
+        fill!(need, UInt8(0))
+        run_list!(p, D, c, Int32.(idx), n)
+        view(lev, idx) .= Int8(min(length(passes) + 1, 127))
+        push!(passes, n)
+        rplan === nothing || recheck_points!(p, rplan, D, c, idx[findall(!=(Int8(0)), p.flags[idx])])
+        if isnan(Lv)                                       # self-calibration on the first-pass grid
+            ncx, ncy = ncell(s0)
+            slope = KernelAbstractions.zeros(be, T, ncx * ncy)
+            k_slope!(be, 256)(slope, lev, p.rho, Int32(nx), Int32(ny), Int32(s0), Int32(ncx), Int32(ncy), ρc;
+                ndrange = ncx * ncy)
+            KernelAbstractions.synchronize(be)
+            Lv = T(Lscale) * maximum(slope)
+        end
+        for (k, s) in enumerate(st[1:end-1])
+            ncx, ncy = ncell(s)
+            k_mark!(be, 256)(marks[k], lev, p.Zraw, p.flags, p.rho, Int32(nx), Int32(ny), Int32(s), Lv,
+                Int32(ncx), Int32(ncy); ndrange = ncx * ncy)
+            k_request!(be, 256)(need, marks[k], lev, Int32(nx), Int32(ny), Int32(s), Int32(st[k + 1]),
+                Int32(ncx), Int32(ncy), Int32(dil); ndrange = ncx * ncy)
+        end
+    end
+    k_fill!(be, 256)(p.Zraw, p.sigma, p.omega, p.steps, p.flags, p.rho, lev, Int32(nx), Int32(ny),
+        Tuple(Int32.(reverse(st[1:end-1]))); ndrange = N)
+    KernelAbstractions.synchronize(be)
+    return (passes = passes, points = sum(passes), L = Lv)
 end
 
 """
@@ -1009,7 +1405,8 @@ root closer to the line than the precision can resolve was counted by its
 side (a boundary-grazing point: its count is a decision, not a measurement),
 bit 3 = integer residual |Zraw - round(Zraw)| > 0.25 (a root on the line),
 bit 4 (value 8) = impossible count (Z < 0 or Z > `zmax`), bit 5 (value 16) = parity
-mismatch of a circle march (`parity = true`).
+mismatch of a circle march (`parity = true`); and `rho`: min |D/D'| over the accepted
+samples (distance from the contour to the nearest root, the certificate of `run_adaptive!`).
 """
 function fetch_result(p::SweepPlan)
     Zraw = Array(p.Zraw)
@@ -1017,7 +1414,7 @@ function fetch_result(p::SweepPlan)
     Z = map(z -> isfinite(z) ? round(Int, z) : -1, Zraw)
     return (Z = Z, Zraw = Zraw, sigma = Array(p.sigma), omega = Array(p.omega),
         steps = steps, evals = 1 .+ evals_per_step(Val(p.method)) .* Int.(steps),
-        flags = Array(p.flags))
+        flags = Array(p.flags), rho = Array(p.rho))
 end
 
 """
@@ -1077,6 +1474,7 @@ function plan_grid(xr, yr, nx::Integer, ny::Integer; backend = CPU(), T::Type = 
     p.points = KernelAbstractions.allocate(backend, NTuple{2, T}, n)
     p.Zraw, p.sigma, p.omega = alloc(T), alloc(T), alloc(T)
     p.steps, p.flags = alloc(Int32), alloc(Int8)
+    p.rho = alloc(T)
     nt = Threads.nthreads()
     cpu = backend isa CPU
     p.lanes = min(something(lanes, cpu ? (p.schedule === :queue ? nt : 8 * nt) : 1 << 18), n)
@@ -1110,8 +1508,11 @@ into `rplan` -- a plan of at least the same capacity, typically Float32 with
 production settings -- run it there, and scatter `Zraw`, `sigma`, `omega`,
 `steps`, `flags` back into `plan`. Nothing crosses the bus except the count `n`.
 """
-function recheck_flagged!(p::SweepPlan, rp::SweepPlan, D, c = ())
-    idx = findall(!=(Int8(0)), p.flags)
+recheck_flagged!(p::SweepPlan, rp::SweepPlan, D, c = ()) =
+    recheck_points!(p, rp, D, c, findall(!=(Int8(0)), p.flags))
+
+# re-run the points idx (device vector of indices into p) in rp and scatter the results back
+function recheck_points!(p::SweepPlan, rp::SweepPlan, D, c, idx)
     n = length(idx)
     n == 0 && return 0
     n <= length(rp.points) || error("recheck_flagged!: rplan is too small")
@@ -1126,6 +1527,7 @@ function recheck_flagged!(p::SweepPlan, rp::SweepPlan, D, c = ())
     view(p.omega, idx) .= view(rp.omega, 1:n)
     view(p.steps, idx) .= view(rp.steps, 1:n)
     view(p.flags, idx) .= view(rp.flags, 1:n)
+    view(p.rho, idx) .= view(rp.rho, 1:n)
     KernelAbstractions.synchronize(p.backend)
     rp.npts, rp.stride, rp.lanes = cap, stride, lanes
     return n
