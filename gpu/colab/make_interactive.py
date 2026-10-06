@@ -260,7 +260,7 @@ def write_speed(out, branch, script="hill/warp/speed_ratio.jl --res 480x270", ti
             "Pick the GPU, *Run all*. **Afterwards: Runtime -> Disconnect and delete runtime.**\n"]},
         json.loads(json.dumps(setup).replace("%BRANCH%", branch)),
         {"cell_type": "code", "metadata": {}, "execution_count": None, "outputs": [], "source": [
-            "sh(f\"set -o pipefail; cd {REPO_DIR} && julia --project=gpu/scripts hill/warp/speed_ratio.jl --res 480x270 \"\n",
+            "sh(f\"set -o pipefail; cd {REPO_DIR} && julia --project=gpu/scripts " + script + " \"\n",
             "   f\"--csv /content/speed.csv 2>&1 | tee /content/speed.log\")\n"]},
     ]
     nb = {"cells": cs, "metadata": {"accelerator": "GPU", "colab": {"provenance": [], "gpuType": "T4"},
