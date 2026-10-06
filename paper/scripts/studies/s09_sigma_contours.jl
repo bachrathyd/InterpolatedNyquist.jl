@@ -8,9 +8,13 @@ nP, nD = FAST[] ? (45, 35) : (90, 70)
 Pv = LinRange(SHOWCASE_PRANGE..., nP)
 Dv = LinRange(SHOWCASE_DRANGE..., nD)
 
-grid = with_cache("s01_domgrid_h_$(nP)x$(nD)") do   # reuse the s01 cache if present
-    sweep_grid_dominant(D_showcase_reduced, Pv, Dv; ω_max = 1e4)
+# The SAME grid as the s01 showcase chart (same cache name, so it is reused
+# when s01 ran first): unwrap march on the entire reduced form (SHOWCASE_UW).
+kkey = string(hash((SHOWCASE_PRANGE, SHOWCASE_DRANGE)); base = 16)
+grid = with_cache("s01_domgrid_h_$(kkey)_$(nP)x$(nD)$(chart_suffix(SHOWCASE_UW))") do
+    chart_grid(D_showcase_reduced, Pv, Dv; ω_max = 1e4, uw = SHOWCASE_UW)
 end
+@info "s09 background grid" grid.backend grid.t
 
 # Choose contour levels from the actual depth of the stable region
 σ_stable = grid.sigma[grid.Z .== 0]
@@ -18,7 +22,9 @@ end
 σ_levels = collect(LinRange(0.0, 0.9 * σ_deep, 5))
 @info "sigma levels" σ_levels
 
-contours = with_cache("s09_sigma_mdbm") do
+# sigma-contours: MDBM with the phase-ODE back-end inside mdbm_boundary (unchanged)
+# (the levels come from the grid, so they are part of the cache name)
+contours = with_cache("s09_sigma_mdbm_$(string(hash(σ_levels); base = 16))") do
     map(σ_levels) do σ
         bnd = mdbm_boundary(D_showcase_reduced, SHOWCASE_PRANGE, SHOWCASE_DRANGE;
             ngrid = 24, Niter = FAST[] ? 3 : 4, σ = σ, ω_max = 1e4)

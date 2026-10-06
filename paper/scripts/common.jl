@@ -29,6 +29,15 @@ foreach(mkpath, (FIG_DIR, TAB_DIR, DATA_DIR, CACHE_DIR, GEN_DIR))
 # ---------------------------------------------------------------------------
 const FORCE = Ref(false)   # ignore caches
 const FAST  = Ref(false)   # draft mode: reduced resolutions
+# Counting back-end of the example stability charts (s01, s08, s09, s10):
+#   :unwrap -- discrete phase-unwrapping march (calculate_unstable_roots_unwrap_p_vec),
+#              the recommended back-end, used wherever it is valid;
+#   :ode    -- the phase-ODE back-end the charts were originally computed with.
+# generate_all.jl --ode-charts (or ENV NYQ_CHART_BACKEND=ode) reproduces the old run.
+const CHART_BACKEND = Ref(Symbol(get(ENV, "NYQ_CHART_BACKEND", "unwrap")))
+# With the unwrap back-end, also run the ODE sweep on the same grid and record
+# the count differences (data/unwrap_check_<study>.csv). --no-chart-check skips it.
+const CHART_CHECK = Ref(true)
 
 # ---------------------------------------------------------------------------
 # Reproducibility / stable timings

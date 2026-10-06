@@ -6,11 +6,16 @@
 #   --force        ignore caches, recompute everything
 #   --fast         draft mode (reduced grid resolutions, skips the solver zoo)
 #   --only=s01,s03 run only the listed studies
+#   --ode-charts   example charts (s01, s08-s10) with the phase-ODE back-end
+#                  instead of the unwrap march (reproduces the original figures)
+#   --no-chart-check  skip the ODE cross-check of the unwrap charts
 
 include(joinpath(@__DIR__, "common.jl"))
 
 FORCE[] = "--force" in ARGS
 FAST[]  = "--fast" in ARGS
+"--ode-charts" in ARGS && (CHART_BACKEND[] = :ode)
+"--no-chart-check" in ARGS && (CHART_CHECK[] = false)
 only_arg = findfirst(a -> startswith(a, "--only="), ARGS)
 const ONLY = only_arg === nothing ? String[] :
     split(replace(ARGS[only_arg], "--only=" => ""), ",")
