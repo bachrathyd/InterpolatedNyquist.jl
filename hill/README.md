@@ -275,12 +275,124 @@ GPU tour on the RTX PRO 6000 (`hill/gpu_tour_milling.jl`, `gpu/results/hill_tour
 Your full-HD Test 3 chart took 61.5 s before. The Test 3 forms are now limited by the per-thread
 matrix in GPU memory (about 0.5 TFLOPS effective); that is the target of iteration 2.
 
+## Code review, iteration 2 (2026-10-06)
+The same six reviewers read the iteration-1 code again (round 2); the GPU reviewer then wrote the
+warp-cooperative Test 3 kernel (round 3). Implemented:
+
+* **Test 2: `D_mill2g`** (mathematics). Gauss nodes plus the diagonal kink correction, in the
+  pole-free prepared form of `D_mill2p`. The convergence is O(Q⁻⁴):
+  - Q = 8 differs from a Q = 32 reference at 1 of 12 800 points (ζ = 0.011) and at 0 (ζ = 0.002);
+    `D_mill2p` at Q = 16 differs at 12 and 5.
+  - Float16: every wrong count is flagged, and Float16 + re-check equals Float32.
+  - The correction adds poles z = g/(1 + g); on the chart all lie inside |z| < 0.04
+    (`mill2g_polecheck`).
+
+  It is now the Test 2 form of the app and the tour.
+* **Test 3: `D_mill3h`** (numerical linear algebra). The leading block X11 of the reduced
+  (n_w + 2)-square determinant does not depend on λ.
+  - Once per point, scaled Householder reflectors bring X11 to Hessenberg form.
+  - Per evaluation, a bordered Hessenberg elimination makes exactly the pivot choices of the dense
+    partial-pivoting LU, in O(n_w²).
+  - That is 7.5× fewer operations per evaluation and 4× less work per point. The values equal
+    `D_mill3c` to 1e−14.
+* **Test 3 setup, v2** (machining dynamics, mathematics):
+  - **Axial nodes per point** from the helix lag across the depth:
+    n_s = clamp(⌈2 + 1.6 a_p b_max / (2πΩ)⌉, 2, 6), with b = tan β / R.
+  - **Kink correction** of Test 2 for every node.
+  - **Range** 3–30 krpm × 0–10 mm (the old 8–30 krpm left out the dense low-speed lobes).
+  - **Check against Q = 10, n_s ≤ 8:** 3 of 1152 counts differ (16 with the fixed n_s = 4).
+* **Robustness** (Julia/GPU engineering):
+  - **Impossible counts are flagged** (Z < 0 or Z > zmax). The pole-free determinants are
+    polynomials in 1/z of degree ≤ 2Q + 2 (Test 2) and ≤ n_w + 4 (Test 3).
+  - **Parity check of circle marches:** Z ≡ [D(1) < 0] + [D(−1) < 0] (mod 2), else flag 16.
+  - **End rule at ω_max:** a flip multiplier at μ = ½.
+  - **Trust radius qtrust·h** for the one-step root estimates. The old radius max(|λ|, 1) accepted
+    far-away roots.
+  - **Wrapped nodes of `D_mill3c`/`D_mill3h` are decided by the time order.** With a node exactly at
+    the time origin, the angle test and the sort could disagree, and a sweep then read a stale running
+    sum (found by the GPU reviewer).
+* **Adaptive charts** (adaptive sampling). `run_adaptive!` refines from coarse to fine, over strides
+  16, 8, 4, 2, 1.
+  - **Certificate:** every march returns ρ = min |D/D′| over its samples, the distance from the
+    contour to the nearest root.
+  - **Refinement rule:** a cell is refined when its corner counts differ, a corner is flagged, or a
+    corner has ρ < L · (cell side).
+  - **Slope bound L:** taken from the data as Lscale × the largest |Δρ| per pixel. With
+    `Lmode = :local` (the default), each first-pass cell takes it from the edges of every evaluated
+    level near it.
+  - **Why local:** the reviewer's single first-pass bound missed 1-pixel-wide lobes at low spindle
+    speed on a 192 × 108 Test 3 chart (30 of 20 736 pixels; now 0). A secant between first-pass
+    nodes cannot see slopes above ρcut/16, and the lobes get denser like 1/rpm².
+  - **Supporting changes:**
+    - `run_list!` marches index lists with every schedule.
+    - `warm = true` starts from the pixels of the previous call (slider moves).
+    - The Float16 + re-check format re-checks after every pass.
+    - `stepctl = :damped` is an optional step controller.
+* **Warp-cooperative `D_mill3h`** (`hill/warp/`, GPU performance). One warp per point:
+  - **Prepare:** the 32 lanes share it (nodes, origin search, ranks, forward sweeps with one
+    right-hand side per lane, the Householder reduction).
+  - **Evaluation:** in the bordered Hessenberg elimination the lanes are the columns of the three
+    active rows. Every lane reads the pivot candidates from shared memory and takes the same decision.
+  - **Shared memory:** the X matrices and row buffers live there, sized per axial class n_s. On the
+    chart n_w = 8 n_s, and n_s = 3 for 76 % of the points, which needs 8.3 KB per warp instead of
+    33 KB. The shared memory is dynamic, so one compiled kernel per number format serves every class.
+  - **Bit-identical** to `mill3h_prepare` + `D_mill3h` on the CPU emulation: q, all 162 240 X
+    entries, 600 D values in Float32 and Float16, and 120 full marches.
+  - **Registers set the occupancy.** On the G4 it uses 255 registers per thread, so at most 8 warps
+    per SM are resident. Sizing the persistent grid as one resident wave (occupancy API) cut the
+    full-HD chart from 893 to 736 ms. A register cap is slower: 787 ms at 168 and 915 ms at 128.
+
+**GPU tour** (`hill/warp/tour_warp3h.jl`, `hill/gpu_tour_milling.jl`; `gpu/results/hill_tour_*_iter2.csv`).
+The hardest case is Test 3 at full HD: 1920 × 1080 = 2.07 M points, 3–30 krpm × 0–10 mm, helix 30°/45°.
+* **Formats:** F32 = Float32; F16 = D evaluated in Float16 with a Float32 march; F16+ = F16 followed by
+  a Float32 re-check of the flagged points.
+* **Check:** 192 × 108 points against a Float64 reference with Q = 10, n_s ≤ 8.
+* **Adaptive:** compared with the full chart of the same format at every pixel.
+
+Test 3, warp-cooperative kernel (`mill3w`), full HD:
+
+| GPU | F32 | F16 | F16+ | adaptive F32 / F16 / F16+ | check: differ of 20 736 | adaptive: pixels ≠ full chart |
+|---|---|---|---|---|---|---|
+| RTX PRO 6000 (G4) | 736 ms | 774 ms | 793 ms | 451 ms / 511 ms / 574 ms | 54 / 62 / 53 | 0 / 0 / 0 |
+| A100 40 GB | 1.86 s | 2.12 s | 2.18 s | 908 ms / 1.09 s / 1.20 s | 54 / 62 / 53 | 0 / 0 / 0 |
+| L4 | 2.38 s | 2.68 s | 2.79 s | 1.28 s / 1.47 s / 1.60 s | 54 / 62 / 53 | 0 / 0 / 0 |
+| T4 | 8.11 s | 9.39 s | 9.46 s | 4.14 s / 4.75 s / 5.04 s | 54 / 62 / 53 | 0 / 0 / 0 |
+
+For comparison, the other forms (full HD unless noted; F32 / F16 / F16+):
+
+| GPU | Test 3, one thread per point (`mill3h`) | `mill3h` adaptive | Test 3, dense Hill (`mill3d`), 480 × 270, F32 | Test 2 (`mill2g`, Q = 8) |
+|---|---|---|---|---|
+| RTX PRO 6000 (G4) | 9.21 s / 9.19 s / 9.31 s | 5.07 s / 5.13 s / 5.60 s | 1.14 s | 1.57 ms / 1.50 ms / 2.32 ms |
+| A100 40 GB | 26.16 s / 26.84 s / 27.39 s | 12.78 s / 13.32 s / 14.28 s | 2.25 s | 6.22 ms / 5.35 ms / 7.56 ms |
+| L4 | 31.77 s / 31.51 s / 31.99 s | 14.29 s / 14.59 s / 15.44 s | 2.70 s | 5.32 ms / 5.49 ms / 7.31 ms |
+| T4 | 120.80 s / 184.69 s / 186.33 s | 50.19 s / 77.74 s / 79.76 s | 6.59 s | 33.06 ms / 27.84 ms / 33.59 ms |
+
+* **The counts do not depend on the GPU.** All four GPUs give the same check numbers (54 / 62 / 53
+  for the warp kernel; 54 / 61 / 53 for one thread per point, whose Float16 rounding differs
+  slightly). The 54 differences are the quadrature level of Q = 8 against Q = 10.
+* **Adaptive refinement** marches 33 % of the pixels and gives exactly the full chart in every
+  format on every GPU. It takes half the time of the full chart; the boundary pixels it marches are
+  the expensive ones.
+* **Float16 does not pay for Test 3:**
+  - The prepare step stays in Float32.
+  - The warp evaluation is dominated by the pivot logic and shared-memory traffic, not by
+    arithmetic.
+  - At full HD, 21 Float16 points fail (non-finite), and the re-check of F16+ repairs them.
+  - Float32 is the format to use for Test 3. F16 is 5–16 % slower, F16+ 8–18 % slower.
+* **Against your dense full-HD Test 3 chart (61.5 s):** the G4 now needs 0.74 s, or 0.45 s
+  adaptively, 80–135× faster. On the T4 the warp kernel (8.1 s) also beats the dense form on the G4
+  (about 18 s at full HD, from 1.14 s at 480 × 270).
+* **Registers:** 255 per thread on the G4, 215–238 on the others, so at most 8 resident warps per SM.
+  Shared memory limits only the large classes (n_s ≥ 5) and the T4 (64 KB per SM).
+
 ## Interactive
 `gpu/colab/NyquistGPU_Hill_Interactive.ipynb` (this branch) adds these time-periodic examples to the
 three time-independent ones:
-* *milling, straight flutes (Test 2, compressed Hill, fast)*: the default (`D_mill2p`); Float16 /
+* *milling, straight flutes (Test 2, compressed Hill, fast)*: the default (`D_mill2g`, Q = 8); Float16 /
   Float16 + re-check / Float32 / Float64; full HD.
-* *milling, different helix angles (Test 3, compressed Hill, fast)* (`D_mill3c`): starts at 960 × 540.
+* *milling, different helix angles (Test 3, compressed Hill, fast)*: `D_mill3h`. On the GPU it uses
+  the warp-cooperative kernel (one warp per point, first-order σ estimate). Range 3–30 krpm ×
+  0–10 mm; starts at 960 × 540 (full HD: 0.74 s on a G4).
 * *delayed Mathieu*.
 * *milling, straight flutes (Test 2, dense Hill, slow)*.
 * *milling, different helix angles (Test 3)*: the dense Hill form.
@@ -288,6 +400,12 @@ three time-independent ones:
 Model constants are sliders: κ, ε for Mathieu; ζ, a/D, K_n/K_t for Test 2; ζ, a/D, β₂ for Test 3.
 
 ## Not done yet
+* **Register pressure of the warp kernel.** It uses 255 registers per thread on the G4 (sm_120) and
+  215–218 on the A100 and L4, which allows at most 8 resident warps per SM. A leaner evaluation could
+  double the occupancy, for example pivot logic in fewer live values and row buffers only in shared
+  memory. A plain register cap does not help: 168 and 128 were slower.
+* **Fewer adaptive passes.** A full-HD chart takes 11 passes; the last six come from updates of the
+  local slope bounds. Every pass costs a launch per axial class plus a stream compaction.
 * The compressed determinant for multi-DOF models: S becomes a matrix sum of 2n exponentials, so the
   semiseparable rank grows to 2n.
 * Banded/shifted truncation and Schur-complement ring growth (not needed for Mathieu: N = 9
