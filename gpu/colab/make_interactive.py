@@ -250,3 +250,25 @@ point from one tolerance. The rightmost-root colouring uses the Newton-polished 
 offered for the fast example only.
 """, default_ex="mill2q")
 write_tour("NyquistGPU_Hill_Tour.ipynb", "hill-argument-principle")
+
+def write_speed(out, branch):
+    "Setup + the format speed ratios (F64 / F32 / F16) on a small chart."
+    setup = next(c for c in cells if c["cell_type"] == "code")
+    cs = [
+        {"cell_type": "markdown", "metadata": {}, "source": [
+            "# Speed of Float64 / Float32 / Float16 relative to Float32 (milling Tests 3 and 2, 480x270)\n",
+            "Pick the GPU, *Run all*. **Afterwards: Runtime -> Disconnect and delete runtime.**\n"]},
+        json.loads(json.dumps(setup).replace("%BRANCH%", branch)),
+        {"cell_type": "code", "metadata": {}, "execution_count": None, "outputs": [], "source": [
+            "sh(f\"set -o pipefail; cd {REPO_DIR} && julia --project=gpu/scripts hill/warp/speed_ratio.jl --res 480x270 \"\n",
+            "   f\"--csv /content/speed.csv 2>&1 | tee /content/speed.log\")\n"]},
+    ]
+    nb = {"cells": cs, "metadata": {"accelerator": "GPU", "colab": {"provenance": [], "gpuType": "T4"},
+                                    "kernelspec": {"display_name": "Python 3", "name": "python3"},
+                                    "language_info": {"name": "python"}},
+          "nbformat": 4, "nbformat_minor": 0}
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), out), "w", encoding="utf-8") as f:
+        json.dump(nb, f, indent=1, ensure_ascii=False)
+    print("written", out)
+
+write_speed("NyquistGPU_Hill_Speed.ipynb", "hill-argument-principle")
