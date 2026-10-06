@@ -274,3 +274,6 @@ def write_speed(out, branch, script="hill/warp/speed_ratio.jl --res 480x270", ti
 write_speed("NyquistGPU_Hill_Speed.ipynb", "hill-argument-principle")
 write_speed("NyquistGPU_Lane_Scaling.ipynb", "hill-argument-principle", "gpu/scripts/gpu_lane_scaling.jl",
             "GPU thread scaling: chart time vs number of GPU threads (Float64), three time-independent examples")
+write_speed("NyquistGPU_Final.ipynb", "hill-argument-principle",
+            "gpu/scripts/gpu_final.jl --out /content/r1 && cat /content/r1/*.csv && julia --project=gpu/scripts gpu/scripts/gpu_final.jl --res 7680x4320 --reps 5 --out /content/r8 && cat /content/r8/*.csv && echo",
+            "Paper GPU table: gpu_final.jl, full HD and 8K, current engine")
