@@ -12,7 +12,9 @@ if !("--cpu" in ARGS)
     end
 end
 const ON_GPU = isdefined(Main, :CUDA) && CUDA.functional()
-const BACKEND = ON_GPU ? CUDA.CUDABackend() : CPU()
+# always_inline: D (and the complex/dual arithmetic it calls) is compiled into the kernel; as a
+# separate function its arguments and results went through local memory
+const BACKEND = ON_GPU ? CUDA.CUDABackend(always_inline = true) : CPU()
 
 "Short description of the compute device."
 function device_name()
