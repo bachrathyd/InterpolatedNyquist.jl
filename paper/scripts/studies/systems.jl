@@ -137,6 +137,185 @@ function sweep_grid_dominant(D_func, xv, yv; nroots = 15, kwargs...)
             sigma = reshape(sig, nx, ny), t = t)
 end
 
+# ===========================================================================
+# Unwrap chart back-end (CHART_BACKEND in common.jl)
+# ===========================================================================
+"""
+`sweep_grid_dominant` with the discrete phase-unwrapping march
+(`calculate_unstable_roots_unwrap_p_vec`). `D_func` must be ENTIRE -- rational
+characteristic functions with their (stable) denominators cleared -- and
+`n_power_max` is its leading order (or the effective order of a cleared
+denominator, see `denominator_order`). Same outputs as `sweep_grid_dominant`.
+The march finishes most charts in milliseconds, where one run is dominated by
+scheduling noise, so the time is the best of `reps` runs (a run over 5 s is
+timed once).
+"""
+function sweep_grid_dominant_unwrap end
+
+"""
+Root estimate of a |D| minimum AT the origin, exactly as the phase-ODE back-end
+records it: one Newton step from λ = σ + 10⁻⁹i, taken when |D|² grows from
+ω = 0. The march records this estimate only inside the trust region
+|D/D'| <= max(|σ|, 1), so a real dominant root further left is lost from its
+buffer -- 15 % of the stable pixels of the delayed-oscillator panel were left
+without any σ (painted as boundary colour). NaN when |D| does not grow from 0.
+"""
+function origin_estimate(D_func, p; σ = 0.0)
+    d = ForwardDiff.Dual(1e-9, 1.0)
+    res = D_func(σ + 1im * d, p)
+    vr, vi = ForwardDiff.value(real(res)), ForwardDiff.value(imag(res))
+    dr, di = ForwardDiff.partials(real(res), 1), ForwardDiff.partials(imag(res), 1)
+    vr * dr + vi * di > 0 || return NaN
+    s = σ - (vr * di - vi * dr) / (di^2 + dr^2)
+    return isfinite(s) ? s : NaN
+end
+
+function sweep_grid_dominant_unwrap(D_func, xv, yv; nroots = 15, n_power_max, reps = 3,
+                                    kwargs...)
+    params = vec([(x, y) for x in xv, y in yv])
+    calculate_unstable_roots_unwrap_p_vec(D_func, params[1:2]; n_roots_to_track = nroots,
+        n_power_max = n_power_max, kwargs...)                     # JIT warm-up
+    res = nothing
+    s0 = fill(NaN, length(params))
+    t = Inf
+    for _ in 1:reps
+        t0 = time_ns()
+        res = calculate_unstable_roots_unwrap_p_vec(D_func, params; n_roots_to_track = nroots,
+            n_power_max = n_power_max, kwargs...)
+        Threads.@threads for i in eachindex(params)
+            s0[i] = origin_estimate(D_func, params[i])
+        end
+        t = min(t, (time_ns() - t0) / 1e9)
+        t > 5 && break
+    end
+    Z_ints, Z_raws, _, es_list, _ = res
+    # Consistency filter for the colouring. Where the count proves the point
+    # stable (Z = 0) no root lies right of the line, so a tracked estimate with
+    # σ_est > 0 there is spurious: a shallow minimum of the high-frequency delay
+    # ripple, located on a long step's Hermite model, can return σ_est in the
+    # hundreds (seen on the fractional Gao charts), which max-Re would pick and
+    # the |σ| colour scale would paint as deeply stable. Such estimates are
+    # dropped (a margin of 0.02 keeps genuine near-boundary roots).
+    sig = map(Z_ints, es_list, s0) do z, v, o
+        m = maximum(filter(s -> isfinite(s) && (z != 0 || s <= 0.02), [v; o]); init = -Inf)
+        isfinite(m) ? m : NaN
+    end
+    nx, ny = length(xv), length(yv)
+    return (Z = reshape(Z_ints, nx, ny), Z_raw = reshape(Z_raws, nx, ny),
+            sigma = reshape(sig, nx, ny), t = t)
+end
+
+"""
+    denominator_order(Dden, ω_max; p = (1.0, 1.0))
+
+Effective order n_eff = 2Φ_den/π of a PARAMETER-INDEPENDENT stable denominator,
+Φ_den its phase increment over [0, ω_max] measured by the same march. A rational
+D = N/Dden written as a return difference (D -> 1, n = 0) has
+Φ_D = Φ_N - Φ_den, so counting the entire numerator N with n_power_max = n_eff
+gives exactly the return-difference count, with the same truncation at ω_max,
+while the march never sees the poles. Dden must have no zeros in Re λ >= 0.
+"""
+denominator_order(Dden, ω_max; p = (1.0, 1.0)) =
+    -2 * calculate_unstable_roots_unwrap(Dden, p; n_roots_to_track = 0, ω_max = ω_max,
+        n_power_max = 0.0)[2]
+
+"""
+    chart_grid(D, xv, yv; nroots, ω_max, ode_kw, uw)
+
+The sweep behind every example chart. `uw === nothing` (or CHART_BACKEND[] ==
+:ode) -> the phase-ODE back-end `sweep_grid_dominant(D, ...; ode_kw...)`.
+Otherwise `uw = (D = entire form, n_power_max = n, kw = march options)` and the
+chart is computed with the unwrap march; with CHART_CHECK[] the ODE sweep is
+repeated on the same grid, and every point where the two counts differ is
+re-counted by the ODE back-end at reltol = abstol = 1e-10 (on the entire form)
+to tell which one is off. Returns the grid fields plus `backend`, `t_ode` (the
+ODE grid on the same machine, one run; the unwrap time is the best of three)
+and `check`.
+"""
+function chart_grid(D, xv, yv; nroots = 15, ω_max, ode_kw = (;), uw = nothing)
+    if uw === nothing || CHART_BACKEND[] == :ode
+        g = sweep_grid_dominant(D, xv, yv; nroots = nroots, ω_max = ω_max, ode_kw...)
+        return merge(g, (backend = "ode", t_ode = g.t, check = nothing, uw_npow = NaN))
+    end
+    g = sweep_grid_dominant_unwrap(uw.D, xv, yv; nroots = nroots, ω_max = ω_max,
+        n_power_max = uw.n_power_max, uw.kw...)
+    check = nothing
+    if CHART_CHECK[]
+        go = sweep_grid_dominant(D, xv, yv; nroots = nroots, ω_max = ω_max, ode_kw...)
+        params = [(x, y) for x in xv, y in yv]
+        # Referee at the differing points: the phase ODE at reltol = abstol =
+        # 1e-10 on the ENTIRE form with the march's order -- an independent
+        # algorithm, and free of the pole-zero pairs of a rational form. A point
+        # whose count changes when the line is shifted by ±1e-6 has a root ON
+        # the integration line (e.g. lambda = 0 at K = 1 on the bar panels, the
+        # pair ±i on the a = c diagonal of the neutral panel): its count is
+        # undefined ("degenerate"), and neither back-end can be called wrong
+        # there. (The residual is no test for this on the neutral panels, whose
+        # tail oscillation alone reaches 0.5.)
+        idx = findall(g.Z .!= go.Z)
+        diffs = Vector{Tuple}(undef, length(idx))
+        isdeg = falses(length(idx))
+        kref = (n_roots_to_track = 0, ω_max = ω_max, n_power_max = uw.n_power_max,
+                reltol = 1e-10, abstol = 1e-10)
+        Threads.@threads for k in eachindex(idx)
+            i = idx[k]
+            zref, zrref = calculate_unstable_roots_direct(uw.D, params[i], 0.0; kref...)
+            zp = calculate_unstable_roots_direct(uw.D, params[i], 1e-6; kref...)[1]
+            zm = calculate_unstable_roots_direct(uw.D, params[i], -1e-6; kref...)[1]
+            isdeg[k] = zp != zm
+            diffs[k] = (params[i]..., go.Z[i], go.Z_raw[i], g.Z[i], g.Z_raw[i], zref, zrref, isdeg[k])
+        end
+        degen(d) = d[9]
+        check = (t_ode = go.t, n_diff = length(diffs),
+                 n_degenerate = count(degen, diffs),
+                 n_uw_wrong = count(d -> !degen(d) && d[5] != d[7], diffs),
+                 n_ode_wrong = count(d -> !degen(d) && d[3] != d[7], diffs),
+                 n_class_diff = count((g.Z .== 0) .!= (go.Z .== 0)),
+                 diffs = diffs, Z_ode = go.Z, Z_raw_ode = go.Z_raw)
+        @info "unwrap vs ODE counts" n_points = length(g.Z) n_diff = check.n_diff check.n_degenerate check.n_uw_wrong check.n_ode_wrong check.n_class_diff t_unwrap = g.t t_ode = go.t
+    end
+    return merge(g, (backend = "unwrap", t_ode = check === nothing ? NaN : check.t_ode,
+                     check = check, uw_npow = Float64(uw.n_power_max)))
+end
+
+"""
+Cache-name suffix of a chart grid: unwrap grids never reuse an ODE cache and
+vice versa, and the march settings (order, step caps) are part of the name.
+"""
+chart_suffix(uw) = (CHART_BACKEND[] == :unwrap && uw !== nothing) ?
+    "_uw3" * string(hash((Float64(uw.n_power_max), uw.kw)); base = 16) : ""
+
+# The showcase chart (s01, reused by s09): the reduced form is an entire
+# quasi-polynomial of order 4. The step cap over the resonance band ω < 6 is
+# for the COLOURING, not the count: the counts are identical without it, but
+# the march then locates some |D| minima on too coarse a Hermite model, and at
+# ~1% of the stable pixels the dominant root is lost from the σ field (errors
+# up to 0.28 against Newton-refined roots, vs 0.06 for the ODE grid; with the
+# cap: max 0.06, median 6e-4 vs 5e-3 for the ODE grid).
+const SHOWCASE_UW = (D = D_showcase_reduced, n_power_max = 4.0, kw = (hmax = 0.1, ωband = 6.0))
+
+"Write data/unwrap_check_<study>.csv (one row per chart) and ..._points.csv (every differing point)."
+function write_chart_checks(study, charts)
+    med_res(Zr) = (r = filter(isfinite, abs.(vec(Zr) .- round.(vec(Zr)))); isempty(r) ? NaN : median(r))
+    rows = Tuple[]
+    pts = Tuple[]
+    for (id, g, settings) in charts
+        c = g.check
+        nc(f) = c === nothing ? -1 : getfield(c, f)
+        push!(rows, (id, g.backend, length(g.Z), g.t, g.t_ode, nc(:n_diff), nc(:n_degenerate),
+            nc(:n_uw_wrong), nc(:n_ode_wrong), nc(:n_class_diff), g.uw_npow, med_res(g.Z_raw),
+            c === nothing ? NaN : med_res(c.Z_raw_ode), settings))
+        c === nothing || foreach(d -> push!(pts, (id, d...)), c.diffs)
+    end
+    write_csv("unwrap_check_$(study)",
+        ["chart", "backend", "n_points", "chart_time_s", "ode_time_s_same_machine", "n_diff_vs_ode",
+         "n_diff_degenerate", "n_diff_unwrap_wrong", "n_diff_ode_wrong", "n_stability_class_diff",
+         "unwrap_n_power", "median_int_residual", "median_int_residual_ode", "unwrap_settings"], rows)
+    write_csv("unwrap_check_$(study)_points",
+        ["chart", "x", "y", "Z_ode", "Zraw_ode", "Z_unwrap", "Zraw_unwrap", "Z_ref_1e-10",
+         "Zraw_ref_1e-10", "root_on_line"], pts)
+end
+
 """
 MDBM boundary trace with the scalar sign(Z==0)*|σ_dom - σ| objective.
 

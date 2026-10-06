@@ -213,6 +213,36 @@ function D_turning(λ::T, p) where T
 end
 
 # ---------------------------------------------------------------------------
+# ENTIRE forms for the unwrap march (CHART_BACKEND = :unwrap, common.jl).
+# The march sums exact phase increments between samples; a pole next to a
+# lightly damped mode can make a pole-zero pair wind the phase by -2pi inside
+# one step, unseen. So the rational panels are counted on their numerators.
+# ---------------------------------------------------------------------------
+# turning: modal denominators M1 M2 cleared (n = 4 exactly, a quasi-polynomial)
+function D_turning_entire(λ::T, p) where T
+    Ω, w = p
+    M1 = λ^2 + 2 * T(0.02) * λ + one(T)
+    M2 = λ^2 + 2 * T(0.03) * T(2.4) * λ + T(2.4)^2
+    return M1 * M2 + w * (1 - exp(-(2π / Ω) * λ)) * (M2 + T(0.45) * M1)
+end
+# beam: D_beam = (cosh(gamma) - K e^{-r lam}) / cosh(gamma). The denominator is
+# parameter-independent and has no zeros in Re lam >= 0 (the damped open-loop
+# bar modes), so its phase is measured once (denominator_order, systems.jl) and
+# enters as the effective order: the count and the truncation at omega_max are
+# exactly those of the return difference, but the march never meets a pole.
+D_beam_den(λ::T, p) where T = cosh(λ / sqrt(one(T) + T(BEAM_ETA) * λ))
+D_beam_entire(λ::T, p) where T = D_beam_den(λ, p) - p[2] * exp(-p[1] * λ)
+# FEM bar: det(Q0) * D_fem = det(Q0 + F) (one LU for the determinant and the
+# lemma solve); the denominator det(Q0) is handled as for the beam.
+D_fem_den(λ::T, p) where T = det(λ^2 .* T.(M_f) .+ λ .* T.(C_f) .+ T.(K_f))
+function D_fem_entire(λ::T, p) where T
+    r, K = p
+    F = lu(λ^2 .* T.(M_f) .+ λ .* T.(C_f) .+ T.(K_f))
+    c = -K * (one(T) + T(BEAM_ETA) * λ) / T(H_FEM) * exp(-r * λ)
+    return det(F) * (one(T) + c * (F \ T.(E_1_FEM))[N_FEM])
+end
+
+# ---------------------------------------------------------------------------
 # Panel specifications
 # ---------------------------------------------------------------------------
 # This gallery is the paper's SPEED argument. Every panel uses the same
@@ -314,6 +344,61 @@ SPECS = [
      nx = half(NBF), ny = half(NBF), ω = 1e4, tol = 1e-4, title = "fractional oscillator"),
 ]
 
+# ---------------------------------------------------------------------------
+# Counting back-end per panel (CHART_BACKEND, common.jl; --ode-charts restores
+# the phase-ODE grids of the original figures). An entry names the ENTIRE form
+# the unwrap march counts, its leading order n (or `den`, a parameter-
+# independent stable denominator whose phase gives the effective order, see
+# denominator_order), and march options. A panel without an entry keeps the
+# phase-ODE back-end; the reason is stated next to it. Every unwrap grid is
+# cross-checked against the ODE grid (data/unwrap_check_s08*.csv).
+# ---------------------------------------------------------------------------
+#
+# Step caps (hmax over [0, ωband]) follow the rule hmax ≈ π/(2 τ_max) wherever a
+# chain of roots runs close to the axis: a step that spans two same-side roots
+# of the chain winds the phase by 2π unseen. Measured on the 75x75 grids
+# against a reference march capped at 0.005 (over [0, 100] on the 10^4-window
+# panels): without the cap the turning panel miscounts 17 points and the beam
+# 33 (FEM bar 37), with it none (apart from points with a root ON the line,
+# see chart_grid).
+const UNWRAP = Dict(
+    "fourth"      => (D = D_fourth, n = 4.0, kw = (;)),
+    # "algebraic": phase-ODE back-end, for the COLOURING. The counts are fine
+    # (unwrap = ODE except 1 point, where the ODE grid is wrong), but the
+    # march's dip estimates are confined to a trust region |D/D'| <= max(|λ|, 1),
+    # and where the dominant roots are real and far left (a large) 300 of the
+    # 3627 stable pixels get no root estimate at all -- a boundary-coloured band
+    # through the stable domain. The ODE back-end keeps every dip estimate.
+    # entire: (1 - e^{-λ})/λ has a removable singularity (series branch at 0)
+    "distributed" => (D = D_distributed, n = 2.0, kw = (;)),
+    # neutral: entire, the counted quantity (phase at ω_max = 200/500) is the
+    # same as the ODE's; the root chain approaches Re λ = ln|a| and never leaves
+    # the axis band, hence the cap π/(2τ), τ = 1, over the whole window.
+    "neutral"     => (D = D_neutral, n = 2.0, kw = (hmax = π / 2, ωband = Inf)),
+    "neutral_hg"  => (D = D_neutral_hg, n = 2.0, kw = (hmax = π / 2, ωband = Inf)),
+    "pda"         => (D = D_pda, n = 2.0, kw = (hmax = π / 2, ωband = Inf)),
+    # rational -> denominators cleared; regenerative chain spaced ≈ Ω >= 0.1
+    "turning"     => (D = D_turning_entire, n = 4.0, kw = (hmax = 0.05, ωband = 5.0)),
+    # return differences -> numerators, denominator phase as effective order;
+    # τ/T up to 10.5 -> hmax = π/21 over the lightly damped band ω < 40
+    "beam"        => (D = D_beam_entire, den = D_beam_den, kw = (hmax = π / 21, ωband = 40.0)),
+    "fem"         => (D = D_fem_entire, den = D_fem_den, kw = (hmax = π / 21, ωband = 40.0)),
+    # "ccc": NOT unwrap -- phase-ODE back-end. Its normalization poles (order
+    # 2(N-1) = 198 at s = -1) cannot be cleared (|D| ~ ω^198 overflows Float64),
+    # and on this D the march loses ±2π at hundreds of the 75x75 points (809
+    # with the defaults, still 22 at tol = 0.1 with hmax = π/0.4 up to ω_max,
+    # always by exactly 2 roots), so the march is not trusted on this panel.
+    # "bigmat": NOT unwrap -- phase-ODE back-end. Entire (n = 100), but its 50
+    # lightly damped modes are packed into ω ∈ [0.34, 2.97] (spacing ~0.05) and
+    # |D| reaches 1e250: the march miscounted 26 of the 1600 points by ±2/±4
+    # (9 of them stable points shown unstable), and no tolerance / step cap
+    # tried (tol down to 0.05, hmax down to 0.02 over ω < 4) removed every
+    # error, while the ODE grid was wrong at 11 points only.
+    # σ = 0 only: the branch point sits at the start of the march (ω0 = 1e-9)
+    "frac"        => (D = D_frac, n = 1.8, kw = (;)),
+)
+CHART_ROWS = Tuple[]
+
 getcap(s) = hasproperty(s, :cap) ? s.cap : nothing
 gethl(s) = hasproperty(s, :hlines) ? s.hlines : nothing
 # A panel may state its leading order instead of having it estimated. This is
@@ -344,12 +429,19 @@ function gallery_panel!(fig, r, c, spec)
     # the DOMINANT root (max Re over several tracked minima) -- a single
     # tracked minimum can belong to a non-dominant branch away from the
     # boundary, which shows up as discontinuous shading
-    grid = with_cache("s08_$(spec.id)_$(skey)_$(spec.nx)x$(spec.ny)") do
+    uws = get(UNWRAP, spec.id, nothing)
+    uw = uws === nothing ? nothing :
+        (D = uws.D, kw = uws.kw, n_power_max = hasproperty(uws, :den) ?
+            denominator_order(uws.den, spec.ω) : uws.n)
+    grid = with_cache("s08_$(spec.id)_$(skey)_$(spec.nx)x$(spec.ny)$(chart_suffix(uw))") do
         np = getnpow(spec)
         kw = np === nothing ? (;) : (; n_power_max = np)
-        sweep_grid_dominant(spec.D, xv, yv; nroots = nr, ω_max = spec.ω,
-            reltol = spec.tol, abstol = spec.tol, kw...)
+        chart_grid(spec.D, xv, yv; nroots = nr, ω_max = spec.ω,
+            ode_kw = (; reltol = spec.tol, abstol = spec.tol, kw...), uw = uw)
     end
+    push!(CHART_ROWS, (spec.id, grid, uw === nothing ? "ode only" :
+        @sprintf("n=%.6g%s", uw.n_power_max, isempty(uw.kw) ? "" :
+            " " * join(("$k=$(round(v; sigdigits = 4))" for (k, v) in pairs(uw.kw)), " "))))
     bnd = with_cache("s08_$(spec.id)_$(skey)_mdbm") do
         mdbm_boundary(spec.D, spec.xr, spec.yr; ngrid = MDBM_N0_G,
             Niter = FAST[] ? max(3, mit - 2) : mit,
@@ -373,7 +465,8 @@ function gallery_panel!(fig, r, c, spec)
     hl !== nothing && hlines!(ax, hl; color = :red, linestyle = :dash, linewidth = 1.0)
     # CPU cost of BOTH stages, plus this panel's own colour limits: each panel
     # is normalized to its own extremes, so those numbers must travel with it.
-    lab = "$(spec.nx)×$(spec.ny): $(tex_time_plain(grid.t))"
+    # (the label names the counting back-end of the background grid)
+    lab = "$(spec.nx)×$(spec.ny) $(grid.backend == "unwrap" ? "unwrap" : "ODE"): $(tex_time_plain(grid.t))"
     bnd !== nothing && (lab *= "\nMDBM: $(tex_time_plain(bnd.t))")
     lab *= "\nσ≤$(round(σ_min, sigdigits = 2)) Z≤$(Z_max)"
     # Put the plate where it hides the least: over a solidly unstable corner
@@ -399,7 +492,7 @@ function gallery_panel!(fig, r, c, spec)
     @info "panel residual" spec.id ω = spec.ω resid_med resid_max n_uncert n_nonfinite
     return (spec.id, spec.nx * spec.ny, grid.t, bnd === nothing ? NaN : bnd.t,
             spec.ω, spec.tol, MDBM_N0_G, mit, mdbm_equiv(spec.nx),
-            resid_med, resid_max, n_uncert, n_nonfinite)
+            resid_med, resid_max, n_uncert, n_nonfinite, grid.backend, grid.t_ode)
 end
 
 # ---------------------------------------------------------------------------
@@ -525,8 +618,10 @@ save_fig(figb, "fig_gallery_b")
 write_csv("gallery_timings",
     ["system", "n_points", "grid_time_s", "mdbm_time_s", "wmax", "tol",
      "mdbm_n0", "mdbm_levels", "mdbm_equiv_res",
-     "median_int_residual", "max_int_residual", "n_uncertain", "n_nonfinite"],
+     "median_int_residual", "max_int_residual", "n_uncertain", "n_nonfinite",
+     "backend", "ode_grid_time_s_same_machine"],
     timings)
+write_chart_checks("s08", CHART_ROWS)
 # A panel is suspect when a non-trivial FRACTION of its points are uncertain --
 # that is what a truncated tail or an under-resolved march looks like. A single
 # bad pixel is not: it is the tail of a distribution whose median is ~1e-4.

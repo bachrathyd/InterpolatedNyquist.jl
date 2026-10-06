@@ -125,12 +125,25 @@ rows_csv = Tuple[]
 # uniformly blue -- while a shared BAR over per-panel scales would mislabel one
 # of them. Two bars is the only arrangement that is both readable and honest.
 NXY = FAST[] ? (40, 30) : (80, 60)
+chart_rows = Tuple[]
 for (ic, case) in enumerate(CASES_G)
     D = make_D_gao(case.lam)
     kpv = LinRange(case.kpr..., NXY[1]); kiv = LinRange(case.kir..., NXY[2])
-    grid = with_cache("s10_gao_lam$(case.lam)_$(NXY[1])x$(NXY[2])") do
-        sweep_grid_dominant(D, kpv, kiv; nroots = 5, ω_max = 1e4)
+    # sigma = 0 chart with the unwrap march: D has no poles, and on the
+    # imaginary axis it is smooth except at the branch point s = 0, where the
+    # march starts (omega0 = 1e-9, like the ODE back-end); leading order
+    # mu + 0.5 (the 10 s^{mu+0.5} term). The counts of both charts agree with
+    # the ODE grid at every point, but mu = 0.4 keeps the phase-ODE back-end
+    # for the COLOURING: there the only genuine |D| dip is at the branch point,
+    # and the remaining tracking slots fill with shallow minima of the e^{-0.4s}
+    # ripple at omega ~ 1e2..1e4, whose march estimates (on a long step's Hermite
+    # model) reach |sigma| ~ 1e3 -- 19 stable pixels end with only such garbage,
+    # which wrecks the per-panel colour scale (2% quantile -748 instead of -1.9).
+    uw = case.lam == 0.4 ? nothing : (D = D, n_power_max = case.lam + 0.5, kw = (;))
+    grid = with_cache("s10_gao_lam$(case.lam)_$(NXY[1])x$(NXY[2])$(chart_suffix(uw))") do
+        chart_grid(D, kpv, kiv; nroots = 5, ω_max = 1e4, uw = uw)
     end
+    push!(chart_rows, ("gao_mu$(case.lam)", grid, uw === nothing ? "ode only" : "n=$(case.lam + 0.5)"))
     col = 2ic - 1
     ax = MAxis(fig[1, col], xlabel = "k_p", ylabel = ic == 1 ? "k_i" : "",
         title = "μ = $(case.lam)")
@@ -143,6 +156,7 @@ for (ic, case) in enumerate(CASES_G)
     # sigma-degree contours in hues the map does not use
     cmap = cgrad([:white, :magenta])
     for (k, sd) in enumerate(case.sig_degs)
+        # boundary: MDBM with the phase-ODE back-end (mdbm_boundary), unchanged
         bnd = with_cache("s10_gao_lam$(case.lam)_mdbm_sd$(sd)") do
             mdbm_boundary(D, case.kpr, case.kir; ngrid = 25,
                 Niter = FAST[] ? 3 : 4, σ = -sd, ω_max = 1e4)
@@ -168,6 +182,7 @@ for (ic, case) in enumerate(CASES_G)
         backgroundcolor = (:white, 0.85))
 end
 save_fig(fig, "fig_fractional_controller")
+write_chart_checks("s10", chart_rows)
 
 write_csv("fractional_controller",
     ["lambda", "sigma_deg", "kp", "ki", "Z", "Z_raw"], rows_csv)

@@ -40,6 +40,24 @@ and produce identical counts (asserted in the `s06` extraction block). Swap one
 for the other in a study to see the difference; `tab_extraction` measures it on
 one chart.
 
+## Counting back-end of the example charts
+
+The background grids of `fig_showcase_hybrid` (s01), `fig_gallery_a/b` (s08),
+`fig_sigma_contours` (s09) and `fig_fractional_controller` (s10) are computed
+with the discrete phase-unwrapping march (`calculate_unstable_roots_unwrap_p_vec`)
+wherever it is valid; rational panels are counted on their entire numerators
+(see `UNWRAP` in `s08_gallery.jl`). Each unwrap grid is cross-checked against
+the phase-ODE grid on the same points (`data/unwrap_check_<study>.csv`, the
+differing points in `..._points.csv`). The MDBM boundary traces still use the
+phase-ODE back-end. To reproduce the original phase-ODE charts:
+
+```powershell
+julia --project=. -t auto generate_all.jl --only=s08_gallery --ode-charts
+julia --project=. -t auto generate_all.jl --only=s08_gallery --no-chart-check  # unwrap, skip the ODE cross-check
+```
+
+Per-panel back-ends, times and count differences: `paper/UNWRAP_FIGURES.md`.
+
 | Output | Script | Main knobs to play with |
 |---|---|---|
 | `fig_showcase_hybrid` (Fig. showcase chart + robust ellipse) | `s01_showcase.jl` | grid `90x70`, `ω_max=1e4`; MDBM `ngrid`/`Niter`; `find_largest_circle(N=5)`; `ELL_SX/ELL_SY` |
@@ -86,15 +104,17 @@ one chart.
 
 ## Panels that are NOT fast
 
-Nine of the eleven gallery panels compute a 100x100 chart in well under a
-second. Two do not, and the reason is the cost of evaluating `D`, not the
-counting method:
+With the unwrap march, ten of the twelve gallery panels compute their 75x75
+background grid in well under a second (7–140 ms; the algebraic panel, kept
+on the phase ODE for its colouring, ~0.2 s). Three do not, and the reason is
+the cost of evaluating `D` or the counting method the panel has to keep:
 
-* **29-DOF FEM bar** — a 29x29 linear solve per frequency, ~25k frequencies per
-  point. Even with the matrix-determinant-lemma form (5.5x faster than the full
-  determinant) the panel takes minutes.
-* **50x50 dense determinant** — a dense 50x50 determinant per frequency; the
-  grid is therefore 40x40 rather than 100x100.
+* **12-DOF FEM bar** — one 12x12 LU per frequency; ~6 s with the unwrap march
+  (45 s with the phase ODE on the same machine).
+* **100-vehicle CCC ring** — phase ODE (the march is not reliable on its
+  normalized D, see `UNWRAP` in `s08_gallery.jl`): ~7 s.
+* **50x50 dense determinant** — phase ODE (same reason), a dense 50x50
+  determinant per frequency; the grid is therefore 40x40, ~3 min.
 
-Their measured times are in `data/gallery_timings.csv`, printed on the panels
-themselves, and discussed honestly in the appendix.
+Their measured times are in `data/gallery_timings.csv` (and
+`data/unwrap_check_s08.csv`), printed on the panels themselves.

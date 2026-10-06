@@ -25,12 +25,18 @@ Dv = LinRange(SHOWCASE_DRANGE..., nD)
 
 kkey = string(hash((SHOWCASE_PRANGE, SHOWCASE_DRANGE)); base = 16)
 
-grid = with_cache("s01_domgrid_h_$(kkey)_$(nP)x$(nD)") do
-#grid = with_cache("s01_domgrid_h_$(nP)x$(nD)") do
-    sweep_grid_dominant(D_showcase_reduced, Pv, Dv; ω_max = 1e4)
+# The reduced form is an entire quasi-polynomial of order 4: the unwrap march
+# applies directly (SHOWCASE_UW in systems.jl; CHART_BACKEND in common.jl --
+# --ode-charts reproduces the original phase-ODE chart, whose cache name
+# carries no suffix). s09 reuses this grid through the same cache name.
+grid = with_cache("s01_domgrid_h_$(kkey)_$(nP)x$(nD)$(chart_suffix(SHOWCASE_UW))") do
+    chart_grid(D_showcase_reduced, Pv, Dv; ω_max = 1e4, uw = SHOWCASE_UW)
 end
+write_chart_checks("s01", [("showcase", grid, "n=4 hmax=0.1 ωband=6")])
 
 C = combined_metric(grid.Z, grid.sigma)
+# MDBM boundary: unchanged, phase-ODE back-end (calculate_unstable_roots_direct
+# inside mdbm_boundary, systems.jl)
 bnd  = with_cache("s01_mdbm_h_$(kkey)") do
 #bnd = with_cache("s01_mdbm_h") do
     mdbm_boundary(D_showcase_reduced, SHOWCASE_PRANGE, SHOWCASE_DRANGE;
@@ -145,6 +151,8 @@ write_csv("showcase_summary", ["key", "value"], [
     ("extraction_ratio_dev", ratio_dev),
     ("grid_nx", nP), ("grid_ny", nD),
     ("grid_time_s", grid.t),
+    ("grid_backend", grid.backend),
+    ("grid_time_ode_s_same_machine", grid.t_ode),
     ("mdbm_time_s", bnd.t),
     ("robust_P", circ.x), ("robust_D", circ.y), ("robust_R_scaled", circ.R_scaled),
     ("p_stable_P", p_stable[1]), ("p_stable_D", p_stable[2]),

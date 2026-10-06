@@ -1,0 +1,2 @@
+chart,backend,n_points,chart_time_s,ode_time_s_same_machine,n_diff_vs_ode,n_diff_degenerate,n_diff_unwrap_wrong,n_diff_ode_wrong,n_stability_class_diff,unwrap_n_power,median_int_residual,median_int_residual_ode,unwrap_settings
+showcase,unwrap,6300,0.0182562,1.498000144958496,1,0,0,1,0,4.0,1.3773761683655295e-5,1.5268569058646264e-5,n=4 hmax=0.1 ωband=6
