@@ -13,7 +13,7 @@ with a singular mass matrix.
   \maybefig{fig_showcase_hybrid}{0.72\linewidth}
   \caption{Stability chart of the constrained two-degree-of-freedom system
   with delayed PD control. Colored background: combined
-  field~\eqref{eq:coloring} of the brute-force sweep (smooth spectral gap
+  field~\eqref{eq:coloring} of the brute-force sweep (smooth stability margin
   $\sest$ inside the stable domain, integer number of unstable roots
   outside). Black curve: stability boundary traced by MDBM with the scalar
   objective~\eqref{eq:objective}. Red ellipse and star: largest inscribed
@@ -29,8 +29,9 @@ attached through a spring and damper $(k_2, c_2)$, and an instrumentation
 block of mass $m_3$ is \emph{rigidly bolted} to the absorber mass. Instead of
 eliminating the rigid connection by hand, the model keeps it as an algebraic
 constraint with the internal force $F_{\mathrm c}$ -- exactly the form in
-which a simulation model of a larger assembly would be written. A digital
-controller measures the motion of the main mass and applies the delayed PD
+which a simulation model of a larger assembly would be written. A controller
+with a feedback delay (sampling is neglected) measures the motion of the main
+mass and applies the delayed PD
 force $u(t) = -P\,x_1(t-\tau) - D\,\dot x_1(t-\tau)$ to it. With the state
 vector $\vect z = (x_1,x_2,x_3,v_1,v_2,v_3,F_{\mathrm c})$, the descriptor
 form~\eqref{eq:ddae} reads
@@ -92,7 +93,7 @@ control-gain plane $(P,D)$. Since the uncontrolled structure is unstable,
 the stable domain is a bounded island: its left boundary is the static
 (divergence) limit, while the remaining boundaries are Hopf-type curves whose
 crossing frequencies are delivered by $\west$. The combined
-coloring~\eqref{eq:coloring} displays the interior spectral gap -- deep blue
+coloring~\eqref{eq:coloring} displays the interior stability margin -- deep blue
 marks the fastest-decaying configurations -- and the integer plateaus
 $\Zint=1,2,3,4$ outside, all in one map. The black MDBM curve is the
 high-resolution stability boundary traced from the scalar
@@ -178,12 +179,13 @@ chart, with $210$ points beyond the rounding threshold -- and one decade
 into the safe range the problem is essentially gone: at $10^{-4}$ a single
 count of the $8000$ deviates, by one and without flipping the
 classification, and at $10^{-6}$ none. Second, while the integrator
-dominates the error budget, the integer residual tracks the requested
-tolerance with a roughly constant factor,
+dominates the error budget, the largest integer residual of the chart tracks
+the requested tolerance with a roughly constant factor,
 \begin{equation}\label{eq:rule}
-  \varepsilon \;\approx\; 100 \cdot \mathrm{tol}
+  \max\varepsilon \;\approx\; 100 \cdot \mathrm{tol}
 \end{equation}
-to within an order of magnitude; the factor is inherited from the
+to within a factor of four (Table~\ref{tab:tolerance}; the mean residual is
+one to two orders of magnitude smaller); the factor is inherited from the
 accepted-step count of the march. At the standard window $\wmax=10^{4}$ the
 truncated tail of this velocity-feedback system, $\approx2\cdot10^{-5}$,
 takes over once the tolerance drops below $\sim10^{-6}$ -- the mean
@@ -211,7 +213,7 @@ setting to certify the counts, with the cross-check~\eqref{eq:crosscheck}
 guarding the one error mode near the boundary that the residual cannot
 reveal.
 
-A flagged pixel need not be recomputed with a different backend: the march
+A flagged pixel need not be recomputed with a different back-end: the march
 can repair itself (\code{peak\_repair=true}). The skipped peak is easy to
 \emph{locate} even when it is far too narrow to \emph{integrate}: its center
 is a minimum of $|\Dfun(\sigma+\ii\omega)|^2$, which dips toward that
@@ -221,7 +223,7 @@ recomputes the phase increment of the crossing step by quadrature whose
 subdivision is forced into the located peak, and restarts the march at the
 minimum. Measured across the Hopf point of this chart
 (\code{data/peak\_repair.csv}): the plain march loses one count from
-$\Delta P = \RepairPlainFailDP$ inward, the Gauss--Kronrod backend -- which
+$\Delta P = \RepairPlainFailDP$ inward, the Gauss--Kronrod back-end -- which
 must \emph{discover} the peak -- loses it silently at
 $\Delta P = \RepairDeepDP$, whereas the repaired march, which \emph{knows}
 where the peak is, still counts correctly there. The repair matters only in
@@ -249,7 +251,7 @@ the repair on.
   $\sigma$-deviation, for each system, together with the per-point cost. The
   raw estimate is the smoothest field; every polish sharpens the smooth
   system uniformly, while on the rational system Newton becomes patchy (it can
-  jump to a neighbouring root near a pole) and the Taylor and combined polishes
+  jump to a neighboring root near a pole) and the Taylor and combined polishes
   stay consistent.}\label{fig:refinement}
 \end{figure}
 
@@ -264,7 +266,7 @@ the repair on.
 \end{table}
 
 Figure~\ref{fig:refinement} quantifies the rightmost-root estimates with a
-yardstick that favours no method: the residual $|\Dfun(\lam)|$, which
+yardstick that favors no method: the residual $|\Dfun(\lam)|$, which
 measures distance to an actual root, and the deviation from an independent
 semi-discretization solve.\footnote{A natural but circular way to rank the
 polishes is to measure each against many Newton iterations taken as
@@ -279,7 +281,7 @@ drives the residual $|\Dfun|$ to machine precision and saturates the
 accuracy of the semi-discretization reference ($\RefShowNewton$), but on
 the rational system,
 where the plant response has poles near the imaginary axis, a Newton step
-can settle on a neighbouring root and its error \emph{worsens} to
+can settle on a neighboring root and its error \emph{worsens} to
 $\RefTurnNewton$ -- the patchiness visible in its field -- whereas the cubic
 Taylor polish stays consistent at $\RefTurnPolyThree$, and the combined mode
 is the robust compromise ($\RefTurnComb$) that never speckles. Third, the
@@ -297,15 +299,15 @@ recipe of Section~\ref{sec:performance-sd} exploits.
   \centering
   \maybefig{fig_sigma_contours}{0.72\linewidth}
   \caption{Decay-rate map of the showcase system: colored background --
-  estimated spectral gap $\sest$ from the coarse sweep (stable domain only);
-  curves -- guaranteed $\gamma$-stability boundaries traced by MDBM for a
+  estimated decay rate $\sest$ from the coarse sweep (stable domain only);
+  curves -- $\gamma$-stability boundaries traced by MDBM for a
   family of shifted lines $\Real\lam=\sigma$. The two independent
   computations delineate the same landscape.}\label{fig:sigmacontours}
 \end{figure}
 
 Finally, Fig.~\ref{fig:sigmacontours} demonstrates the $\gamma$-stability
 capability: the traced $\sigma$-contours (Section~\ref{sec:sigmacontours})
-enclose progressively smaller regions with guaranteed spectral gaps, and
+enclose progressively smaller regions with larger asymptotic decay rates, and
 they are consistent with the interpolated $\sest$ background computed from
 the coarse sweep alone. For control design this map answers directly which
 gain combinations guarantee a prescribed settling rate -- at the cost of one

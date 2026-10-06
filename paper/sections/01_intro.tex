@@ -13,8 +13,8 @@ maps over a plane of design parameters that show where the equilibrium is
 asymptotically stable~\cite{insperger2011semidiscretization,sipahi2011stability}.
 The practical value of such a chart depends on two properties of the
 underlying numerical method: how fast a single parameter point can be
-classified, and how much extra information (dominant root location, spectral
-gap, robustness margin) the classification yields.
+classified, and how much extra information (dominant root location,
+stability margin, robustness) the classification yields.
 
 A large family of methods operates in the time domain by discretizing either
 the solution operator or the infinitesimal generator of the delay system.
@@ -77,20 +77,28 @@ the imaginary axis. The multi-dimensional bisection method
 one-dimensional solution manifolds very efficiently. The D-curves, however,
 are \emph{not} the stability boundaries: they merely mark root crossings,
 and the number of unstable roots on either side remains unknown -- and
-automating that decision is surprisingly hard (triangulation into closed
-cells, filtering of spurious slivers). The turning stability-lobe diagram
-illustrates a more fundamental inefficiency: towards low spindle speeds the
-lobe structure becomes infinitely dense, and almost all D-curves lie deep
-inside the unstable domain
-(cf.\ Appendix~\ref{app:gallery})~\cite{stepan2001modelling,insperger2003stability,bachrathy2013improved},
-so the method spends most of its effort on curves that never bound the
+automating that decision in general is not trivial (triangulation into
+closed cells, filtering of spurious slivers). For classical models the
+decision is settled by root-crossing directions from a single test point per
+cell~\cite{stepan1989retarded,olgac2002exact}, and for turning the stability
+boundary is the explicit lower envelope of the
+lobes~\cite{tlusty1963stability,stepan2001modelling}. The turning
+stability-lobe diagram nevertheless illustrates an inefficiency: towards low
+spindle speeds the lobe structure becomes infinitely dense, and an ever
+smaller fraction of the D-curve length bounds the stable region
+(cf.\ Appendix~\ref{app:gallery})~\cite{insperger2003stability,bachrathy2013improved};
+for models with several parameters and delays, where no explicit envelope
+exists, the method spends most of its effort on curves that never bound the
 stable region.
 
 The second strategy counts the unstable roots directly by the argument
 principle, i.e., by the winding number of $\Dfun(\ii\omega)$ -- the
 generalized Nyquist, or Mikhailov, criterion~\cite{stepan1989retarded,kolmanovskii1999introduction}.
-Root counting by contour integrals of $\Dfun'/\Dfun$ has a long history for
-general analytic functions~\cite{delves1967numerical,kravanja2000computing,kravanja2000zeal};
+Root counting by contour integrals of $\Dfun'/\Dfun$ or by the argument
+increment along sampled contours has a long history for general analytic
+functions~\cite{delves1967numerical,ying1988reliable,kravanja2000computing,kravanja2000zeal,johnson2009enclosing},
+and for fractional delay systems an argument-principle stability test was
+given by Hwang and Cheng~\cite{hwang2006numerical};
 for delay systems, Hassard~\cite{hassard1997counting} derived a
 semi-analytical counting formula, Z\'{\i}tek and Vyhl\'{\i}dal formulated
 argument-increment criteria for neutral systems~\cite{zitek2008argument,vyhlidal2009modification},
@@ -111,12 +119,11 @@ frequency range poses an additional truncation problem.
 
 This paper revisits the integration-based Nyquist criterion and turns it into
 a fast and robust tool with \emph{interpolable} output. Its speed is best
-stated in a hardware-independent way: a parameter point costs a few
-microseconds on one processor thread, and this cost divides almost exactly
-by the number of threads, from one CPU core to tens of thousands of GPU
-cores, so that a full-HD chart is computed in about a millisecond and an 8K
-chart in real time on a current graphics processor. The contributions are the
-following. (i)~The winding integral is reformulated as a scalar ordinary
+stated per thread: a parameter point of the benchmark examples costs
+$4$--$20\,\mu$s on one CPU thread, and this cost divides almost exactly among
+CPU threads and, on a graphics processor, in proportion to the number of
+threads up to the saturation of the device (Section~\ref{sec:parallel}). The
+contributions are the following. (i)~The winding integral is reformulated as a scalar ordinary
 differential equation for the phase, marched by a high-order adaptive
 integrator~\cite{verner2010numerically,tsitouras2011runge,rackauckas2017differentialequations}
 whose step-size control resolves the near-singular peaks and crosses the
@@ -126,34 +133,39 @@ by forward-mode automatic differentiation~\cite{revels2016forward}.
 integration can be dropped altogether: the exact phase increments between
 adaptively placed samples are summed (discrete phase unwrapping), and the
 exact phase slope from the same automatic derivatives drives an
-ODE-style step-size control that rejects any step hiding a root transition.
+ODE-style step-size control that rejects steps hiding a root transition.
 This integration-free march needs one evaluation of $\Dfun$ per step and
-tens of evaluations per parameter point, is one to two orders of magnitude
-faster than the phase ODE on the CPU and more robust near the boundary, and
+some $30$--$130$ evaluations for a median parameter point, is $38$ to $298$
+times faster than the phase ODE on the three benchmarks of
+Section~\ref{sec:performance-unwrap} and more robust near the boundary, and
 -- consisting of identical scalar steps on a fixed-size state -- maps
-directly onto GPUs, in single and even half precision. Measured on two CPUs
-and four GPUs, its chart time scales linearly with the number of threads up
-to the saturation of the device, and a two-parameter model (single-thread
-cost and effective parallelism) predicts it for any hardware.
+directly onto GPUs, where single precision suffices. Measured on two CPUs and
+four GPUs, its chart time is proportional to $1/n$ in the number of threads
+over several decades up to the saturation of the device, and a model with the
+single-thread cost and the effective parallelism of the device estimates it
+for other hardware.
 (iii)~The location of the
 characteristic root closest to the integration line -- normally the rightmost
 root -- is estimated \emph{during the same sweep} at negligible extra cost; the
-first-order estimate is the smooth, sign-correct default, and an optional local
+first-order estimate is the smooth default, whose sign is that of the
+rightmost root near the stability boundary, and an optional local
 polish (Taylor, Newton or a combined mode) sharpens it toward machine precision
 for a modest fraction of the cost when an accurate root is wanted. Tracking
 several local minima yields multiple roots at once. This ordered march is what
 distinguishes the phase ODE from plain quadrature, whose recursive subdivision
-visits the frequencies out of order and cannot recognize the minima at all.
+visits the frequencies out of order, so that the minima could only be found
+afterwards from stored nodes.
 (iv)~The root
 estimate makes the chart interpolable: a combined coloring shows the integer
-number of unstable roots outside and the smooth spectral gap inside the
-stable domain, which is a strikingly effective visual diagnostic.
-(v)~The integrality of the computed winding number provides a built-in,
-dimensionless error estimate that scales with the requested solver tolerance
-and lets the accuracy of the count be prescribed in advance; where it is
-structurally blind -- a skipped peak costs exactly $\pm\pi$ and leaves the
-result an integer -- the independently obtained root supplies the missing
-check. (vi)~The estimated root distance serves
+number of unstable roots outside and the smooth stability margin inside the
+stable domain, an effective visual diagnostic.
+(v)~For the integration back-end, the integrality of the computed winding
+number provides a built-in, dimensionless error estimate that scales with the
+requested solver tolerance; where it is structurally blind -- a skipped peak
+costs exactly $\pm\pi$ and leaves the result an integer -- the tracked root
+and the parity of the real roots supply the missing checks, and the discrete
+march avoids the failure by sampling $\Dfun$ itself. (vi)~The estimated root
+distance serves
 as a scalar objective for MDBM, which then traces the \emph{true} stability
 boundary (not the D-curves) at very high equivalent resolution, and the most
 robust parameter point is found as the center of the largest circle inscribed
@@ -170,7 +182,11 @@ error control tied to the integer-residual estimate, the rightmost-root
 by-product that enables interpolation and boundary tracing, and a far wider
 class of demonstrated applications; compared with contour-moment methods such
 as ZEAL~\cite{kravanja2000zeal}, it needs no bounded search region and is
-tailored to the half-line stability sweep.
+tailored to the half-line stability sweep. Adaptive phase unwrapping itself
+is classical~\cite{tribolet1977new,ying1988reliable}; what the discrete march
+adds is its combination with exact slopes of an arbitrary user function, the
+in-stream root estimate, the decision of sub-resolution transitions by the
+side of that root, and a fixed-state formulation that runs as a GPU kernel.
 
 The paper is organized as follows. Section~\ref{sec:theory} summarizes the
 system classes and the argument-principle counting formula.

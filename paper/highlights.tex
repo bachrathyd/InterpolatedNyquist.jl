@@ -1,8 +1,8 @@
 % JSV requires 3-5 highlights, max 85 characters each (submit as separate file).
 \begin{itemize}
-\item The Nyquist winding integral is solved as an ODE by adaptive stiff integrators.
+\item Adaptive phase unwrapping counts the unstable roots of delay systems in tens of steps
 \item The rightmost characteristic root is estimated for free during the same sweep.
-\item Integer-ness of the winding number gives a built-in, dimensionless error measure.
+\item Chart time falls as 1/threads: an 8K chart takes about ten milliseconds on a GPU.
 \item Root distance drives bisection-based tracing of the exact stability boundary.
 \item One code path covers retarded, neutral, algebraic, distributed and fractional delays.
 \end{itemize}

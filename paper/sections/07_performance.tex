@@ -22,17 +22,19 @@
   \caption{Count error $|\Zraw-\Zint|$ (left block) and single-point CPU time
   (right block) of the back-ends at selected tolerances; system and point as
   in Fig.~\ref{fig:convergence}.}\label{tab:convergence}
-  \maybeinput{tables/tab_convergence.tex}
+  \resizebox{\linewidth}{!}{\maybeinput{tables/tab_convergence.tex}}
 \end{table}
 
 Figure~\ref{fig:convergence} and Table~\ref{tab:convergence} quantify the
-choice of back-end, and three points deserve emphasis. First, all adaptive
-back-ends track the requested tolerance over the studied range -- with the
-error settling roughly two orders of magnitude above it, the rule of thumb
-$\varepsilon\approx100\,\mathrm{tol}$ of Section~\ref{sec:integerness} --
-until they meet a common floor of $\approx8\cdot10^{-7}$ set by the tail
+choice of back-end, and three points deserve emphasis. First, from the
+default tolerance downwards the adaptive back-ends track the requested
+tolerance -- with the error settling roughly two orders of magnitude above
+it, the rule of thumb~\eqref{eq:rule} of Section~\ref{sec:showcase-tolerance}
+-- until they meet a common floor of $\approx8\cdot10^{-7}$ set by the tail
 truncated at $\wmax=10^{6}$ and the estimated leading order, not by any
-integrator. Second, the order of the pair matters far more than its family.
+integrator; at loose tolerances the lower-order pairs do not yet track it
+(Table~\ref{tab:convergence}). Second, the order of the pair matters far more
+than its family.
 Across the loose half of the ladder the classical fifth-order
 pair~\cite{tsitouras2011runge} under-resolves the $\omega^{-1}$ ripple of
 this velocity-feedback system, leaving count errors of $0.2$--$0.34$ --
@@ -42,7 +44,7 @@ default~\cite{verner2010numerically} leaves $6\cdot10^{-5}$: three orders
 of magnitude, for a factor of $2.4$ in time. The linearly implicit
 Rosenbrock
 pair~\cite{rosenbrock1963some,shampine1997matlab,hairer1996solving} is
-uniformly dominated, as
+dominated from the default tolerance downwards, as
 expected once one recognizes that the problem has no stiffness for it to
 exploit (Section~\ref{sec:phaseode}); at tight tolerances it needs seconds
 for a single parameter point where the ninth-order pair needs a quarter of
@@ -56,9 +58,12 @@ margin rather than for raw speed.
 \begin{table}[tb]
   \centering
   \caption{Approaching a Hopf boundary of the showcase system at distance
-  $\Delta P$ in the gain. The peak half-width equals the true $|\sest|$,
-  proportional to $\Delta P$; the tracked estimate reproduces it until it
-  saturates at the solver-tolerance floor (last two rows). The marching
+  $\Delta P$ in the gain. The peak half-width equals the distance of the
+  crossing root from the axis, proportional to $\Delta P$
+  ($6.6\cdot10^{-4}\,\Delta P/10^{-2}$); the tracked estimate $\sest$
+  reproduces it down to $\Delta P=10^{-6}$, while in the last two rows it is
+  limited by the step of the march (Section~\ref{sec:tracking}) and only its
+  sign -- a root right of the axis -- remains correct. The marching
   solver silently loses one root once the peak falls below its step
   resolution, while the integer residual stays small
   ($\Zraw$ shifts by exactly one).}\label{tab:boundarystress}
@@ -84,8 +89,9 @@ $|\Dfun|^{2}$ minimum rather than searching for it -- still counts
 correctly there.
 
 The practical consequences are mild. Landing within $\sim10^{-8}$ of the
-boundary is a measure-zero event that a chart grid hits, if ever, in a
-single pixel, and the damage is a count off by one, not a wild outlier. The
+boundary has a probability of order $10^{-8}/\Delta p$ per pixel for a grid
+spacing $\Delta p$, so a chart grid hits it, if ever, in a single pixel, and
+the damage is a count off by one, not a wild outlier. The
 MDBM trace is insensitive to it: its objective tends to zero at the
 boundary regardless of the sign, so a miscount displaces the interpolated
 boundary point by no more than the skipped strip's width, $\sim10^{-8}$ in
@@ -94,8 +100,10 @@ classification is affected only where the skip flips the count to or from
 zero -- exactly the situation in which the tracked root (still positive,
 $\sest=+4.3\cdot10^{-7}$ at $\Delta P=10^{-8}$, correctly placing a root
 right of the axis) disagrees with $\Zint=0$ and the sign
-test~\eqref{eq:crosscheck} fires. Since that test is available only from
-the ordered march, the march remains the default.
+test~\eqref{eq:crosscheck} fires; the parity test~\eqref{eq:parity} fires as
+well, since $\Zint=3$ lies between the true values $4$ and $2$. Since the
+root test needs the tracked root, which quadrature cannot provide, the ODE
+march remains the default integration back-end.
 
 \subsection{Chart-level cost, memory and cold start}\label{sec:performance-cost}
 
@@ -108,8 +116,8 @@ the ordered march, the march remains the default.
   tight-tolerance reference of the same chart: the adaptive back-ends are
   required to match everywhere before their time is recorded, while the
   fixed-step back-end -- whose resolution is set by hand -- reports its
-  misses honestly.}\label{tab:gridtimings}
-  \maybeinput{tables/tab_grid_timings.tex}
+  misses.}\label{tab:gridtimings}
+  \resizebox{\linewidth}{!}{\maybeinput{tables/tab_grid_timings.tex}}
 \end{table}
 
 \begin{table}[tb]
@@ -134,12 +142,12 @@ acceptable for a first look, and flagged by the diagnostics of
 Section~\ref{sec:showcase-tolerance}. Beyond the presets, two user choices
 dominate the cost on the showcase DDAE, spanning three orders of magnitude
 together: $\wmax$ (the velocity feedback's $\omega^{-1}$ ripple makes
-$\wmax=10^{6}$ cost some sixty times $\wmax=10^{4}$, while buying nothing
+$\wmax=10^{6}$ cost some fifty times $\wmax=10^{4}$, while buying nothing
 -- the truncated tail is five orders below the rounding threshold) and the
 form of $\Dfun$ (the automatic extraction costs a factor of $\ExtractRatio$
 per evaluation over the hand-derived expression,
 Table~\ref{tab:extraction}). Choosing badly on both turns the $1.98$\,s
-chart of Table~\ref{tab:presets} into a fifty-minute one; this is what the
+chart of Table~\ref{tab:presets} into one of more than half an hour; this is what the
 asymmetric guidance of Section~\ref{sec:phaseode} means in practice.
 
 Table~\ref{tab:gridtimings} reports the cost of a \emph{complete}
@@ -171,7 +179,7 @@ Table~\ref{tab:gridtimings}.
   of a uniform grid of the given size, at the listed number of function
   evaluations. The saving factor is the ratio of the two point
   counts.}\label{tab:mdbm}
-  \maybeinput{tables/tab_mdbm.tex}
+  \resizebox{\linewidth}{!}{\maybeinput{tables/tab_mdbm.tex}}
 \end{table}
 
 Table~\ref{tab:mdbm} makes the boundary-tracing argument of
@@ -180,11 +188,12 @@ $20\times20$ mesh yield a boundary resolved as finely as a
 $320\times320$ uniform grid would resolve it, while evaluating only the
 cells that actually bracket the boundary -- a saving of $34$ to $53$ times in
 function evaluations, which is precisely why the high-resolution boundary is
-affordable on top of a deliberately coarse colored background. These numbers substantiate the practical claim
-of the paper: the stability chart of a nontrivial delayed system refreshes
-fast enough to be explored \emph{interactively}, which changes how such
-charts are used in design -- parameter studies and optimization loops can
-call the entire chart pipeline as an inner function.
+affordable on top of a deliberately coarse colored background. The saving
+matters most where an evaluation of $\Dfun$ is expensive -- large
+determinants, automatic extraction -- since for a cheap scalar $\Dfun$ a
+brute-force grid of that density is itself affordable
+(Section~\ref{sec:parallel}); and the traced boundary is a curve, which a
+grid of any density only approximates.
 
 \subsection{The discrete march: two orders of magnitude on the CPU}\label{sec:performance-unwrap}
 
@@ -197,8 +206,11 @@ call the entire chart pipeline as an inner function.
   hardware differences. The integration back-ends use the chart window
   $\wmax=10^{4}$, the discrete march $\wmax=10^{5}$; the wrong-$\Zint$ column
   counts the deviations from a tight-tolerance ($10^{-8}$) integration
-  reference of the same chart. The turning model enters the discrete march
-  with its denominators cleared (Section~\ref{sec:unwrap}).}\label{tab:unwrap}
+  reference of the same chart. The per-point column is the chart time divided
+  by $10^{4}$. The turning model enters the discrete march with its
+  denominators cleared and with the step cap $h\le0.05$ for $\omega<5$
+  (Section~\ref{sec:unwrap}); its speed-up therefore includes the change of
+  form and of window.}\label{tab:unwrap}
   \maybeinput{tables/tab_unwrap.tex}
 \end{table}
 
@@ -216,8 +228,10 @@ Table~\ref{tab:unwrap} measures what Section~\ref{sec:unwrap} predicts. On
 the same machine and the same ten thousand points, the discrete march computes
 every chart without a single wrong count, $\UwSpeedFourth$, $\UwSpeedShowcase$
 and $\UwSpeedTurning$ times faster than the default ODE back-end, and at
-$\UwUsFourth$, $\UwUsShowcase$ and $\UwUsTurning$\,$\mu$s per point -- a
-complete $100\times100$ chart of any of the three systems in $10$--$35$\,ms.
+$\UwUsFourth$, $\UwUsShowcase$ and $\UwUsTurning$\,$\mu$s of wall time per
+point on \UwThreads{} threads -- a complete $100\times100$ chart of any of the
+three systems in $10$--$35$\,ms (the kernel of Section~\ref{sec:parallel}
+needs about half of that per point on the same processor).
 The gain grows with the difficulty of the system, because the discrete march
 pays only for what it must resolve: the median point costs $31$, $52$ and $129$
 evaluations of $\Dfun$, whereas the integrators pay for every period of the
@@ -228,21 +242,25 @@ anywhere. Near a boundary the discrete march is also the more robust
 back-end (Table~\ref{tab:unwrapstress}): it reproduces the exact count down
 to $|P-P_b|=10^{-12}$ on both sides of the Hopf boundary of the showcase
 system, spending at most $165$ evaluations there, while the ODE march at the
-tight tolerance $10^{-8}$ misses the narrow peak from $|P-P_b|\le10^{-8}$ on -- the
+tight tolerance $10^{-8}$ misses the narrow peak from $P-P_b=+10^{-8}$ and
+$-10^{-10}$ onwards -- the
 failure mode discussed above, here resolved by the step rejection on an
 unpredicted phase jump and by the root-side decision below the resolution of
 the number format.
 
-The discrete march therefore becomes the recommended back-end for charts of
-entire characteristic functions, with the ODE march kept for what it does
-better: the convergence-controlled integer residual of
-Section~\ref{sec:integerness} as an independent check, and rational $\Dfun$
-whose denominators cannot be cleared conveniently. All the timings of
+The discrete march is therefore the recommended back-end for charts of
+entire characteristic functions, and for neutral systems with an explicit,
+moderate $\wmax$ (Section~\ref{sec:unwrap}); in the package it is selected
+explicitly (\code{calculate\_unstable\_roots\_unwrap}), while the ODE march
+remains the default. The ODE march is kept for what it does better: the
+convergence-controlled integer residual of Section~\ref{sec:integerness} as
+an independent check, and characteristic functions with poles whose
+denominators cannot be cleared conveniently. All the timings of
 Sections~\ref{sec:performance-convergence}--\ref{sec:performance-cost} were
 measured with the integration back-ends, on an earlier machine; their
 \emph{ratios} remain valid, but the absolute chart times of
-Table~\ref{tab:gridtimings} are now one to two orders of magnitude above what
-the package delivers by default.
+Table~\ref{tab:gridtimings} are one to two orders of magnitude above what the
+discrete march delivers.
 
 How the per-point cost of the discrete march divides among CPU and GPU threads,
 and what that means for the chart time on any hardware, is the subject of
@@ -273,15 +291,25 @@ of discretization steps per delay. Table~\ref{tab:semidisc} compares it with
 the present method on the reduced showcase system at a stable, a
 near-boundary and an unstable point; the dominant root of the present method
 is obtained by the multi-root recipe of Section~\ref{sec:tracking} (ten
-tracked minima, all refined, maximal real part). That both converge towards
+tracked minima, all refined, maximal real part); the discrete march gives the
+same accuracy at these points -- raw errors of $2\cdot10^{-5}$ to
+$4\cdot10^{-2}$ with ten tracked minima, $10^{-16}$ to $10^{-10}$ after a
+Newton polish -- whereas a single tracked minimum is not the dominant root
+at any of the three points, by either back-end (\code{data/unwrap\_checks}).
+That both converge towards
 the same residual-certified reference validates the two formulations against
 each other. The substantive difference lies elsewhere: semi-discretization
 requires the user to choose the number of steps per delay \emph{by hand},
-and an insufficient resolution returns a confidently wrong exponent with no
-warning, whereas the present method sets its own frequency steps, exposes
-the accuracy through the requested tolerance, and ships two independent
-consistency checks (the integer residual and the sign
-agreement~\eqref{eq:crosscheck}). The comparison is also intentionally
+and an insufficient resolution returns a wrong exponent without an internal
+indicator, whereas the present method sets its own frequency steps and
+exposes part of its accuracy through the integer residual and the
+consistency tests~\eqref{eq:crosscheck} and~\eqref{eq:parity} -- although it,
+too, has resolution parameters ($\wmax$, the tolerance) chosen by the user.
+Spectral collocation of the infinitesimal
+generator~\cite{breda2005pseudospectral,breda2009tracedde} converges
+spectrally rather than polynomially and is the stronger competitor for the
+dominant root of a small system; a quantitative comparison with it is left
+for future work. The comparison is also intentionally
 asymmetric in what the methods deliver: semi-discretization returns the full
 dominant multiplier cluster and extends unchanged to time-periodic systems,
 where the argument-principle formulation does not apply; the present method
@@ -340,7 +368,7 @@ order of magnitude slower than the adaptive default -- its worst error over
 the chart remains several roots, because a uniform grid cannot resolve a
 peak that narrows without bound as a root approaches the line. All adaptive
 methods follow their tolerance; higher-order pairs dominate at tight
-tolerances, and the linearly implicit pair is uniformly dominated -- there
-is no stiffness for it to exploit. The spread between the \emph{adaptive}
+tolerances, and the linearly implicit pair is dominated. The spread between
+the \emph{adaptive}
 methods is far smaller than the gap that separates all of them from a fixed
 grid, which is the practical message of this section.

@@ -6,6 +6,8 @@
 \usepackage{xcolor}
 \usepackage{lineno}
 \usepackage{hyperref}
+\usepackage{xurl}
+\usepackage[section]{placeins}
 \modulolinenumbers[5]
 
 \journal{Journal of Sound and Vibration}
@@ -106,7 +108,12 @@ equation \sep automatic differentiation \sep adaptive integration \sep phase unw
 \input{sections/07b_parallel.tex}
 \input{sections/08_conclusion.tex}
 
+% appendix equations continue the main numbering, so that (A.n) never clashes
+% with the hand-numbered case studies A.1--A.12
+\newcounter{maineq}\setcounter{maineq}{\value{equation}}
 \appendix
+\setcounter{equation}{\value{maineq}}
+\renewcommand{\theequation}{\arabic{equation}}
 \input{sections/appendix.tex}
 
 \bibliographystyle{elsarticle-num}

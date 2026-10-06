@@ -2,7 +2,7 @@
 
 \subsection{The winding integral as an ordinary differential equation}\label{sec:phaseode}
 
-The key step is disarmingly simple: instead of applying quadrature
+The key step is simple: instead of applying quadrature
 to~\eqref{eq:count}, the accumulated phase is treated as the state of the
 scalar initial value problem
 \begin{equation}\label{eq:phaseode}
@@ -113,7 +113,7 @@ functions of continua, where $\cosh\bigl(\sqrt{\lam^2+c\lam}\,L\bigr)$ grows
 like $\ee^{\lam L}$. The package detects this automatically (for a genuine
 power law the fitted slope is reproduced one window lower; for exponential
 growth it is not) and falls back to a fit along the imaginary axis, where
-such functions are bounded ($n\approx0$ for the beam of
+such functions are bounded ($n\approx0$ for the rod of
 Appendix~\ref{app:gallery}).
 
 The requested relative and absolute solver tolerances control the local
@@ -143,11 +143,16 @@ yield the real part of one Newton step towards the root,
 \end{equation}
 using $\dd\Dfun/\dd\lam=-\ii\,\Dfun'$, and the frequency of the minimum is
 stored as $\west$. The pair $(\sest,\west)$ is a first-order estimate of the
-dominant root location returned together with $\Zint$; its accuracy is
-highest exactly at the stability boundary, where the root lies on the line
-and the Newton step becomes exact up to the solver tolerance. Away from the
-boundary the estimate degrades gracefully, but there only its sign and
-magnitude matter -- as a smooth measure of the distance to instability.
+dominant root location returned together with $\Zint$. Its accuracy is
+highest near the stability boundary, where the root lies close to the line,
+provided a sample lands close to the minimum: a Newton step from a sample at a
+distance $\delta\omega$ from $\omega_r$ carries an error of order
+$|\Dfun_{\lam\lam}/\Dfun_\lam|\,\delta\omega^{2}$, so once the peak is far
+narrower than the local step, the estimate is limited by the step rather than
+by the distance of the root from the line (Table~\ref{tab:boundarystress}).
+Away from the boundary the estimate degrades gracefully, but there only its
+sign and magnitude matter -- as a smooth measure of the distance to
+instability.
 
 Several roots can be tracked simultaneously. A compile-time variant of the
 solver detects every local minimum of $|\Dfun|^{2}$ through the sign change
@@ -156,8 +161,7 @@ of its $\omega$-derivative, $2(\Real\Dfun\,\partial_\omega\Real\Dfun +
 candidates in a sorted, allocation-free buffer; a boundary test at
 $\omega=0$ captures real dominant roots, since $|\Dfun|^{2}$ is even in
 $\omega$. Tracking one root is the default and adds a few percent to the sweep
-time; tracking
-zero roots gives maximal sweep speed. One caveat deserves emphasis: the
+time; tracking zero roots gives maximal sweep speed. One caveat deserves emphasis: the
 \emph{deepest} minimum of $|\Dfun|$ belongs to the rightmost root near the
 stability boundary, but deeper inside the stable or unstable domains a
 different root branch may produce a deeper dip. When the true dominant root
@@ -175,7 +179,7 @@ inside each cell -- will read the jump as a zero crossing and place a
 spurious boundary point in the middle of the stable domain. The dominant root
 passes through a branch crossing smoothly, because it is a maximum over
 branches rather than the nearest one, so building the coloring and the
-boundary objective from it removes the artefact at its source. For the count
+boundary objective from it removes the artifact at its source. For the count
 itself the caveat is immaterial, since near the boundary the crossing root
 always produces the global minimum.
 
@@ -185,8 +189,10 @@ The raw tracked estimate $(\sest,\west)$ -- one Newton step off the minimum
 of $|\Dfun|$ -- is the method's \emph{default} root output, and deliberately
 so. It is first-order accurate, but it is the \emph{smoothest} field over a
 parameter chart (a single formula evaluated at every pixel), it is the
-cheapest, and its \emph{sign} -- all the stability classification needs -- is
-already correct. When an accurate rightmost root is wanted, the same automatic
+cheapest, and near the stability boundary, where the classification is
+decided, its sign is that of the rightmost root (away from it, the closest
+minimum may belong to a non-dominant branch, Section~\ref{sec:tracking}).
+When an accurate rightmost root is wanted, the same automatic
 derivatives drive an optional local polish. Writing the Taylor expansion at
 $\hat\lam=\sest+\ii\west$,
 \begin{equation}\label{eq:taylor}
@@ -205,15 +211,17 @@ derivative is exact (automatic differentiation); the higher derivatives are
 central differences of that exact first derivative, which avoids the
 compilation cost of nested dual numbers. Each polish is \emph{monotone}: it is
 accepted only if it lowers $|\Dfun|$ below the seed, otherwise the raw estimate
-is returned, so refinement can help but never degrade the estimate.
+is returned, so refinement never increases $|\Dfun|$ -- although, as discussed
+next, a lower $|\Dfun|$ can belong to a neighboring root.
 
 Which polish is best is genuinely system-dependent: on a smooth
 quasi-polynomial the Newton iteration reaches machine precision, but on a
-rational characteristic function, near the poles of the plant frequency
-response, a Newton step can settle on a neighbouring root and speckle an
+characteristic function with poles -- a return difference containing the
+plant frequency response -- a Newton step near the poles can settle on a
+neighboring root and speckle an
 otherwise smooth chart, where the Taylor polishes stay put. The combined
 mode is the robust choice -- lowest residual on every system tested -- at
-about $\RefCombOver\%$ over the raw solve; the trade-offs are measured in
+about $\RefCombOver\,\%$ over the raw solve; the trade-offs are measured in
 Section~\ref{sec:showcase-roots}. The practical guidance matches the design
 goal of a single, generally valid setting: leave refinement off for charts,
 turn it on when a specific rightmost root matters, and read a precise
@@ -231,8 +239,10 @@ The exact winding number is an integer, so
 \begin{equation}\label{eq:eps}
   \varepsilon = \bigl|\Zraw - \operatorname{round}(\Zraw)\bigr|
 \end{equation}
-is a rigorous, freely available indicator of the accumulated numerical
-error: it contains the local integration errors, the tail truncated at
+is a freely available a-posteriori indicator of the accumulated numerical
+error -- a necessary condition, not a certificate, since it is blind to a
+skipped peak (below): it contains the local integration errors, the tail
+truncated at
 $\wmax$, and the residual of the estimated order~\eqref{eq:npow}. (When a
 characteristic root lies on the integration line itself, no count is defined;
 the package then returns an invalid-count marker rather than a number.)
@@ -243,11 +253,12 @@ the accepted-step count, since the per-step error tolerance accumulates
 along the march -- hence the tolerance acts as a universal accuracy dial
 that transfers between systems without re-tuning. In the numerical
 experiments of Section~\ref{sec:showcase-tolerance}, $\varepsilon$ tracks
-the tolerance across six decades: at $10^{-2}$ the residual reaches order
-one and genuine miscounts appear -- the deliberate failure demonstration of
-Fig.~\ref{fig:errorfield} -- while $10^{-4}$ already keeps $\varepsilon$ an
-order of magnitude below the rounding threshold $1/2$ and produces reliable
-charts at near-maximal speed, and $10^{-8}$ yields reference-quality values
+the tolerance from $10^{-2}$ to $10^{-6}$ (Table~\ref{tab:tolerance}): at
+$10^{-2}$ the residual reaches order one and genuine miscounts appear -- the
+deliberate failure demonstration of Fig.~\ref{fig:errorfield} -- while
+$10^{-4}$ already keeps $\varepsilon$ an order of magnitude below the rounding
+threshold $1/2$ and leaves a single wrong count on a chart of $10^{4}$ points,
+and $10^{-8}$ yields reference-quality values
 at a moderate CPU-time premium; the package default $10^{-5}$ adds a further
 safety decade at little cost.
 
@@ -282,19 +293,39 @@ as close to an integer as before: $\varepsilon$ measures the
 Nor is this hypothetical: approaching a stability boundary the peak
 half-width $|\sigma_r-\sigma|$ collapses to many orders of magnitude below
 any practical step size (Table~\ref{tab:boundarystress}), and the marching
-solver then strides past it and reports success. No pointwise method is
-immune (Section~\ref{sec:performance-convergence}).
+solver then strides past it and reports success. No integration back-end is
+immune (Section~\ref{sec:performance-convergence}); the discrete march of
+Section~\ref{sec:unwrap}, which samples $\Dfun$ itself, rejects such steps
+by construction (Table~\ref{tab:unwrapstress}).
 
-What rescues the situation is the second output of the same sweep. The
-tracked root of Section~\ref{sec:tracking} is obtained from the minima of
-$|\Dfun|^{2}$, a mechanism entirely independent of the accumulated phase,
-and it remains accurate exactly where the peak is narrow -- that is, exactly
-where the count is fragile. The two therefore cross-validate each other: a
-skipped peak shows up as an \emph{inconsistency} between $\operatorname{sign}
-(\sest-\sigma)$ and the predicate $\Zint=0$; both quantities are standard
-outputs of every sweep, so the check costs one comparison.
+Two free tests detect a skipped peak. The first uses the second output of the
+same sweep. The tracked root of Section~\ref{sec:tracking} shares its samples
+with the count but not the accumulation: it does not need to resolve the peak,
+only to come close to its minimum, and its sign then usually identifies the
+side of the line on which the root lies even when its magnitude is limited by
+the step (Table~\ref{tab:boundarystress}) -- usually, not always: in a
+repetition of the boundary stress test on both sides of the boundary at two
+tolerances, the tracked root of the ODE march had the wrong sign at $5$ of the
+$13$ miscounted points (\code{data/unwrap\_checks}). A skipped peak therefore
+shows up as an
+\emph{inconsistency} between $\operatorname{sign}(\sest-\sigma)$ and the
+predicate $\Zint=0$; both quantities are standard outputs of every sweep, so
+the check costs one comparison. The second test is parity. For a
+real-coefficient system the complex roots right of the line come in conjugate
+pairs, so $\Zint$ has the parity of the number of real roots in
+$(\sigma,\infty)$, which is fixed by the signs of $\Dfun(\sigma)$ and of the
+leading coefficient $c$, both already known from the first sample and the
+real-axis probe~\eqref{eq:npow}:
+\begin{equation}\label{eq:parity}
+  \Zint \equiv \bigl[\operatorname{sign}\Dfun(\sigma)\neq\operatorname{sign}c\bigr]
+  \pmod 2 .
+\end{equation}
+A single skipped peak changes $\Zint$ by one and violates~\eqref{eq:parity};
+two skipped peaks do not. In the repeated stress test the parity rule caught
+all $13$ miscounts and fired on none of the correct counts. (The parity test was not applied to the charts of
+this paper; it costs one comparison and is a natural addition to the package.)
 
-The test must, however, be restricted to a neighbourhood of the line: far
+The root test must, however, be restricted to a neighborhood of the line: far
 from the boundary the tracked minimum need not belong to the \emph{dominant}
 root (Section~\ref{sec:tracking}), so the tracked root may disagree with
 $\Zint>0$ entirely legitimately -- applied blindly, the test fires on
@@ -357,8 +388,8 @@ traversal but drops the integration itself.
 \subsection{Discrete phase unwrapping: counting without integration}\label{sec:unwrap}
 
 The phase ODE~\eqref{eq:phaseode} integrates $\theta'$ only to obtain one
-number, the end value $y(\wmax)=\Phi(\wmax)-\Phi(0)$ of the continuous phase
-$\Phi(\omega)=\arg\Dfun(\sigma+\ii\omega)$. That number is available
+number, the end value $y(\wmax)=\theta(\wmax)-\theta(0)$ of the continuous
+phase $\theta(\omega)=\arg\Dfun(\sigma+\ii\omega)$. That number is available
 \emph{without} integration. Between two samples $\omega_a<\omega_b$ the phase
 increment is known exactly up to a multiple of $2\pi$,
 \begin{equation}\label{eq:dphase}
@@ -374,9 +405,19 @@ the counting formula~\eqref{eq:count} becomes the finite sum
 \end{equation}
 which is \emph{exact}: there is no integration error, only the requirement
 that no branch of the phase is lost. This is the classical phase-unwrapping
-problem, with one decisive advantage over its signal-processing namesake: the
-same dual-number evaluation that returns $\Dfun$ also returns the exact phase
-slope $\theta'=\Imag(\Dfun'/\Dfun)$ at every sample.
+problem. Adaptive unwrapping guided by the phase derivative goes back to
+Tribolet~\cite{tribolet1977new} for the phase of a polynomial on the unit
+circle, argument-principle root counting with adaptive sampling that keeps the
+phase increments below $\pi$ to Ying and Katz~\cite{ying1988reliable} (with a
+rigorous variant in~\cite{johnson2009enclosing}), and the counting of the
+roots of a delay system from sampled values of $\Dfun$ to
+St\'ep\'an~\cite{stepan1989retarded} and Hassard~\cite{hassard1997counting}.
+What is added here is the combination with exact slopes from automatic
+differentiation of an arbitrary user function, the in-stream root estimate,
+the decision of sub-resolution transitions by the side of that root, and a
+fixed-state formulation that runs as a GPU kernel: the same dual-number
+evaluation that returns $\Dfun$ also returns the exact phase slope
+$\theta'=\Imag(\Dfun'/\Dfun)$ at every sample.
 
 \paragraph{Adaptivity.} The slope makes the march adaptive in exactly the way
 an embedded Runge--Kutta pair is. A trial step $h=\omega_b-\omega_a$ evaluates
@@ -389,20 +430,32 @@ accepts the step if $e\le\mathrm{tol}$ (in radians; default $0.3$), and sets
 the next trial step to $h\cdot\min\{4,\max\{0.2,\,0.9(\mathrm{tol}/e)^{1/3}\}\}$,
 the exponent reflecting the $O(h^{3}\theta''')$ trapezoid error -- the standard
 step-size controller, with the exact increment in the role of the
-higher-order solution. On smooth stretches $e$ follows the curvature of the
-phase. Across an unresolved root transition -- a peak~\eqref{eq:peak} of width
+higher-order solution. Unlike the solver tolerance of
+Section~\ref{sec:phaseode}, this tolerance does not set the error of $\Zraw$
+-- the sum~\eqref{eq:unwrapcount} has none -- but is a safety margin against
+losing a branch, and it is far from critical (Appendix~\ref{app:unwrap}). On
+smooth stretches $e$ follows the curvature of the phase. Across an unresolved root transition -- a peak~\eqref{eq:peak} of width
 $|\sigma_r-\sigma|$ hidden inside the step -- the observed increment contains a
 jump of almost $\pm\pi$ that the end-point slopes do not predict, $e\approx\pi$,
 and the step is rejected and refined until the transition is resolved. In the
-tail, where $\Phi\approx n\pi/2$ plus a small ripple, $e\to0$ and the step
-grows geometrically, so the frequency axis is crossed in a logarithmic number
-of steps whatever $\wmax$ is. The delay-induced ripple, which keeps an
+tail of a retarded system, where $\theta$ approaches its limit up to a
+decaying ripple, $e\to0$ and the step grows geometrically, so the frequency
+axis is crossed in a logarithmic number of steps whatever $\wmax$ is. (For a
+neutral system the ripple does not decay; its phase slope is of order
+$\beta\tau$, the step stays near $\mathrm{tol}/(\beta\tau)$, and the cost grows
+linearly with $\wmax$ -- by one to three evaluations per unit of frequency on
+the neutral case studies -- so a neutral chart needs an explicit, moderate
+$\wmax$; with the windows of Appendix~\ref{app:gallery} ($200$--$500$) the
+discrete march reproduces every defined count of the three neutral panels at
+a median of $260$--$650$ evaluations per point, whereas the default
+$\wmax=10^{5}$ exhausts the step budget on about a third of the points.) The
+delay-induced ripple, which keeps an
 integrator busy for thousands of steps when a delayed term sits only one order
 below the leading power (Section~\ref{sec:phaseode}), becomes invisible as soon
 as its phase amplitude drops below the tolerance, because its contribution is
 contained \emph{exactly} in the end-point phase. Each step costs a single
 evaluation of $\Dfun$ (a \code{Vern9} step costs sixteen), and on the systems of
-this paper a point needs $30$--$130$ evaluations instead of
+this paper a median point needs $30$--$130$ evaluations instead of
 $10^{3}$--$10^{4}$ (Section~\ref{sec:performance-unwrap}). Automatic
 differentiation is still essential: the error estimate~\eqref{eq:uwerr} needs the
 exact slope, and the root tracking below needs $\Dfun'$.
@@ -414,13 +467,18 @@ $\partial_\omega|\Dfun|$ between its end points; it is located on the cubic
 Hermite interpolant of the complex function $\Dfun(\omega)$ built from $\Dfun$
 and $\Dfun'$ at both ends -- $\Dfun$ itself is smooth even where its phase is
 not -- and one Newton step~\eqref{eq:sigmaest} from the located minimum gives
-$(\sest,\west)$, under the same trust region as the refinement of
-Section~\ref{sec:refinement}. No additional evaluation of $\Dfun$ is spent.
+$(\sest,\west)$; the estimate is kept only if the Newton step stays within
+the step that contains the minimum. No additional evaluation of $\Dfun$ is
+spent. The minimum is detected through the sign change of
+$\partial_\omega|\Dfun|$ between the end points, so a step that contains a
+minimum and a neighboring maximum of $|\Dfun|$ hides the minimum; for a
+dominant root near the line the step is small and this does not happen.
 
 \paragraph{Below the resolution of the number format.} When a root lies so
-close to the line that its transition is narrower than the smallest
-representable step ($\approx8\,\epsilon_{\mathrm{mach}}\,\omega$), the step
-cannot be refined further and the observed increment is ambiguous near $\pm\pi$.
+close to the line that its transition is narrower than a floor of a few
+machine epsilons of the frequency ($h\le8\,\epsilon_{\mathrm{mach}}\max(\omega,1)$
+in the format in which the march runs), the step is not refined further and
+the observed increment is ambiguous near $\pm\pi$.
 The branch is then decided by the \emph{side} of the root: a root right of the
 line lowers the phase by $\pi$, one left of it raises it, and the side is the
 sign of the Newton estimate from the current sample -- the peak repair of
@@ -428,30 +486,41 @@ Section~\ref{sec:showcase-tolerance} at no cost. Such a count is a decision
 rather than a measurement, and the point is flagged. Since the sum
 \eqref{eq:unwrapcount} carries no integration error, the residual
 $\varepsilon$ of~\eqref{eq:eps} now contains only the truncated tail and the
-error of the order $n$: it is typically $10^{-7}$--$10^{-10}$, and a value above
-$1/4$ flags a root \emph{on} the line (e.g.\ $\Dfun(\sigma)=0$, $\Zraw=k+\tfrac12$).
+error of the order $n$: for retarded systems it is typically
+$10^{-7}$--$10^{-10}$, and a value above $1/4$ flags a real root \emph{on}
+the line ($\Dfun(\sigma)=0$, $\Zraw=k+\tfrac12$). A complex pair exactly on
+the line is not flagged -- the count is then undefined, and the march returns
+one of the adjacent values -- and for a neutral system the residual carries
+the bounded oscillation of Section~\ref{sec:counting}, which exceeds $1/4$
+for a neutral amplitude above about $0.7$, so that the flag is not usable for
+that class.
 
 \paragraph{Limitations.} An end-point test cannot see an increment of exactly
 $2\pi$: two transitions in the same direction inside one step escape it. Two
-situations produce them in practice. First, a \emph{rational} $\Dfun$ places a
-pole next to every lightly damped mode; when a root leaves that mode into the
-right half-plane, the pole--zero pair winds the phase by $-2\pi$ within a
-frequency interval of the size of the modal damping. Writing $\Dfun$ as an
-entire function -- multiplying out the (stable) denominators, which does not
-change the count in $\Real\lam>\sigma$ -- removes the pair. Second, a
+situations produced them on the benchmarks. First, a $\Dfun$ with poles -- a
+return difference $1+L(\lam)$ -- places a pole next to every lightly damped
+mode; when a root leaves that mode into the right half-plane, the pole--zero
+pair winds the phase by $-2\pi$ within a frequency interval of the size of the
+modal damping. Writing $\Dfun$ as an entire function -- multiplying out the
+(stable) denominators, which does not change the count in
+$\Real\lam>\sigma$ -- removes the pair. This reverses the advice of
+Section~\ref{sec:phaseode} for the return difference, whose $n=0$ and moderate
+magnitudes favor the phase ODE; for large models with a low-rank feedback a
+step cap near the known open-loop poles would keep both advantages. Second, a
 regenerative delay $\tau$ can place a chain of roots near the axis, spaced
 $\approx2\pi/\tau$ apart in frequency; capping the step at
 $h\le\pi/(2\tau_{\max})$ over the resonance band removes the ambiguity at a
-moderate cost. With these two rules the discrete march reproduces the
-reference counts on every point of the three benchmark charts, and near a
-Hopf boundary it is more robust than the phase ODE
-(Table~\ref{tab:unwrapstress}).
+moderate cost (for the turning model of Table~\ref{tab:unwrap},
+$h\le0.05$ for $\omega<5$). A third situation is generic though it did not
+occur on the benchmarks: two lightly damped roots right of the line within
+one step, as near a double-Hopf point of a multi-mode system; the band cap
+covers it only if it is below their frequency separation. The step test is
+therefore a strong safeguard rather than a proof. With these rules the
+discrete march reproduces the reference counts on every point of the three
+benchmark charts, and near a Hopf boundary it is more robust than the phase
+ODE (Table~\ref{tab:unwrapstress}).
 
-\paragraph{Fitness for parallel hardware.} The march consists of identical
-scalar steps on a small, fixed-size state, one evaluation each, with no
-allocation and no solver infrastructure. It therefore maps directly onto a GPU
-kernel with one thread per parameter point, and even onto narrow number
-formats for the evaluation of $\Dfun$, since only the \emph{phase} of $\Dfun$
-matters and the tolerance of~\eqref{eq:uwerr} is a fraction of a radian
-(Section~\ref{sec:parallel}). The algorithm and its parameters are
-listed in Appendix~\ref{app:unwrap}.
+\paragraph{Parallel hardware.} The march is a loop of identical scalar steps
+on a fixed-size state, one evaluation each, with no allocation; its execution
+on CPUs and GPUs is analyzed in Section~\ref{sec:parallel}, and the algorithm
+and its parameters are listed in Appendix~\ref{app:unwrap}.

@@ -23,7 +23,8 @@ argument is replaced by the \emph{mock exponential history}
 Whatever delayed value $\vect h(\vect p, t-\tau_j)$ the model requests
 contributes the factor $\ee^{-\lam\tau_j}$ automatically, so discrete,
 multiple, and (approximated) distributed delays are all captured without
-declaring them. Evaluating $\vect f$ at $t=0$ and collecting the dual
+declaring them; delayed \emph{derivatives}, i.e.\ neutral right-hand sides,
+are not yet supported by the extraction. Evaluating $\vect f$ at $t=0$ and collecting the dual
 partial derivatives of the residual
 \begin{equation}\label{eq:extraction}
   \vect r = \lam\,\mat E\,\vect a - \vect f\bigl(\vect u_{\mathrm{eq}}
@@ -100,7 +101,8 @@ exists only as a simulation right-hand side -- the normal situation early in
 a design study -- the extracted form gives a correct chart in a minute with
 no derivation whatsoever. If the same chart is to be refreshed interactively
 or recomputed inside an optimization loop, the algebra is worth doing once:
-the hand-derived form turns the same chart into a sub-second one. The
+the hand-derived form makes the same chart about $\ExtractRatio$ times faster
+($\ExtractHandT$ instead of $\ExtractAutoT$). The
 recommended workflow is exactly that order -- explore with the extracted
 form, derive $\Dfun$ by hand once the model has settled and speed starts to
 matter. All figures in this paper use the hand-derived form, having first
