@@ -254,8 +254,13 @@ moderate $\wmax$ (Section~\ref{sec:unwrap}); in the package it is selected
 explicitly (\code{calculate\_unstable\_roots\_unwrap}), while the ODE march
 remains the default. The ODE march is kept for what it does better: the
 convergence-controlled integer residual of Section~\ref{sec:integerness} as
-an independent check, and characteristic functions with poles whose
-denominators cannot be cleared conveniently. All the timings of
+an independent check, characteristic functions with poles whose
+denominators cannot be cleared (the normalization pole of order $198$ of the
+vehicle ring in Appendix~\ref{app:gallery}), and densely packed lightly
+damped modes (the $50\times50$ determinant, A.10). With these exceptions the
+charts of the showcase and of nine gallery panels are now computed with the
+discrete march, $6$ to $150$ times faster than with the phase ODE on the same
+machine (\code{data/gallery\_timings.csv}). All the timings of
 Sections~\ref{sec:performance-convergence}--\ref{sec:performance-cost} were
 measured with the integration back-ends, on an earlier machine; their
 \emph{ratios} remain valid, but the absolute chart times of

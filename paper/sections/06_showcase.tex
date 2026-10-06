@@ -15,7 +15,11 @@ with a singular mass matrix.
   with delayed PD control. Colored background: combined
   field~\eqref{eq:coloring} of the brute-force sweep (smooth stability margin
   $\sest$ inside the stable domain, integer number of unstable roots
-  outside). Black curve: stability boundary traced by MDBM with the scalar
+  outside), computed with the discrete march of Section~\ref{sec:unwrap}:
+  $18$\,ms for the $90\times70$ grid on an Intel i5-10400 (twelve threads),
+  against $1.5$\,s with the phase ODE, with identical counts apart from one
+  point that the phase ODE miscounts (\code{data/unwrap\_check\_s01.csv}).
+  Black curve: stability boundary traced by MDBM (phase ODE) with the scalar
   objective~\eqref{eq:objective}. Red ellipse and star: largest inscribed
   ellipse and the most robust parameter point. The markers S and U denote
   the stable and unstable points analyzed in
@@ -299,7 +303,8 @@ recipe of Section~\ref{sec:performance-sd} exploits.
   \centering
   \maybefig{fig_sigma_contours}{0.72\linewidth}
   \caption{Decay-rate map of the showcase system: colored background --
-  estimated decay rate $\sest$ from the coarse sweep (stable domain only);
+  estimated decay rate $\sest$ from the coarse sweep of Fig.~\ref{fig:showcase}
+  (discrete march; stable domain only);
   curves -- $\gamma$-stability boundaries traced by MDBM for a
   family of shifted lines $\Real\lam=\sigma$. The two independent
   computations delineate the same landscape.}\label{fig:sigmacontours}

@@ -274,12 +274,13 @@ precondition: the \emph{convergence of the tail}. $\Zraw$ is only
 \emph{expected} to be an integer when the truncated remainder
 $\int_{\wmax}^{\infty}$ is negligible. For retarded systems it is, and
 $\varepsilon$ behaves as described: across the retarded case studies of
-Appendix~\ref{app:gallery} the median residual is $\sim10^{-4}$ and
-essentially no grid point is uncertain. For \emph{neutral} systems the
+Appendix~\ref{app:gallery} the median residual of the phase ODE at the chart
+tolerance $10^{-4}$ is $\sim10^{-4}$ and essentially no grid point is
+uncertain. For \emph{neutral} systems the
 integrand does not decay at all: the tail contributes an oscillation bounded
 by $\arcsin(\beta)/\pi$ rather than a vanishing remainder
 (Section~\ref{sec:counting}), and the residual inherits it -- on the neutral
-panels of Appendix~\ref{app:gallery} the median residual is $\approx0.1$,
+panels of Appendix~\ref{app:gallery} the median residual is $0.07$--$0.15$,
 with the counts nevertheless correct. For that class $\varepsilon$ is
 \emph{not} a usable self-check; what protects the count is the analytic
 bound $\arcsin(\beta)/\pi<1/2$ instead, and enlarging $\wmax$ does not help,
@@ -515,10 +516,19 @@ $h\le0.05$ for $\omega<5$). A third situation is generic though it did not
 occur on the benchmarks: two lightly damped roots right of the line within
 one step, as near a double-Hopf point of a multi-mode system; the band cap
 covers it only if it is below their frequency separation. The step test is
-therefore a strong safeguard rather than a proof. With these rules the
-discrete march reproduces the reference counts on every point of the three
-benchmark charts, and near a Hopf boundary it is more robust than the phase
-ODE (Table~\ref{tab:unwrapstress}).
+therefore a strong safeguard rather than a proof: on the $50\times50$
+determinant of Appendix~\ref{app:gallery} (A.10), with fifty lightly damped
+modes packed into one decade of frequency, no setting removed all miscounts.
+With these rules the discrete march reproduces the reference counts on every
+point of the three benchmark charts and of nine gallery panels and the
+showcase (Appendix~\ref{app:gallery}), apart from points with a root exactly
+on the line, and near a Hopf boundary it is more robust than the phase ODE
+(Table~\ref{tab:unwrapstress}). Where a parameter-independent, stable
+denominator cannot be cleared conveniently -- $\cosh\gamma$ of a continuum,
+$\det\mat Q_0$ of a finite element model -- its phase can be measured once
+along the line and used as an effective order,
+$n_{\mathrm{eff}}=2\Phi_{\mathrm{den}}(\wmax)/\pi$, while the march counts
+the entire numerator (A.8, A.9).
 
 \paragraph{Parallel hardware.} The march is a loop of identical scalar steps
 on a fixed-size state, one evaluation each, with no allocation; its execution
