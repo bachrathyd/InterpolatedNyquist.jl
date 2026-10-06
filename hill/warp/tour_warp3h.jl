@@ -6,6 +6,7 @@
 # the full chart at every pixel). Formats F32, F16 (D in Float16, march in Float32), F16+ (flagged
 # points again in Float32 by the warp kernel).
 #   julia --project=gpu/scripts hill/warp/tour_warp3h.jl [--res 1920x1080] [--check 192x108] [--adaptive yes] [--csv out.csv]
+#         [--maxregs 0 (= no cap)] [--wpb 1 (warps per block)]
 const REPO = get(ENV, "NGPU_REPO", normpath(joinpath(@__DIR__, "..", "..")))   # the repository root
 include(joinpath(REPO, "hill", "gpu_tour_milling.jl"))     # MODELS, plan_for, counts, fmt_types (no run)
 include(joinpath(@__DIR__, "warp3h.jl"))
@@ -70,6 +71,9 @@ end
 if abspath(PROGRAM_FILE) == @__FILE__
     print_device()
     ON_GPU || error("needs a CUDA GPU")
+    mr = parse(Int, arg("maxregs", "0")); wpb = parse(Int, arg("wpb", "1"))
+    WARP3H_KW[] = (maxregs = mr > 0 ? mr : nothing, warps_per_block = wpb)
+    (mr > 0 || wpb != 1) && println("launch options: ", WARP3H_KW[])
     tour_warp3h(; res = parse_res(arg("res", "1920x1080")), chk = parse_res(arg("check", "192x108")),
                 csv = arg("csv", nothing), adaptive = arg("adaptive", "yes") == "yes")
 end

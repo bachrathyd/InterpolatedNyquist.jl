@@ -59,29 +59,39 @@ function k_warp3h!(Zr, Sg, Om, St, Fl, Rh, D, c, Pts, idx, n, mp, meth, nr, ws, 
     return nothing
 end
 
-# one class instance over idx[1:n] (idx: device vector of Int32 point indices)
+# default launch options (e.g. tour_warp3h.jl --maxregs): warps_per_sm, warps_per_block, maxregs
+const WARP3H_KW = Ref{Any}((;))
+
+# one class instance over idx[1:n] (idx: device vector of Int32 point indices). The persistent grid
+# is one wave: the resident blocks per SM from the occupancy API (registers AND shared memory; at 255
+# registers per thread the registers allow 8 warps per SM, fewer than the shared memory of the small
+# classes). maxregs caps the registers (ptxas --maxrregcount): more resident warps, more spills.
 function warp3h_launch!(p::NyquistGPU.SweepPlan{T, N}, c, idx, n::Integer, ns::Integer;
-                        warps_per_sm = nothing, warps_per_block = 1) where {T, N}
+                        warps_per_sm = get(WARP3H_KW[], :warps_per_sm, nothing),
+                        warps_per_block = get(WARP3H_KW[], :warps_per_block, 1),
+                        maxregs = get(WARP3H_KW[], :maxregs, nothing)) where {T, N}
     n == 0 && return p
     (p.mp.newton == 0 && p.mp.bisect == 0) || error("run_warp3h!: no refinement / certification")
     d = warp3h_dims(c, ns)
     dev = CUDA.device()
     sms = CUDA.attribute(dev, CUDA.DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT)
-    shm = CUDA.attribute(dev, CUDA.DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_MULTIPROCESSOR)
-    wpsm = something(warps_per_sm, clamp(floor(Int, 0.95shm / warp3h_shared_bytes(d, T)), 1, 32))
-    W = min(sms * wpsm, n)
     wl = mill3w_wslen(Tuple(c))
-    ws = CUDA.zeros(Complex{T}, W * wl)
     cT = NyquistGPU.conv_consts(T, Tuple(c))
     D = NyquistGPU.CharFn(W3h())
     shmem = warp3h_shared_bytes(d, T) * warps_per_block
-    args = (p.Zraw, p.sigma, p.omega, p.steps, p.flags, p.rho, D, cT, p.points, idx, Int32(n), p.mp,
+    args(ws) = (p.Zraw, p.sigma, p.omega, p.steps, p.flags, p.rho, D, cT, p.points, idx, Int32(n), p.mp,
         Val(p.method), Val(N), ws, Int32(wl), Val(:none), Int32(d.ldx), Int32(d.nx), Int32(d.ldr),
         Int32(d.nn), Val(warps_per_block))
-    k = @cuda launch = false always_inline = true k_warp3h!(args...)
+    ws0 = CUDA.zeros(Complex{T}, wl)                      # compile with a one-warp slot (same types)
+    k = @cuda launch = false always_inline = true maxregs = maxregs k_warp3h!(args(ws0)...)
     shmem > 48 * 1024 && (CUDA.attributes(k.fun)[CUDA.FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES] = shmem)
-    k(args...; threads = 32 * warps_per_block, blocks = cld(W, warps_per_block), shmem = shmem)
+    bps = CUDA.active_blocks(k.fun, 32 * warps_per_block; shmem = shmem)
+    wpsm = something(warps_per_sm, max(bps, 1) * warps_per_block)
+    W = min(sms * wpsm, n)
+    ws = CUDA.zeros(Complex{T}, W * wl)
+    k(args(ws)...; threads = 32 * warps_per_block, blocks = cld(W, warps_per_block), shmem = shmem)
     CUDA.unsafe_free!(ws)
+    CUDA.unsafe_free!(ws0)
     return p
 end
 
