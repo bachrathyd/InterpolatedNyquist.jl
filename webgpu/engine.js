@@ -37,7 +37,7 @@ export class Engine {
     });
     const info = adapter.info || (adapter.requestAdapterInfo ? await adapter.requestAdapterInfo() : {});
     const fetchText = async (u) => {
-      const r = await fetch(u);
+      const r = await fetch(u, { cache: 'no-cache' });      // revalidate: shaders change with the page
       if (!r.ok) throw new Error(`cannot load ${u} (${r.status})`);
       return r.text();
     };
@@ -91,16 +91,25 @@ export class Engine {
     return [i.vendor, i.architecture, i.device, i.description].filter((s) => s).join(' ') || 'unknown GPU';
   }
 
-  async pipeline(ex) {
-    if (this.pipelines.has(ex.key)) return this.pipelines.get(ex.key);
-    const code = this.marchSrc.replace('//#CHARD#', ex.wgsl);
-    const module = this.device.createShaderModule({ code, label: 'march:' + ex.key });
+  /** compute pipeline of an example; exact: the 'exact root' variant (EXACT = true in march.wgsl) */
+  async pipeline(ex, exact = false) {
+    const key = ex.key + (exact ? '#exact' : '');
+    if (this.pipelines.has(key)) return this.pipelines.get(key);
+    let code = this.marchSrc.replace('//#CHARD#', ex.wgsl);
+    const sw = (name) => {
+      const flag = `const ${name}: bool = false;`;
+      if (!code.includes(flag)) throw new Error(`march.wgsl: ${name} switch not found`);
+      code = code.replace(flag, `const ${name}: bool = true;`);
+    };
+    if (exact) sw('EXACT');
+    if (ex.branch0) sw('BRANCH0');
+    const module = this.device.createShaderModule({ code, label: 'march:' + key });
     const ci = await module.getCompilationInfo();
     const errs = ci.messages.filter((m) => m.type === 'error');
     if (errs.length) throw new Error('WGSL compile error (' + ex.key + '): ' + errs.map((m) => `line ${m.lineNum}: ${m.message}`).join('; '));
-    const p = await this.device.createComputePipelineAsync({ layout: 'auto', compute: { module, entryPoint: 'main' }, label: ex.key });
+    const p = await this.device.createComputePipelineAsync({ layout: 'auto', compute: { module, entryPoint: 'main' }, label: key });
     const entry = { pipeline: p, bgCache: new WeakMap() };
-    this.pipelines.set(ex.key, entry);
+    this.pipelines.set(key, entry);
     return entry;
   }
 
@@ -130,14 +139,15 @@ export class Engine {
     f[2] = yr[0]; f[3] = ny > 1 ? (yr[1] - yr[0]) / (ny - 1) : 0;
     u[4] = nx; u[5] = ny; u[6] = row0; u[7] = rows;
     f[8] = m.w0; f[9] = m.wmax; f[10] = m.h0; f[11] = m.tol;
-    f[12] = m.hrel; f[13] = Number.isFinite(m.hmax) ? m.hmax : BIG; f[14] = m.wband; f[15] = job.npow;
+    const fin = (v) => (Number.isFinite(v) ? v : BIG);       // WGSL does not promise IEEE infinities
+    f[12] = m.hrel; f[13] = fin(m.hmax); f[14] = fin(m.wband); f[15] = job.npow;
     f[16] = m.qtrust; f[17] = m.growmax; u[18] = m.maxsteps; f[19] = m.sigma;
     for (let i = 0; i < 8; i++) f[20 + i] = i < job.c.length ? job.c[i] : 0;
     this.device.queue.writeBuffer(this.paramBuf, 0, b);
   }
 
   /**
-   * Compute one chart.  job = { ex, c, npow, nx, ny, xr, yr, march }
+   * Compute one chart.  job = { ex, c, npow, nx, ny, xr, yr, march, exact }
    * opts = { targetMs, onBand(rowlo, frac), isCancelled() }
    * -> { gpuMs, wallMs, bands, npts, tsUsed, cancelled }
    */
@@ -145,7 +155,7 @@ export class Engine {
     const dev = this.device;
     const { nx, ny } = job;
     const fresh = this.ensureBuffers(nx, ny);
-    const { pipeline, bgCache } = await this.pipeline(job.ex);
+    const { pipeline, bgCache } = await this.pipeline(job.ex, !!job.exact);
     let bg = bgCache.get(this.resBuf);
     if (!bg) {
       bg = dev.createBindGroup({

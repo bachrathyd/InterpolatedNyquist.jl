@@ -48,6 +48,9 @@
   .buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
   details summary { cursor: pointer; color: var(--muted); font-size: 13px; margin: 4px 0 8px; }
   .formula { font-size: 12.5px; color: var(--muted); margin: -2px 0 10px; }
+  .note { font-size: 12px; color: var(--muted); margin: -4px 0 12px; padding-left: 8px; border-left: 2px solid var(--line); }
+  optgroup { font-style: normal; font-weight: 600; }
+  #marchInfo { font-size: 12px; color: var(--muted); margin-top: 6px; font-variant-numeric: tabular-nums; }
   .figure { min-width: 0; }
   .plotwrap { position: relative; padding: 8px 12px 40px 58px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
   #chart { display: block; width: 100%; height: auto; image-rendering: auto; background: var(--plot-bg); cursor: crosshair; touch-action: none; }
@@ -92,6 +95,7 @@
       <h2>Model</h2>
       <label class="row"><span><b>Example</b></span><select id="example"></select></label>
       <div class="formula" id="formula"></div>
+      <div class="note" id="note"></div>
       <div id="knobs"></div>
       <details>
         <summary>All constants</summary>
@@ -102,6 +106,7 @@
       <h2>Chart</h2>
       <label class="row"><span><b>Resolution</b></span>
         <select id="res">
+          <option value="320x180">320 × 180 (0.06 Mpts)</option>
           <option value="480x270">480 × 270 (0.13 Mpts)</option>
           <option value="960x540" selected>960 × 540 (0.52 Mpts)</option>
           <option value="1920x1080">1920 × 1080 (2.07 Mpts)</option>
@@ -117,14 +122,16 @@
     </div>
     <div class="panel">
       <h2>Display and march</h2>
+      <label class="check" title="Track the 8 deepest |D| minima, polish each by damped Newton steps in the complex plane and colour by the largest real part (about 1.5-2x the cost)"><input type="checkbox" id="exact"> <span><b>Exact root (refined)</b>: Newton-polished dominant root</span></label>
       <label class="check"><input type="checkbox" id="live" checked> Recompute while dragging sliders</label>
       <label class="check"><input type="checkbox" id="bnd" checked> White stability boundaries</label>
       <label class="check"><input type="checkbox" id="flags"> Tint flagged points (magenta)</label>
       <div class="grid2">
         <label class="row"><span><b>σ colour floor</b></span><input type="number" id="smin" step="0.05"></label>
         <label class="row"><span><b>ω<sub>max</sub></b></span>
-          <select id="wmax"><option value="1000">1e3</option><option value="10000">1e4</option><option value="100000" selected>1e5</option></select></label>
+          <select id="wmax"></select></label>
       </div>
+      <div id="marchInfo"></div>
       <div class="buttons">
         <button class="primary" id="render">Compute</button>
         <button id="bench">Benchmark ×5</button>
@@ -160,8 +167,10 @@
 <footer>
   Each point marches λ = iω, ω ∈ [10⁻⁹, ω<sub>max</sub>], unwrapping arg D with one evaluation of D and dD/dω (complex dual numbers) per step and
   step control from the trapezoid phase prediction; Z = n/2 − Δarg D/π counts the roots with Re λ &gt; 0, and the deepest |D| minima
-  give first-order estimates of the roots near the axis (σ = the rightmost). Large charts run as several row bands so no single GPU
-  submission is long. <a href="?validate=1">Validation against the Julia engine</a> · <a href="?bench=1">Full-HD benchmark</a>
+  give first-order estimates of the roots near the axis (σ = the rightmost; with "exact root" the tracked minima are polished by
+  Newton steps in the complex plane). Large charts run as several row bands so no single GPU submission is long.
+  The examples are the case studies of the paper's appendix (A.1–A.12) that run in real time.
+  <a href="?validate=1">Validation against the Julia engine</a> · <a href="?bench=1">Benchmark</a> · <a href="?bench=hd">Full-HD benchmark</a>
 </footer>
 <script type="module" src="app.js"></script>
 </body>
