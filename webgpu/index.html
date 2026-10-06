@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NyquistGPU WebGPU</title>
+<meta name="description" content="Stability charts of delay-differential models computed on your own GPU with WebGPU: a Float32 port of the NyquistGPU phase-unwrapping march (InterpolatedNyquist.jl).">
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #ffffff; --ink: #1d2230; --muted: #5d6475; --line: #dfe2e8;
+    --accent: #2f6fdb; --accent-ink: #ffffff; --chip: #eef1f6; --warn: #b4441c; --ok: #1e7b45;
+    --plot-bg: #111318;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #121418; --panel: #1b1e24; --ink: #e6e8ee; --muted: #9aa1b2; --line: #2c313b;
+      --accent: #5b93f0; --accent-ink: #0d1117; --chip: #252a33; --warn: #f08a5d; --ok: #5fcf8d;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #121418; --panel: #1b1e24; --ink: #e6e8ee; --muted: #9aa1b2; --line: #2c313b;
+    --accent: #5b93f0; --accent-ink: #0d1117; --chip: #252a33; --warn: #f08a5d; --ok: #5fcf8d;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { padding: 14px 20px 10px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { margin: 0; font-size: 18px; font-weight: 650; }
+  header .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  #device { font-variant-numeric: tabular-nums; }
+  main { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 16px; padding: 16px 20px; max-width: 1700px; }
+  @media (max-width: 860px) { main { grid-template-columns: minmax(0, 1fr); padding: 12px 16px; } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+  aside .panel + .panel { margin-top: 12px; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 10px; font-weight: 600; }
+  label.row { display: block; margin: 0 0 10px; }
+  label.row > span { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; margin-bottom: 4px; }
+  label.row > span b { font-weight: 500; }
+  label.row > span output, .num { font-variant-numeric: tabular-nums; color: var(--muted); }
+  select, input[type=number], input[type=text] { width: 100%; min-width: 0; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px;
+    background: var(--bg); color: var(--ink); font: inherit; }
+  input[type=range] { width: 100%; margin: 2px 0; accent-color: var(--accent); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .check { display: flex; align-items: center; gap: 8px; margin: 6px 0; font-size: 13px; }
+  button { font: inherit; padding: 7px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--chip); color: var(--ink); cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  button:disabled { opacity: .5; cursor: default; }
+  .buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 13px; margin: 4px 0 8px; }
+  .formula { font-size: 12.5px; color: var(--muted); margin: -2px 0 10px; }
+  .note { font-size: 12px; color: var(--muted); margin: -4px 0 12px; padding-left: 8px; border-left: 2px solid var(--line); }
+  optgroup { font-style: normal; font-weight: 600; }
+  #marchInfo { font-size: 12px; color: var(--muted); margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .figure { min-width: 0; }
+  .plotwrap { position: relative; padding: 8px 12px 40px 58px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+  #chart { display: block; width: 100%; height: auto; image-rendering: auto; background: var(--plot-bg); cursor: crosshair; touch-action: none; }
+  #axes { position: absolute; inset: 0; pointer-events: none; }
+  #progress { position: absolute; left: 58px; right: 12px; top: 8px; height: 3px; background: transparent; }
+  #progress div { height: 100%; width: 0; background: var(--accent); transition: width .08s linear; }
+  .legend { display: flex; flex-wrap: wrap; gap: 14px 22px; align-items: center; margin: 10px 2px 0; font-size: 12.5px; color: var(--muted); }
+  .legend .bar { width: 160px; height: 10px; border-radius: 2px;
+    background: linear-gradient(90deg, #440154, #472c7a, #3b518b, #2c718e, #21908d, #27ad81, #5cc863, #aadc32, #fde725); }
+  .legend .sw { display: inline-block; width: 14px; height: 10px; border-radius: 2px; vertical-align: -1px; margin-right: 2px; }
+  .lg { display: flex; align-items: center; gap: 6px; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin-top: 12px; }
+  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+  .stat .k { font-size: 11.5px; color: var(--muted); }
+  .stat .v { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .stat .v small { font-size: 12px; font-weight: 400; color: var(--muted); }
+  #hover { margin-top: 8px; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; min-height: 1.4em; }
+  #msg { margin: 0 0 12px; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--warn); color: var(--warn); display: none; }
+  #log { font: 12px/1.4 ui-monospace, Consolas, monospace; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 10px; }
+  #report { margin-top: 14px; }
+  #report table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; font-size: 13px; }
+  #report th, #report td { text-align: right; padding: 5px 8px; border-bottom: 1px solid var(--line); }
+  #report th:first-child, #report td:first-child { text-align: left; }
+  #report .pass { color: var(--ok); font-weight: 600; }
+  #report .fail { color: var(--warn); font-weight: 600; }
+  .diffs { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; }
+  .diffs figure { margin: 0; font-size: 12px; color: var(--muted); }
+  .diffs canvas { width: 320px; max-width: 100%; image-rendering: pixelated; border: 1px solid var(--line); display: block; }
+  footer { padding: 4px 20px 24px; color: var(--muted); font-size: 12.5px; max-width: 1700px; }
+  footer a { color: var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1>NyquistGPU in the browser: stability charts on your GPU</h1>
+  <div class="sub">Float32 WebGPU port of the <code>:unwrap</code> argument-principle march of InterpolatedNyquist.jl / NyquistGPU. One GPU thread per chart point. <span id="device">Starting WebGPU...</span></div>
+</header>
+<main>
+  <aside>
+    <div id="msg"></div>
+    <div class="panel">
+      <h2>Model</h2>
+      <label class="row"><span><b>Example</b></span><select id="example"></select></label>
+      <div class="formula" id="formula"></div>
+      <div class="note" id="note"></div>
+      <div id="knobs"></div>
+      <details>
+        <summary>All constants</summary>
+        <div id="consts" class="grid2"></div>
+      </details>
+    </div>
+    <div class="panel">
+      <h2>Chart</h2>
+      <label class="row"><span><b>Resolution</b></span>
+        <select id="res">
+          <option value="320x180">320 × 180 (0.06 Mpts)</option>
+          <option value="480x270">480 × 270 (0.13 Mpts)</option>
+          <option value="960x540" selected>960 × 540 (0.52 Mpts)</option>
+          <option value="1920x1080">1920 × 1080 (2.07 Mpts)</option>
+        </select></label>
+      <div class="grid2">
+        <label class="row"><span><b id="xlab">x</b> min</span><input type="number" id="x0" step="any"></label>
+        <label class="row"><span><b id="xlab2">x</b> max</span><input type="number" id="x1" step="any"></label>
+        <label class="row"><span><b id="ylab">y</b> min</span><input type="number" id="y0" step="any"></label>
+        <label class="row"><span><b id="ylab2">y</b> max</span><input type="number" id="y1" step="any"></label>
+      </div>
+      <div class="buttons"><button id="resetAxes">Reset axes</button></div>
+      <div class="formula" style="margin-top:8px">Drag on the chart to zoom, double-click to reset.</div>
+    </div>
+    <div class="panel">
+      <h2>Display and march</h2>
+      <label class="check" title="Track the 8 deepest |D| minima, polish each by damped Newton steps in the complex plane and colour by the largest real part (about 1.5-2x the cost)"><input type="checkbox" id="exact"> <span><b>Exact root (refined)</b>: Newton-polished dominant root</span></label>
+      <label class="check"><input type="checkbox" id="live" checked> Recompute while dragging sliders</label>
+      <label class="check"><input type="checkbox" id="bnd" checked> White stability boundaries</label>
+      <label class="check"><input type="checkbox" id="flags"> Tint flagged points (magenta)</label>
+      <div class="grid2">
+        <label class="row"><span><b>σ colour floor</b></span><input type="number" id="smin" step="0.05"></label>
+        <label class="row"><span><b>ω<sub>max</sub></b></span>
+          <select id="wmax"></select></label>
+      </div>
+      <div id="marchInfo"></div>
+      <div class="buttons">
+        <button class="primary" id="render">Compute</button>
+        <button id="bench">Benchmark ×5</button>
+        <button id="savePng">Save PNG</button>
+      </div>
+    </div>
+  </aside>
+  <section class="figure">
+    <div class="plotwrap" id="plotwrap">
+      <div id="progress"><div></div></div>
+      <canvas id="chart" width="960" height="540"></canvas>
+      <canvas id="axes"></canvas>
+    </div>
+    <div class="legend">
+      <span class="lg"><span class="bar"></span> <span>stable (Z = 0): σ of the rightmost root, <span id="sminLab">-0.6</span> … 0</span></span>
+      <span class="lg"><span class="sw" style="background:#fcbba1"></span><span class="sw" style="background:#fb6a4a"></span><span class="sw" style="background:#cb181d"></span><span class="sw" style="background:#67000d"></span> unstable, Z = 1 … 6+</span>
+      <span class="lg"><span class="sw" style="background:#fff;border:1px solid var(--line)"></span> boundary</span>
+      <span class="lg"><span class="sw" style="background:#808080"></span> failed march</span>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="k">GPU time / chart</div><div class="v" id="sGpu">–</div></div>
+      <div class="stat"><div class="k">throughput</div><div class="v" id="sMpts">–</div></div>
+      <div class="stat"><div class="k">wall time</div><div class="v" id="sWall">–</div></div>
+      <div class="stat"><div class="k">points · submissions</div><div class="v" id="sPts">–</div></div>
+      <div class="stat"><div class="k">D evaluations / point</div><div class="v" id="sSteps">–</div></div>
+      <div class="stat"><div class="k">stable · flagged</div><div class="v" id="sStable">–</div></div>
+    </div>
+    <div id="hover">Hover over the chart for the count Z and σ at a point.</div>
+    <div id="report"></div>
+    <div id="log"></div>
+  </section>
+</main>
+<footer>
+  Each point marches λ = iω, ω ∈ [10⁻⁹, ω<sub>max</sub>], unwrapping arg D with one evaluation of D and dD/dω (complex dual numbers) per step and
+  step control from the trapezoid phase prediction; Z = n/2 − Δarg D/π counts the roots with Re λ &gt; 0, and the deepest |D| minima
+  give first-order estimates of the roots near the axis (σ = the rightmost; with "exact root" the tracked minima are polished by
+  Newton steps in the complex plane). Large charts run as several row bands so no single GPU submission is long.
+  The examples are the case studies of the paper's appendix (A.1–A.12) that run in real time.
+  <a href="?validate=1">Validation against the Julia engine</a> · <a href="?bench=1">Benchmark</a> · <a href="?bench=hd">Full-HD benchmark</a>
+</footer>
+<script type="module" src="app.js"></script>
+</body>
+</html>
