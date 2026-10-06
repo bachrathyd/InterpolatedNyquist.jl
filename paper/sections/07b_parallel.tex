@@ -108,23 +108,23 @@ shows the consequence of the hardware design. Graphics-oriented cards (T4, L4,
 RTX PRO 6000) execute double-precision operations at $1/32$--$1/64$ of the
 single-precision rate, so their saturated Float64 time is $23$--$41$ times the
 Float32 time, whereas the A100, built for scientific computing, pays a factor of
-three. Since Float32 gives the same chart as Float64 point for point
-(Table~\ref{tab:gpu}), Float64 serves as a reference on the GPU rather than as
-a production format.
+three. Since the Float32 chart equals the Float64 chart except at a single
+flagged point of two million (Table~\ref{tab:gpu}), Float64 serves as a
+reference on the GPU rather than as a production format.
 
 \subsection{Real-time charts at 8K resolution}\label{sec:parallel-realtime}
 
 \begin{table}[tb]
   \centering
-  \caption{Full-HD brute-force charts ($1920\times1080\approx2.07\cdot10^{6}$
-  points, one GPU thread per point) of the fourth-order benchmark with the
-  discrete march on four NVIDIA GPUs (Google Colab): median kernel time in
-  milliseconds over ten repetitions. $\wmax=10^{5}$ is the production window;
-  $\wmax=15$ suffices for this model and is required by Float16, whose range
-  ends at $65504$; in the Float16 column $\Dfun$ is evaluated in Float16 on a
-  rescaled frequency axis while the march runs in Float32. Float64 and Float32
-  give identical charts; the last column is the Float16 throughput in million
-  points per second.}\label{tab:gpu}
+  \caption{Brute-force charts of the fourth-order benchmark with the discrete
+  march, one GPU thread per point, on four NVIDIA GPUs (Google Colab): median
+  kernel time in milliseconds (full HD, $1920\times1080\approx2.07\cdot10^{6}$
+  points, ten repetitions; 8K, $7680\times4320\approx3.3\cdot10^{7}$ points, five
+  repetitions). $\wmax=10^{5}$ is the production window; $\wmax=15$ suffices
+  for this model and is required by Float16, whose range ends at $65504$; in
+  the Float16 column $\Dfun$ is evaluated in Float16 on a rescaled frequency
+  axis while the march runs in Float32. The Float32 chart equals the Float64
+  chart except at one flagged, boundary-grazing point of the two million.}\label{tab:gpu}
   \maybeinput{tables/tab_gpu.tex}
 \end{table}
 
@@ -154,13 +154,16 @@ $\ParBestFullHDms$\,ms and an 8K chart $\ParBestEightKms$\,ms. The chart can
 therefore be recomputed \emph{while a slider is being moved}: the delay, a gain
 or a damping ratio is changed, and the complete chart -- here more than thirty
 million stability decisions with the rightmost root of each -- follows the
-motion of the hand without visible delay. Table~\ref{tab:gpu} gives the complete
-full-HD timings with the production settings; measured at 8K on the RTX PRO 6000,
-the kernel takes $\GpuEightKFthirtytwo$\,ms in Float32 and
-$\GpuEightKHybrid$\,ms with the Float16 evaluation and the Float32 re-check
-described below, which yields the same chart. A complete interactive frame --
-kernel, colouring and transfer of the display image -- adds a few milliseconds
-(\code{gpu/results/interactive\_G4.csv}).
+motion of the hand without visible delay. Table~\ref{tab:gpu} gives the
+measured timings with the production settings. With one thread per point and
+no thread limit -- the schedule of production runs, somewhat faster than the
+work queue used to control the thread count in Fig.~\ref{fig:parallel} -- the
+\GpuBest{} computes the full-HD chart in $\GpuBestFthirtytwo$\,ms and the 8K
+chart in $\GpuEightKFthirtytwo$\,ms in Float32; a slider loop that changes the
+delay for every frame and copies the complete result back to the host runs at
+$\GpuBestSlider$\,ms per frame in full HD. In an interactive application only
+the coloured display image needs to leave the device, which adds a few
+milliseconds per frame (\code{gpu/results/interactive\_G4.csv}).
 
 It must be stressed that these frame rates belong to the given problem. The
 cost per point is proportional to the cost of one evaluation of $\Dfun$ and to
@@ -177,15 +180,21 @@ GPU cores.
 \emph{phase} of $\Dfun$ to a fraction of a radian, the characteristic function
 can even be evaluated in half precision (Table~\ref{tab:precision}). Float16
 is accurate wherever no root is close to the line: after rescaling the
-frequency into its range it computes the chart up to several times faster than
-Float32 on cards with a fast half-precision path, with
-$\GpuFsixteenWrong\,\%$ wrong counts that are \emph{all} flagged, and
-$\GpuFsixteenFlagged\,\%$ flagged points in total. Re-checking the flagged
-points in Float32 restores the exact chart, and done in place on the device --
-gather the flagged points, march them in Float32, scatter the results back --
-the second pass is cheap. The gain depends on the system: for the lightly
-damped two-mode turning model a third of the points are flagged in Float16, and
-the hybrid is barely faster than Float32. BFloat16, with only seven mantissa
+frequency into its range it yields $\GpuFsixteenWrong\,\%$ wrong counts that
+are \emph{all} flagged, and $\GpuFsixteenFlagged\,\%$ flagged points in total;
+re-checking the flagged points in Float32 -- in place on the device: gather,
+march, scatter -- restores the exact chart. It does not, however, make the
+chart faster: with the kernel compiled as a single inlined loop, the Float16
+evaluation takes $\GpuBestFsixteen$\,ms against $\GpuBestFthirtytwoFifteen$\,ms in
+Float32 on the \GpuBest{} (Table~\ref{tab:gpu}), because the march is limited by
+the number of instructions issued, not by the width of the arithmetic, and the
+conversions between the formats cost as much as the narrower operations save.
+(An earlier version of the kernel, which passed the dual numbers through local
+memory, did run several times faster in Float16 -- the gain came from the
+smaller memory traffic, and disappeared once that traffic was removed.) Float32
+is therefore the production format on every card measured, and the value of the
+narrow formats lies in what they reveal about the method: how little precision
+the phase needs. BFloat16, with only seven mantissa
 bits, flags $14\,\%$ of the chart, and the 8-bit and 4-bit formats are useless
 for this purpose: with two or three mantissa bits even the \emph{parameters} of
 a chart are quantized to a handful of distinct values per octave, so that
