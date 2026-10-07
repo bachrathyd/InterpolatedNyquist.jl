@@ -12,7 +12,7 @@
 //   SHOW_PUBLIC_COUNTER  true: a small 'N visits' line in the footer, from the site's public
 //                        counter (needs 'allow public counter' in the GoatCounter settings)
 
-export const GOATCOUNTER = '';
+export const GOATCOUNTER = 'https://nyquistgpu.goatcounter.com/count';
 export const SHOW_PUBLIC_COUNTER = false;
 
 const queue = [];
