@@ -3,8 +3,10 @@
 // asynchronously and only these are sent: one page view (the path, never the query or the
 // hash -- a shared link's hash holds the equation), example/<key> when a built-in example is
 // opened, custom-equation once per distinct own or edited equation (a local hash decides what is
-// new; the text is never sent), the features used (3d-view, stl-export, copy-link, help-open,
-// exact-off: once per page session), the GPU vendor class and no-webgpu.
+// new; the text is never sent), shared-link-opened, the features used (once per page session:
+// 3d-view, 3d-view/<key> (per example), stl-export, copy-link, help-open, exact-off, zoom-pan,
+// time-limit-raised, fixed-resolution, watchdog-stop, parse-error, 3d-smooth-off, validate-run,
+// bench-run), the GPU vendor class and no-webgpu.
 //
 //   GOATCOUNTER          'https://<code>.goatcounter.com/count'   ('' = off)
 //   SHOW_PUBLIC_COUNTER  true: a small 'N visits' line in the footer, from the site's public

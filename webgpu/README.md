@@ -360,9 +360,12 @@ With `GOATCOUNTER` empty nothing is loaded or sent. When set, the page loads
 query or the hash, which holds a shared equation); `example/<key>` when a built-in example is
 opened (once per selection, not per slider move); `custom-equation` once per distinct own or
 edited equation of a session (after the text rested 5 s; decided by a local hash, the text is
-never sent); `3d-view`, `stl-export`, `copy-link`, `help-open`, `exact-off` (once per session);
+never sent); `shared-link-opened`; once per session: `3d-view`, `3d-view/<key>` (per example),
+`stl-export`, `copy-link`, `help-open`, `exact-off`, `zoom-pan`, `time-limit-raised` (> 5 s),
+`fixed-resolution`, `watchdog-stop`, `parse-error`, `3d-smooth-off`, `validate-run`, `bench-run`;
 `gpu/<intel|nvidia|amd|apple|qualcomm|arm|other>` and `no-webgpu`. No parameter values, no
-equation text, nothing typed. The Help overlay says so in one line.
+equation text, nothing typed. The Help overlay explains it, and a small-print line at the
+bottom of the page says that anonymous visit statistics are collected.
 
 ## Share it with colleagues
 
