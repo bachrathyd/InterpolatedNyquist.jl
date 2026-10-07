@@ -27,9 +27,26 @@
   header { padding: 14px 20px 10px; border-bottom: 1px solid var(--line); background: var(--panel); }
   header h1 { margin: 0; font-size: 18px; font-weight: 650; }
   header .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  #helpBtn { float: right; margin-left: 12px; background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  #helpBg { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55); z-index: 50; display: flex; align-items: flex-start; justify-content: center; padding: 4vh 16px; }
+  #helpBg[hidden] { display: none; }
+  #helpBox { position: relative; background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 12px; max-width: 720px; width: 100%;
+    max-height: 92vh; overflow-y: auto; padding: 18px 22px; font-size: 13.5px; line-height: 1.5; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35); }
+  #helpBox h2 { font-size: 17px; text-transform: none; letter-spacing: 0; color: var(--ink); margin: 0 0 6px; }
+  #helpBox h3 { font-size: 13px; margin: 14px 0 4px; color: var(--accent); }
+  #helpBox p, #helpBox ul { margin: 0; }
+  #helpBox ul { padding-left: 18px; }
+  #helpBox li { margin: 2px 0; }
+  #helpBox a { color: var(--accent); }
+  #helpClose { position: absolute; top: 10px; right: 12px; font-size: 18px; line-height: 1; padding: 4px 10px; }
   #device { font-variant-numeric: tabular-nums; }
-  main { display: grid; grid-template-columns: 350px minmax(0, 1fr); gap: 16px; padding: 16px 20px; max-width: 1700px; }
-  @media (max-width: 860px) { main { grid-template-columns: minmax(0, 1fr); padding: 12px 16px; } }
+  main { --side: 350px; display: grid; grid-template-columns: var(--side) 10px minmax(0, 1fr); gap: 0 6px; padding: 16px 20px; }
+  #split { cursor: col-resize; align-self: stretch; position: relative; touch-action: none; }
+  #split::after { content: ''; position: absolute; top: 0; bottom: 0; left: 4px; width: 2px; border-radius: 1px; background: var(--line); }
+  #split:hover::after, #split.drag::after { background: var(--accent); }
+  details.fold > summary { font-size: 12.5px; margin: 0 0 6px; }
+  details.fold[open] > summary { margin-bottom: 6px; }
+  @media (max-width: 860px) { main { grid-template-columns: minmax(0, 1fr); padding: 12px 16px; } #split { display: none; } }
   .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
   aside .panel + .panel { margin-top: 12px; }
   h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 10px; font-weight: 600; }
@@ -127,6 +144,7 @@
 </head>
 <body>
 <header>
+  <button id="helpBtn" title="How to use this page (also #help)">? Help</button>
   <h1>NyquistGPU in the browser: stability charts on your GPU</h1>
   <div class="sub">Float32 WebGPU port of the <code>:unwrap</code> argument-principle march of InterpolatedNyquist.jl / NyquistGPU. One GPU thread per chart point. <span id="device">Starting WebGPU...</span></div>
 </header>
@@ -136,12 +154,16 @@
     <div class="panel">
       <h2>Model</h2>
       <label class="row"><span><b>Example</b></span><select id="example"></select></label>
-      <div class="formula" id="formula"></div>
-      <div class="note" id="note"></div>
+      <details class="fold" id="about"><summary id="aboutSum">About this example</summary>
+        <div class="formula" id="formula"></div>
+        <div class="note" id="note"></div>
+      </details>
       <div class="eqbar"><label for="eq"><b>D(λ) =</b> <span class="muted" id="eqMod"></span></label>
         <span class="buttons tight"><button id="insLam" title="Insert λ at the cursor">λ</button><button id="view3d" hidden title="Switch this example between its 2D chart and the 3D view">3D</button><button id="resetEx" title="Restore this example's equation, parameters and settings">Reset</button></span></div>
       <textarea id="eq" rows="4" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" aria-describedby="eqHelp"></textarea>
+      <details class="fold"><summary>Syntax help</summary>
       <div class="help" id="eqHelp"><code>+ - * / ^</code>, <code>exp log sqrt sin cos tan sinh cosh tanh exprel pow(a,b)</code>, <code>integral(f, θ, a, b)</code> (distributed delays; exact for polynomial × <code>exp(c·θ)</code> kernels), <code>pi</code>, <code>i</code>, variable <code>λ</code> (or <code>lambda</code>). <code>P = 0:2</code> declares a parameter range (<code>P = 0:2 @ 0.5</code> with its value, <code>P = 0:0.01:2</code> with a step: the grid along an axis); <code>name = expr</code> is a helper and <code>name = 3</code> a fixed constant (no slider); the last line is D; <code>#</code> comments. Every other name is a parameter. Write <code>2*λ</code>, not <code>2λ</code>. Ctrl+Enter applies at once.</div>
+      </details>
       <div id="eqStatus" class="status"></div>
       <div class="phead"><b>Parameters</b><span>min · slider · max · X / Y / Z: axes (Z: 3D)</span></div>
       <div id="ptable"></div>
@@ -214,6 +236,7 @@
       <input type="text" id="linkOut" readonly hidden>
     </div>
   </aside>
+  <div id="split" role="separator" aria-orientation="vertical" title="Drag to resize the panels; double-click resets"></div>
   <section class="figure">
     <div class="plotwrap" id="plotwrap">
       <div id="progress"><div></div></div>
@@ -248,6 +271,50 @@
   compiled to WGSL like a typed equation.
   <a href="?validate=1">Validation against the Julia engine</a> · <a href="?bench=1">Benchmark</a> · <a href="?bench=hd">Full-HD benchmark</a> · <a href="?bench=compare">Generated vs hand-written WGSL</a>
 </footer>
+<div id="helpBg" hidden>
+  <div id="helpBox" role="dialog" aria-modal="true" aria-labelledby="helpTitle" tabindex="-1">
+    <button id="helpClose" aria-label="Close help">×</button>
+    <h2 id="helpTitle">How to use this page</h2>
+    <h3>What it is</h3>
+    <p>Real-time stability charts of linear time-delay systems, computed on your own GPU with WebGPU: every chart point counts the roots of the characteristic function D(λ) in the right half-plane (Z) by the argument principle and estimates the rightmost root σ. Needs Chrome or Edge 113+ (desktop); nothing is sent to a server.</p>
+    <h3>Equation</h3>
+    <ul>
+      <li>Type D(λ) as one expression in <code>λ</code> (or <code>lambda</code>; the λ button inserts it): <code>+ - * / ^</code>, <code>exp log sqrt sin cos tan sinh cosh tanh exprel pow</code>, <code>pi</code>, <code>i</code>. Write <code>2*λ</code>, not <code>2λ</code>.</li>
+      <li><code>name = expr</code> defines a helper, <code>name = 3</code> a fixed constant; the last line is D; <code>#</code> starts a comment.</li>
+      <li>Every other name is a parameter. Range lines: <code>P = 0:2</code>, <code>P = 0:0.01:2</code> (step = grid along an axis), <code>P = 0:2 @ 0.5</code> (default value).</li>
+      <li>Distributed delays: <code>integral(f, θ, a, b)</code>, exact for polynomial × exponential kernels.</li>
+      <li>Matrix models: expand the determinant into a scalar expression (no determinants or loops).</li>
+      <li>Neutral systems (the highest power of λ also multiplies a delay term): use a moderate ω<sub>max</sub> (200–500) and a step cap such as h<sub>max</sub> = <code>pi/(2*τ)</code> (Advanced).</li>
+    </ul>
+    <h3>Parameters and axes</h3>
+    <ul>
+      <li>Each parameter: value, min, slider, max. The <b>X</b> / <b>Y</b> buttons choose the chart axes (their min / max are the chart range); <b>Z</b> adds a third axis: the 3D view (also the "3D view" button of some examples).</li>
+      <li>Sliders recompute live; editing min / max rewrites the range line in the text.</li>
+    </ul>
+    <h3>Navigation</h3>
+    <ul>
+      <li>2D: wheel zooms at the cursor, middle-drag pans, left-drag zooms to a box, double-click resets. Touch: pinch to zoom, two fingers to pan.</li>
+      <li>3D: drag rotates, wheel zooms, double-click resets the view; the α sliders set the interior and boundary opacity.</li>
+      <li>The divider between the panels can be dragged (double-click resets it).</li>
+    </ul>
+    <h3>Modes and settings</h3>
+    <ul>
+      <li>σ: <b>exact root</b> (Newton-polished, default) or <b>fast</b> (first-order estimate).</li>
+      <li>Resolution <b>Auto (20 fps)</b> sizes the grid to about 50 ms per chart; fixed sizes up to 4K use the <b>time limit</b> (1–600 s, default 5 s) after which a chart is stopped.</li>
+      <li>ω<sub>max</sub>: end of the march along λ = iω; tolerance: phase error allowed per step (smaller = safer, slower). The order n is computed automatically.</li>
+    </ul>
+    <h3>Output</h3>
+    <ul>
+      <li><b>Save PNG</b>: the chart at full resolution. <b>Save STL</b> (3D): the stability boundary as a closed surface. <b>Copy link</b>: a URL with the equation, parameters, view and settings.</li>
+    </ul>
+    <h3>Colours</h3>
+    <ul>
+      <li>Stable (Z = 0): viridis by σ of the rightmost root, from the σ colour floor (dark) to 0 (bright yellow). Unstable: reds by the number of unstable roots Z = 1 … 6+. White: stability boundary. Grey: the march failed.</li>
+    </ul>
+    <h3>Validation</h3>
+    <p>The counts match the Julia engine of InterpolatedNyquist.jl on 28 reference charts (<a href="?validate=1">run the check</a>). Source and paper: <a href="https://github.com/bachrathyd/InterpolatedNyquist.jl" target="_blank" rel="noopener">github.com/bachrathyd/InterpolatedNyquist.jl</a>.</p>
+  </div>
+</div>
 <script type="module" src="app.js"></script>
 </body>
 </html>

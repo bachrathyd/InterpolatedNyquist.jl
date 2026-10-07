@@ -416,7 +416,7 @@ function setUrl() {
 function fitTextarea() {
   const ta = $('eq');
   ta.style.height = 'auto';
-  ta.style.height = Math.min(420, ta.scrollHeight + 4) + 'px';
+  ta.style.height = Math.min(220, ta.scrollHeight + 4) + 'px';
 }
 
 function loadModelUI() {
@@ -426,6 +426,8 @@ function loadModelUI() {
   $('formula').style.display = ex.formula ? '' : 'none';
   $('note').textContent = ex.note || '';
   $('note').style.display = ex.note ? '' : 'none';
+  $('about').hidden = !ex.formula && !ex.note;
+  $('aboutSum').textContent = ex.key === 'own' ? 'How it works' : 'About this example (formula, source, settings)';
   const ta = $('eq');
   ta.value = slot.text;
   ta.readOnly = !!ex.builtin;
@@ -783,6 +785,70 @@ function restoreFromHash() {
 // ---------------------------------------------------------------------------------------------
 // chart controls
 // ---------------------------------------------------------------------------------------------
+// resizable split between the controls and the chart (desktop); width kept in localStorage
+const SPLIT_KEY = 'nyquistgpu.split.v1';
+function bindSplit() {
+  const main = document.querySelector('main');
+  const sp = $('split');
+  const clamp = (w) => Math.round(Math.max(240, Math.min(0.7 * window.innerWidth, w)));
+  const apply = (w) => { main.style.setProperty('--side', clamp(w) + 'px'); };
+  let saved = null;
+  try { saved = parseFloat(localStorage.getItem(SPLIT_KEY)); } catch (e) { saved = null; }
+  if (Number.isFinite(saved)) apply(saved);
+  let drag = null;
+  let refit = null;
+  const after = () => {
+    redraw();
+    clearTimeout(refit);
+    refit = setTimeout(() => request(), 150);                 // the chart re-fits, then recomputes
+  };
+  sp.addEventListener('pointerdown', (ev) => {
+    drag = { x: ev.clientX, w: document.querySelector('aside').getBoundingClientRect().width };
+    sp.classList.add('drag');
+    try { sp.setPointerCapture(ev.pointerId); } catch (e) { /* ignore */ }
+    ev.preventDefault();
+  });
+  sp.addEventListener('pointermove', (ev) => {
+    if (!drag) return;
+    apply(drag.w + ev.clientX - drag.x);
+    after();
+  });
+  const end = () => {
+    if (!drag) return;
+    drag = null;
+    sp.classList.remove('drag');
+    try { localStorage.setItem(SPLIT_KEY, String(document.querySelector('aside').getBoundingClientRect().width)); } catch (e) { /* ignore */ }
+  };
+  sp.addEventListener('pointerup', end);
+  sp.addEventListener('pointercancel', end);
+  sp.addEventListener('dblclick', () => {
+    main.style.removeProperty('--side');
+    try { localStorage.removeItem(SPLIT_KEY); } catch (e) { /* ignore */ }
+    after();
+  });
+  window.addEventListener('resize', () => {
+    let w = null;
+    try { w = parseFloat(localStorage.getItem(SPLIT_KEY)); } catch (e) { w = null; }
+    if (Number.isFinite(w)) apply(w);
+  });
+}
+
+// help overlay: the ? button, #help or ?help=1; Esc or a click outside closes it
+function bindHelp() {
+  const bg = $('helpBg');
+  const open = () => { bg.hidden = false; $('helpBox').focus(); };
+  const close = () => {
+    bg.hidden = true;
+    if (location.hash === '#help') { try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { /* ignore */ } }
+  };
+  $('helpBtn').addEventListener('click', open);
+  $('helpClose').addEventListener('click', close);
+  bg.addEventListener('click', (ev) => { if (ev.target === bg) close(); });
+  document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && !bg.hidden) close(); });
+  window.addEventListener('hashchange', () => { if (location.hash === '#help') open(); });
+  if (location.hash === '#help' || params.get('help') === '1') open();
+}
+
 function bindChartControls() {
   $('res').addEventListener('change', () => { cur().res = $('res').value; saveOwn(); request(); });
   $('resetAxes').addEventListener('click', resetAxes);
@@ -1683,6 +1749,8 @@ async function main() {
   bindModelControls();
   bindChartControls();
   bindPointer();
+  bindSplit();
+  bindHelp();
   loadModelUI();
   drawAxes();
   window.__app = { state, slots, auto, getSlot, makeJob, compileSlot, linkFor, applyText, writeRange };
