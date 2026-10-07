@@ -8,7 +8,7 @@
 import { EXAMPLES, GROUPS, SET_DEFAULTS } from './examples.js';
 import { Engine, WebGPUUnavailable, countOf } from './engine.js';
 import { compileModel, rangeDecls, evalSetting, leadingOrder, realCoefficients, ExprError } from './expr.js';
-import { Volume3D, volumeBytes, defaultCamera, project, boundarySTL } from './view3d.js';
+import { Volume3D, volumeBytes, defaultCamera, project, boundaryMesh, runMesh, meshSTL } from './view3d.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -36,6 +36,7 @@ const state = {
   limit: 5,                // time limit [s] of a chart at a fixed resolution
   alpha: 0.25,             // 3D: interior opacity (0: only the boundary, 1: solid)
   surf: 0.22,              // 3D: opacity of the boundary surface
+  smooth: true,            // 3D: boundary as a marching-tetrahedra mesh (else ray-marched)
   cam: defaultCamera(),
 };
 const slots = new Map();
@@ -868,6 +869,13 @@ function bindChartControls() {
   const a3 = () => { $('alphaO').textContent = state.alpha.toFixed(2); $('surfO').textContent = state.surf.toFixed(2); };
   $('alpha').addEventListener('input', () => { state.alpha = +$('alpha').value; a3(); redraw(); });
   $('surfA').addEventListener('input', () => { state.surf = +$('surfA').value; a3(); redraw(); });
+  $('smooth3d').checked = state.smooth;
+  $('smooth3d').addEventListener('change', () => {
+    state.smooth = $('smooth3d').checked;
+    if (state.smooth && is3D(lastJob) && last && !lastMesh) buildMesh(last, [lastJob.nx, lastJob.ny, lastJob.nz], cur().smin);
+    if (!state.smooth) meshJob++;
+    redraw();
+  });
   a3();
   $('view3d').addEventListener('click', () => {
     const slot = cur();
@@ -944,7 +952,7 @@ function draw3d(target = ctx) {
     const H = Math.round(W * 9 / 16);
     if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
   }
-  const F = vol3d.draw(target, state.cam, { fog: state.alpha, surf: state.surf, bg: BG });
+  const F = vol3d.draw(target, state.cam, { fog: state.alpha, surf: state.surf, smooth: state.smooth, bg: BG });
   if (target === ctx) lastFrame = F;
 }
 
@@ -1040,7 +1048,8 @@ async function renderOnce(job, slot) {
   if (d3) {
     if (!vol3d) vol3d = await Volume3D.create(engine.device, engine.format);
     vol3d.setVolume([job.nx, job.ny, job.nz], volumeBytes(rb, [job.nx, job.ny, job.nz], slot.smin, countOf));
-    draw3d();
+    draw3d();                                   // (the ray-marched surface until the mesh is ready)
+    buildMesh(rb, [job.nx, job.ny, job.nz], slot.smin);
   } else engine.draw(ctx, viewOpts(job.nx));
   updatePreview();
   drawAxes();
@@ -1452,11 +1461,42 @@ async function savePng() {
   }, 'image/png');
 }
 
+// the smooth boundary mesh of the current 3D chart: built in time slices (~12 ms) between frames,
+// so the page stays responsive; a newer chart cancels an unfinished build
+let meshJob = 0;
+let lastMesh = null;
+async function buildMesh(rb, dims, smin) {
+  const id = ++meshJob;
+  lastMesh = null;
+  if (!state.smooth) return;
+  const t0 = performance.now();
+  const gen = boundaryMesh(rb, dims, smin, countOf);
+  let r;
+  let slice = performance.now();
+  for (;;) {
+    r = gen.next();
+    if (r.done) break;
+    if (performance.now() - slice > 12) {
+      await new Promise((res) => setTimeout(res, 0));     // (not rAF: it stops in hidden tabs)
+      if (id !== meshJob) return;
+      slice = performance.now();
+    }
+  }
+  if (id !== meshJob || !vol3d) return;
+  vol3d.setMesh(r.value);
+  lastMesh = { mesh: r.value, dims, ms: performance.now() - t0 };
+  window.__meshMs = lastMesh.ms;
+  draw3d();
+  drawAxes();
+}
+
 function saveStl() {
   if (!last || !is3D(lastJob)) return;
   const j = lastJob;
   const t0 = performance.now();
-  const { blob, triangles } = boundarySTL(last, [j.nx, j.ny, j.nz], [j.xr, j.yr, j.zr], cur().smin, countOf, $('stlUnit').checked);
+  const dims = [j.nx, j.ny, j.nz];
+  const mesh = lastMesh && lastMesh.dims.join() === dims.join() ? lastMesh.mesh : runMesh(boundaryMesh(last, dims, cur().smin, countOf));
+  const { blob, triangles } = meshSTL(mesh, dims, [j.xr, j.yr, j.zr], $('stlUnit').checked);
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = `${j.key}_${j.xl}_${j.yl}_${j.zl}_${j.nx}x${j.ny}x${j.nz}.stl`.replace(/[^\w.-]+/g, '_');
