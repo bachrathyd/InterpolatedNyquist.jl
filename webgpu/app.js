@@ -633,6 +633,7 @@ function applyText() {
   slot.jobWarns = [];
   slot.runErr = null;
   const ok = compileSlot(slot);
+  if (!ok) countOnce('parse-error');
   updateModified();
   buildParamTable();
   renderStatus();
@@ -793,6 +794,7 @@ function restoreFromHash() {
     if (o.x === 1 || o.x === 0) state.exact = o.x === 1;
     if (Number.isFinite(o.w) && o.w >= 1 && o.w <= 600) state.limit = o.w;
     applySerialized(getSlot(key), o);
+    countOnce('shared-link-opened');
   } catch (e) {
     showError('The shared link could not be read (' + (e.message || e) + '); showing the default example.');
   }
@@ -866,12 +868,18 @@ function bindHelp() {
 }
 
 function bindChartControls() {
-  $('res').addEventListener('change', () => { cur().res = $('res').value; saveOwn(); request(); });
+  $('res').addEventListener('change', () => {
+    cur().res = $('res').value;
+    if (cur().res !== 'auto') countOnce('fixed-resolution');
+    saveOwn();
+    request();
+  });
   $('resetAxes').addEventListener('click', resetAxes);
   $('limit').value = state.limit;
   $('limit').addEventListener('change', () => {
     const v = parseFloat($('limit').value);
     if (Number.isFinite(v) && v >= 1 && v <= 600) state.limit = v; else $('limit').value = state.limit;
+    if (state.limit > 5) countOnce('time-limit-raised');
   });
   $('live').addEventListener('change', () => { state.live = $('live').checked; });
   $('bnd').addEventListener('change', () => { state.boundary = $('bnd').checked; redraw(); });
@@ -887,6 +895,7 @@ function bindChartControls() {
   $('smooth3d').checked = state.smooth;
   $('smooth3d').addEventListener('change', () => {
     state.smooth = $('smooth3d').checked;
+    if (!state.smooth) countOnce('3d-smooth-off');
     if (state.smooth && is3D(lastJob) && last) buildMesh(last, [lastJob.nx, lastJob.ny, lastJob.nz], cur().smin);
     redraw();
   });
@@ -1050,6 +1059,7 @@ async function renderOnce(job, slot) {
   setProgress(0);
   autoUpdate(job, r);
   if (r.timedOut) {
+    countOnce('watchdog-stop');
     slot.runErr = `Stopped after ${(deadline / 1000).toFixed(0)} s (time limit; ${(100 * r.rowsDone / (job.ny * job.nz)).toFixed(0)} % computed): the equation is too expensive or the march does not finish — reduce ω_max or the resolution${job.auto ? ' (the automatic resolution is lowered for the next frame)' : ''}.`;
     if (!d3) { lastJob = job; engine.draw(ctx, viewOpts(job.nx)); drawAxes(); }
     return r;
@@ -1062,6 +1072,7 @@ async function renderOnce(job, slot) {
   last = { ...rb, xr: job.xr, yr: job.yr, xl: job.xl, yl: job.yl };
   if (d3) {
     countOnce('3d-view');
+    countOnce('3d-view/' + job.key);
     if (!vol3d) vol3d = await Volume3D.create(engine.device, engine.format);
     vol3d.setVolume([job.nx, job.ny, job.nz], volumeBytes(rb, [job.nx, job.ny, job.nz], slot.smin, countOf));
     draw3d();                                   // (smooth: the previous mesh until the new one is ready)
@@ -1267,6 +1278,7 @@ function commitView() {
 }
 
 function setView(xr, yr, commitNow = false) {
+  countOnce('zoom-pan');
   const slot = cur();
   if (!lastJob || is3D(lastJob) || lastJob.key !== slot.key) return;
   const px = slot.params[lastJob.xl], py = slot.params[lastJob.yl];
@@ -1849,8 +1861,9 @@ async function main() {
   window.__engine = engine;
   busy = true;
   try {
-    if (params.has('validate')) await runValidation();
+    if (params.has('validate')) { countOnce('validate-run'); await runValidation(); }
     const b = params.get('bench');
+    if (params.has('bench')) countOnce('bench-run');
     if (b === 'compare' || b === 'compare-hd') await runCompare();
     else if (params.has('bench')) await runBench();
   } catch (e) {
