@@ -1,10 +1,12 @@
-// WebGPU host side of the NyquistGPU port: device setup, one compute pipeline per example
-// (march.wgsl with the example's charD spliced in), banded dispatches (each submission stays
+// WebGPU host side of the NyquistGPU port: device setup, one compute pipeline per characteristic
+// function (march.wgsl with the generated or hand-written charD spliced in; cached by its code), banded dispatches (each submission stays
 // far below the browser / OS GPU watchdog), GPU timing (timestamp queries if available) and
 // the colouring render pass (display.wgsl).
 
 const RES_BYTES = 16;            // struct Res { z: f32, s: f32, steps: u32, flags: u32 }
-const PARAM_BYTES = 112;         // struct Params of march.wgsl
+const PARAM_BYTES = 144;         // struct Params of march.wgsl
+const MAX_CONSTS = 16;           // K[0..15]
+const MAX_PIPELINES = 40;        // compiled pipelines kept (oldest dropped)
 const VIEW_BYTES = 48;           // struct View of display.wgsl
 const MAX_BANDS = 512;           // timestamp slots: 2 per band
 const BIG = 3.0e38;
@@ -91,25 +93,60 @@ export class Engine {
     return [i.vendor, i.architecture, i.device, i.description].filter((s) => s).join(' ') || 'unknown GPU';
   }
 
-  /** compute pipeline of an example; exact: the 'exact root' variant (EXACT = true in march.wgsl) */
-  async pipeline(ex, exact = false) {
-    const key = ex.key + (exact ? '#exact' : '');
-    if (this.pipelines.has(key)) return this.pipelines.get(key);
-    let code = this.marchSrc.replace('//#CHARD#', ex.wgsl);
+  /**
+   * Compute pipeline of a characteristic function (WGSL source of `fn charD`); exact: the
+   * 'exact root' variant (EXACT = true in march.wgsl); branch0: BRANCH0 = true.
+   * A compile error throws an Error with .wgslErrors = [{ line, col, message }] (line numbers
+   * within charD) and .charD = the source.
+   */
+  async pipeline(charD, exact = false, branch0 = false) {
+    const key = (exact ? 'X' : '-') + (branch0 ? 'B' : '-') + charD;
+    if (this.pipelines.has(key)) {
+      const e = this.pipelines.get(key);
+      this.pipelines.delete(key);             // most recently used last
+      this.pipelines.set(key, e);
+      return e;
+    }
+    const marker = '//#CHARD#';
+    const at = this.marchSrc.indexOf(marker);
+    if (at < 0) throw new Error('march.wgsl: charD marker not found');
+    const line0 = this.marchSrc.slice(0, at).split('\n').length;    // charD starts on this line
+    let code = this.marchSrc.replace(marker, charD);
     const sw = (name) => {
       const flag = `const ${name}: bool = false;`;
       if (!code.includes(flag)) throw new Error(`march.wgsl: ${name} switch not found`);
       code = code.replace(flag, `const ${name}: bool = true;`);
     };
     if (exact) sw('EXACT');
-    if (ex.branch0) sw('BRANCH0');
-    const module = this.device.createShaderModule({ code, label: 'march:' + key });
+    if (branch0) sw('BRANCH0');
+    const t0 = performance.now();
+    this.device.pushErrorScope('validation');
+    const module = this.device.createShaderModule({ code, label: 'march' + (exact ? ':exact' : '') });
     const ci = await module.getCompilationInfo();
     const errs = ci.messages.filter((m) => m.type === 'error');
-    if (errs.length) throw new Error('WGSL compile error (' + ex.key + '): ' + errs.map((m) => `line ${m.lineNum}: ${m.message}`).join('; '));
-    const p = await this.device.createComputePipelineAsync({ layout: 'auto', compute: { module, entryPoint: 'main' }, label: key });
-    const entry = { pipeline: p, bgCache: new WeakMap() };
+    if (errs.length) {
+      await this.device.popErrorScope();
+      const nl = charD.split('\n').length;
+      const list = errs.map((m) => {
+        const inCharD = m.lineNum >= line0 && m.lineNum < line0 + nl;
+        return { line: inCharD ? m.lineNum - line0 + 1 : 0, col: m.linePos, message: m.message, march: !inCharD };
+      });
+      const err = new Error('WGSL compilation failed: ' + list.map((m) => (m.line ? `charD line ${m.line}: ` : 'march.wgsl: ') + m.message).join('; '));
+      err.wgslErrors = list;
+      err.charD = charD;
+      throw err;
+    }
+    let p;
+    try {
+      p = await this.device.createComputePipelineAsync({ layout: 'auto', compute: { module, entryPoint: 'main' }, label: 'march' });
+    } finally {
+      const ve = await this.device.popErrorScope();
+      if (ve) { const err = new Error('WebGPU pipeline error: ' + ve.message); err.charD = charD; throw err; }
+    }
+    const entry = { pipeline: p, bgCache: new WeakMap(), compileMs: performance.now() - t0 };
     this.pipelines.set(key, entry);
+    while (this.pipelines.size > MAX_PIPELINES) this.pipelines.delete(this.pipelines.keys().next().value);
+    this.lastCompileMs = entry.compileMs;
     return entry;
   }
 
@@ -142,20 +179,21 @@ export class Engine {
     const fin = (v) => (Number.isFinite(v) ? v : BIG);       // WGSL does not promise IEEE infinities
     f[12] = m.hrel; f[13] = fin(m.hmax); f[14] = fin(m.wband); f[15] = job.npow;
     f[16] = m.qtrust; f[17] = m.growmax; u[18] = m.maxsteps; f[19] = m.sigma;
-    for (let i = 0; i < 8; i++) f[20 + i] = i < job.c.length ? job.c[i] : 0;
+    for (let i = 0; i < MAX_CONSTS; i++) f[20 + i] = i < job.c.length ? job.c[i] : 0;
     this.device.queue.writeBuffer(this.paramBuf, 0, b);
   }
 
   /**
-   * Compute one chart.  job = { ex, c, npow, nx, ny, xr, yr, march, exact }
+   * Compute one chart.  job = { code (WGSL fn charD), branch0, exact, c (K[0..15]), npow, nx, ny,
+   * xr, yr (the axis parameters p.x, p.y), march (MARCH_DEFAULTS overrides) }
    * opts = { targetMs, onBand(rowlo, frac), isCancelled() }
    * -> { gpuMs, wallMs, bands, npts, tsUsed, cancelled }
    */
   async compute(job, opts = {}) {
     const dev = this.device;
     const { nx, ny } = job;
+    const { pipeline, bgCache } = await this.pipeline(job.code, !!job.exact, !!job.branch0);   // (first: a failed compile keeps the chart)
     const fresh = this.ensureBuffers(nx, ny);
-    const { pipeline, bgCache } = await this.pipeline(job.ex, !!job.exact);
     let bg = bgCache.get(this.resBuf);
     if (!bg) {
       bg = dev.createBindGroup({
