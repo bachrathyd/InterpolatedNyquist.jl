@@ -14,7 +14,8 @@
 // rightmost of them is σ, the colour of a stable point.
 //
 // The example's characteristic function is spliced in at the marker below (app.js):
-//     fn charD(l: CD, p: vec2<f32>) -> CD      constants: K[0..7]
+//     fn charD(l: CD, p: vec2<f32>) -> CD      constants: K[0..15]
+// (generated from the typed equation by expr.js, or hand-written for a built-in example)
 //
 // Portability: WGSL does not guarantee IEEE infinities / NaN (and has no isnan), so the
 // NaN / Inf sentinels of the Julia code are replaced by explicit validity flags and BIG.
@@ -35,8 +36,9 @@ struct Params {
     w0: f32, wmax: f32, h0: f32, tol: f32,
     hrel: f32, hmax: f32, wband: f32, npow: f32,
     qtrust: f32, growmax: f32, maxsteps: u32, sigma: f32,
-    c0: vec4<f32>,
-    c1: vec4<f32>,
+    c: array<vec4<f32>, 4>,     // the model constants K[0..15]
+    z0: f32, dz: f32,           // 3D grids: the third axis parameter PZ = z0 + iz dz
+    nys: u32, pad0: u32,        // rows per z slice (ny); the grid has ny * nz rows
 }
 
 struct Res {
@@ -60,7 +62,8 @@ const PI: f32 = 3.14159265358979;
 const EPS32: f32 = 1.1920929e-7;
 const FLOATMIN: f32 = 1.17549435e-38;
 
-var<private> K: array<f32, 8>;
+var<private> K: array<f32, 16>;
+var<private> PZ: f32;            // the third axis parameter (3D grids)
 
 // ---------------------------------------------------------------------------
 // elementary functions
@@ -164,6 +167,84 @@ fn dsqrt(a: CD) -> CD {
     return CD(v, cdiv(a.d, 2.0 * v));
 }
 fn dpowr(a: CD, mu: f32) -> CD { return dexp(dscale(dlog(a), mu)); }    // principal a^mu
+
+// --- helpers of the generated code (expr.js): mixed real / complex-constant / dual operands,
+// trigonometric and hyperbolic functions, exprel(x) = (e^x - 1)/x
+fn daddc(a: CD, c: C) -> CD { return CD(a.v + c, a.d); }                 // + complex constant
+fn dmulc(a: CD, c: C) -> CD { return CD(cmul(a.v, c), cmul(a.d, c)); }   // * complex constant
+fn ddivr(a: CD, r: f32) -> CD { return CD(a.v / r, a.d / r); }           // / real
+fn ddivc(a: CD, c: C) -> CD { return CD(cdiv(a.v, c), cdiv(a.d, c)); }   // / complex constant
+fn cexp(z: C) -> C {
+    let e = exp(z.x);
+    let sc = sincos(z.y);
+    return C(e * sc.y, e * sc.x);
+}
+fn rtan(x: f32) -> f32 { let sc = sincos(x); return sc.x / sc.y; }
+// sin(x+iy) = sin x cosh y + i cos x sinh y,  cos(x+iy) = cos x cosh y - i sin x sinh y
+fn dsin(a: CD) -> CD {
+    let sc = sincos(a.v.x);
+    let ch = cosh(a.v.y);
+    let sh = sinh(a.v.y);
+    return CD(C(sc.x * ch, sc.y * sh), cmul(C(sc.y * ch, -sc.x * sh), a.d));
+}
+fn dcos(a: CD) -> CD {
+    let sc = sincos(a.v.x);
+    let ch = cosh(a.v.y);
+    let sh = sinh(a.v.y);
+    return CD(C(sc.y * ch, -sc.x * sh), -cmul(C(sc.x * ch, sc.y * sh), a.d));
+}
+// sinh(x+iy) = sinh x cos y + i cosh x sin y,  cosh(x+iy) = cosh x cos y + i sinh x sin y
+fn dsinh(a: CD) -> CD {
+    let sc = sincos(a.v.y);
+    let ch = cosh(a.v.x);
+    let sh = sinh(a.v.x);
+    return CD(C(sh * sc.y, ch * sc.x), cmul(C(ch * sc.y, sh * sc.x), a.d));
+}
+fn dcosh(a: CD) -> CD {
+    let sc = sincos(a.v.y);
+    let ch = cosh(a.v.x);
+    let sh = sinh(a.v.x);
+    return CD(C(ch * sc.y, sh * sc.x), cmul(C(sh * sc.y, ch * sc.x), a.d));
+}
+// tanh z = (1 - e^{-2z})/(1 + e^{-2z}) for Re z >= 0 (odd): no overflow
+fn dtanh(a: CD) -> CD {
+    let s = select(1.0, -1.0, a.v.x < 0.0);
+    let e = cexp(-2.0 * s * a.v);
+    let t = s * cdiv(C(1.0, 0.0) - e, C(1.0, 0.0) + e);
+    return CD(t, cmul(C(1.0, 0.0) - cmul(t, t), a.d));
+}
+// tan z = -i tanh(iz)
+fn dtan(a: CD) -> CD {
+    let t = dtanh(CD(C(-a.v.y, a.v.x), C(-a.d.y, a.d.x)));
+    return CD(C(t.v.y, -t.v.x), C(t.d.y, -t.d.x));
+}
+// exprel(x) = (e^x - 1)/x, entire: Horner Taylor series for |x| < 1/2 (the removable
+// singularity at 0 and the cancellation of e^x - 1 near it)
+fn dexprel(x: CD) -> CD {
+    if (cabs(x.v) < 0.5) {
+        var r = daddr(dscale(x, 1.0 / 40320.0), 1.0 / 5040.0);
+        r = daddr(dmul(x, r), 1.0 / 720.0);
+        r = daddr(dmul(x, r), 1.0 / 120.0);
+        r = daddr(dmul(x, r), 1.0 / 24.0);
+        r = daddr(dmul(x, r), 1.0 / 6.0);
+        r = daddr(dmul(x, r), 0.5);
+        return daddr(dmul(x, r), 1.0);
+    }
+    let e = dexp(x);
+    return ddiv(daddr(e, -1.0), x);
+}
+fn rexprel(x: f32) -> f32 {
+    if (abs(x) < 0.5) {
+        var r = x / 40320.0 + 1.0 / 5040.0;
+        r = x * r + 1.0 / 720.0;
+        r = x * r + 1.0 / 120.0;
+        r = x * r + 1.0 / 24.0;
+        r = x * r + 1.0 / 6.0;
+        r = x * r + 0.5;
+        return x * r + 1.0;
+    }
+    return (exp(x) - 1.0) / x;
+}
 
 //#CHARD#
 
@@ -601,10 +682,16 @@ fn march(p: vec2<f32>) -> Res {
 @compute @workgroup_size(8, 8)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let ix = gid.x;
-    let iy = P.row0 + gid.y;
-    if ((ix >= P.nx) || (iy >= P.ny) || (gid.y >= P.rows)) { return; }
-    K[0] = P.c0.x; K[1] = P.c0.y; K[2] = P.c0.z; K[3] = P.c0.w;
-    K[4] = P.c1.x; K[5] = P.c1.y; K[6] = P.c1.z; K[7] = P.c1.w;
+    let row = P.row0 + gid.y;                 // row of the (ny * nz)-row grid
+    if ((ix >= P.nx) || (row >= P.ny) || (gid.y >= P.rows)) { return; }
+    let iz = row / P.nys;
+    let iy = row - iz * P.nys;
+    PZ = P.z0 + f32(iz) * P.dz;
+    // (unrolled: constant indices keep K in registers)
+    K[0] = P.c[0].x; K[1] = P.c[0].y; K[2] = P.c[0].z; K[3] = P.c[0].w;
+    K[4] = P.c[1].x; K[5] = P.c[1].y; K[6] = P.c[1].z; K[7] = P.c[1].w;
+    K[8] = P.c[2].x; K[9] = P.c[2].y; K[10] = P.c[2].z; K[11] = P.c[2].w;
+    K[12] = P.c[3].x; K[13] = P.c[3].y; K[14] = P.c[3].z; K[15] = P.c[3].w;
     let p = vec2<f32>(P.x0 + f32(ix) * P.dx, P.y0 + f32(iy) * P.dy);
-    R[iy * P.nx + ix] = march(p);
+    R[row * P.nx + ix] = march(p);
 }

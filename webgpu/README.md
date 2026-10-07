@@ -2,65 +2,196 @@
 
 A self-contained static page that computes the stability charts of the paper's case studies
 **on the viewer's own GPU** via WebGPU, in Float32, with live sliders on the model constants.
-No build step, no external CDN, no account, no server-side computation.
+The characteristic function is typed as text: any expression in λ, every unknown name becomes a
+parameter with a slider, any two parameters are the chart axes. The paper's examples are such
+texts too. No build step, no external CDN, no account, no server-side computation.
 
 | file | content |
 |---|---|
 | `index.html` | page, layout, styles |
-| `app.js` | UI: example / constants / resolution / axes / box zoom / hover, render scheduler, `?validate=1` and `?bench=1` modes |
-| `engine.js` | WebGPU host code: device, pipelines (default and exact-root variant per example), row-band dispatches, timestamp timing, colouring pass, read-back |
-| `examples.js` | the examples: constants, slider knobs, paper axes, march settings, `D(λ, p, c)` in WGSL; host (Float64) effective orders of the bar models |
-| `march.wgsl` | the per-point `:unwrap` march (port of `gpu/src/NyquistGPU.jl`) and the exact-root polish |
+| `app.js` | UI: equation box, parameter table (sliders, ranges, X / Y axes), march settings, resolution / box zoom / hover, render scheduler, share links, own equation in `localStorage`, `?validate=1`, `?bench=1`, `?bench=compare` |
+| `expr.js` | the equation language: tokenizer (whitelist), parser, typed expression DAG with common-subexpression sharing, WGSL generation, Float64 host evaluator, order estimate, setting expressions |
+| `engine.js` | WebGPU host code: device, pipelines (cached by the generated code; default and exact-root variant), row-band dispatches, timestamp timing, colouring pass, read-back |
+| `examples.js` | the examples as equation texts with parameter defaults / ranges, axes and march settings; the built-in FEM bar (hand-written WGSL, host effective order) |
+| `handwritten.js` | the hand-written WGSL of the first version, only for `?bench=compare` |
+| `march.wgsl` | the per-point `:unwrap` march (port of `gpu/src/NyquistGPU.jl`) and the exact-root polish; 2D grids and 3D grids (z slices stacked as rows) |
+| `view3d.js`, `volume.wgsl` | experimental 3D view: the combined field as a 3D texture, ray marching, orbit camera |
 | `display.wgsl` | colouring (port of `k_display!` / `pixel_colour` of `server.jl`) |
 | `validate/web_systems.jl` | the gallery examples in NyquistGPU form `D(λ, p, c)` (same operations as the WGSL) |
 | `validate/ref_counts.jl` | Julia script: reference counts and dominant roots from the repository engine |
 | `validate/ref_counts.json` | its output (160 × 90 grids, default and a second constant set per example), read by `?validate=1` |
 
+## Your own equation
+
+Pick **Own example** (it starts as A.1 and is kept in this browser's `localStorage`; the page
+also works where storage is blocked) or edit any example's text. The box takes
+
+```
+# comment
+K = -0.75:1                               # parameter range (chart range of an axis)
+r = 0.02:0.05:10.5                        # with a step: 210 grid points along this axis
+η = 0.002:0.05 @ 0.01                     # range and initial value (default: the midpoint)
+c = 0                                     # a fixed constant (a helper): no slider
+γ = λ*sqrt(1 + c/λ)/sqrt(1 + η*λ)        # helper: usable in later lines, computed once
+(1 + exp(-2*γ))/2 - K*exp(-r*λ - γ)       # the last line (or a line  D = ...) is D(λ)
+```
+
+* numbers (`1.5e-3`), `+ - * / ^` (`**`, `·`, `−` and superscripts `λ²`, `λ⁻¹` accepted), unary
+  minus, parentheses; `exp log (ln) sqrt sin cos tan sinh cosh tanh exprel pow(a, b)`,
+  `exprel(x) = (eˣ − 1)/x` (entire; evaluated by its Taylor series near 0 -- for distributed
+  delays, `(1 − e^{−τλ})/λ = τ·exprel(−τλ)`); constants `pi` (`π`), `i`; the variable `λ`
+  (or `lambda`; the **λ** button inserts it);
+* Greek / Unicode names with subscripts (`τ₀`, `ζ₁`, `ω₂`, `k_p`); implicit multiplication is
+  an error (`2λ` → "write 2*λ"); non-analytic functions (`abs`, `real`, `imag`, `conj`, `min`,
+  `max`, ...) are rejected; a line that ends or starts with an operator, or an open
+  parenthesis, continues on the next line; parse errors are shown with a caret under the line.
+* Every identifier that is not λ, a function, a constant or a helper is a **parameter** (the
+  declared ones in declaration order, then by first appearance; at most 16). Each has a row:
+  value, min, slider, max, and **X / Y / Z** buttons. The two axis parameters span the chart over
+  their [min, max]; the others are live sliders.
+* **Parameter ranges in the text** (Julia-like): `P = 2.1:20` declares the range [2.1, 20],
+  `P = 2.1:0.1:10` start:step:stop (on an axis the step sets the grid of the next frame along it,
+  here 80 points; the automatic resolution may refine it later), `P = 2.1:20 @ 5` also the
+  initial value (default: the midpoint). Bounds are constants (`0:2*pi`). These lines declare
+  parameters, they are not helpers; a plain `name = number` stays a fixed constant without a
+  slider. Undeclared parameters get [0, 2] at 1 (or their old value when a line `name = number`
+  was deleted). **Text and table stay in sync**: editing min / max in the table (or drag-zooming
+  the chart) rewrites the declaration line, or adds one; reset axes restores the example's
+  lines. Every example declares its paper ranges and defaults this way, so the text alone
+  defines it.
+* Typing recompiles 400 ms after the last key (Ctrl+Enter at once). The pipeline is rebuilt
+  only when the text or the axis choice changes (cached by the generated code); sliders only
+  rewrite the uniform buffer.
+* **Order n** (`Z = n/2 − Φ/π`): always computed automatically on the host (shown under the
+  sliders; an override exists only in Advanced), as the least-squares slope of `ln|D(s)|`
+  over 9 log-spaced real `s ∈ [s*/10, s*]`, `s* = 1e8` (reduced while `|D|` is not finite),
+  at an interior point of the axis ranges; one decade lower as a check (exponential growth,
+  e.g. an advanced term, gives a warning), and at the four chart corners (a warning if n
+  changes over the chart). Re-estimated on every slider move (a few hundred host
+  evaluations). Fractional powers give a non-integer n, as they should. A real-coefficient
+  check `D(λ̄) = conj D(λ)` warns about complex coefficients.
+* **ω_max** (a log-scale slider, 10 … 1e6; each example sets its default) and the **tolerance**
+  (a slider on its exponent: 10^x rad, x ∈ [−2, 0], default 0.3): the march accepts a step when
+  the observed phase change agrees with the trapezoid prediction within this tolerance, so a
+  smaller value means shorter steps, more robust counts and more time.
+* **Advanced**: n (override), ω₀ (1e-9), step cap
+  h_max for ω below a band (empty band: the whole line), branch point at λ = 0 (auto: `λ^x`
+  with non-integer x, `log λ`, `sqrt λ` -- the |D| minimum at ω₀ is then no root estimate).
+  These are expressions of the parameters (`pi/(2*τ)`; an axis parameter stands for
+  max |value| over its range) with `pi`, `inf`, `min`, `max`, `abs`. Neutral systems need a
+  small explicit ω_max (200–500) and `h_max = pi/(2*τ)` (hint in the panel).
+* **Copy link** puts the equation, parameter values and ranges, axes, settings, resolution and
+  the mode into the URL hash (`#m=` base64url of a small JSON) and restores it on load;
+  `?ex=<key>` links still work (`&exact=0`: fast mode; `&exact=1`: exact, the default).
+
+## Resolution, watchdog, modes
+
+* **Auto (20 fps)** (default): when the equation, the mode or the dimension changes, probe grids
+  10², 20², 40², ... (3D: 10³, 20³, ...) are timed until one takes > 12 ms; the grid is then sized
+  so that a frame takes about 50 ms (clamped to 20 × 20 … 3840 × 2160, in 3D 16³ … 128³, aspect
+  16:9 or that of a declared step grid), and the estimate follows the measured frame times
+  (log-average, 30 % hysteresis). The fixed sizes stay selectable; in 3D they map to n³ with the
+  same number of points (39³ … 160³).
+* **Watchdog**: a chart is submitted in row bands (the first ~4k points, then ~60 ms each);
+  no band is submitted after 5 s, the partial chart stays and the page says "Stopped after 5 s
+  … reduce ω_max or the resolution" (the automatic resolution is lowered for the next frame).
+  A submitted band cannot be cancelled, so the per-thread step cap is 50 000 (the examples need
+  ≤ ~750 evaluations per point); a march that hits it is a failed (grey) point. Measured: a
+  neutral equation at ω_max = 1e6, tol = 0.01, 1920 × 1080 is stopped 5.8 s after the request.
+* **Mode**: the default is the **exact root (refined)** mode (below); "fast (first-order σ)" is
+  the first-order estimate. Auto-resolution times the mode in use.
+
+## 3D view (experimental)
+
+Mark a third parameter with **Z**: the chart becomes a brute-force grid over the three axis
+ranges (the third parameter is a per-slice uniform, the slices are stacked as rows of the same
+march dispatch) and is shown by ray marching (WebGPU render pass, `volume.wgsl`):
+
+* the field `C = max(σ, σ_floor)/|σ_floor|` (≤ −0.02) at stable points and `+0.6` elsewhere is
+  uploaded as an `r8unorm` 3D texture (trilinear filtering);
+* the unstable region is not drawn; the stability boundary is the zero level of `C`, a
+  translucent, Lambert-shaded sheet (normal from the gradient); the stable interior is a fog in
+  the σ colour map whose density grows with the margin `−C` (the "3D fog" slider), so the most
+  stable region is the densest;
+* drag rotates (orbit), the wheel zooms, double-click resets the view; the box edges carry the
+  axis names and ranges. Auto-resolution gives 40³–70³ at 20 fps on the test laptop.
+* Click **Z** again to go back to 2D. Not for the built-in FEM bar (fixed axes).
+* "Generated WGSL" (in Advanced) shows the shader code of the current equation.
+
+**Safety.** The text is tokenized against a whitelist and parsed to an AST; WGSL and the host
+evaluator are generated only from the typed DAG built from it. No `eval` / `new Function`; no
+user text enters the shader: parameters become `K[j]` / `p.x` / `p.y`, helpers and
+subexpressions `t<id>`, numbers are re-printed from their parsed values (checked against the
+Float32 range).
+
+**Code generation.** Each DAG node has a type: R (real, λ-free: f32 arithmetic), C (complex
+constant: `vec2`), D (dual number in λ: value and d/dω). The operator picks the cheapest form
+(`dscale`, `daddr`, `dmul`, `dmulc`, ...); identical subexpressions are one node (a helper
+used twice, the `log λ` of two fractional powers, the `e^{−τλ}` of two terms, `λ²` inside `λ⁴`);
+integer exponents become repeated squaring, ±½ `sqrt`, other exponents `exp(b·log a)` on the
+principal branch; constant subexpressions are folded in Float64; `−(r·x)` puts the sign on the
+real factor. The result is straight-line WGSL, e.g. for A.1:
+
+```
+fn charD(l: CD, p: vec2<f32>) -> CD {
+    let t3 = dmul(l, l);
+    let t4 = dmul(t3, t3);
+    let t5 = dscale(t4, K[0]);
+    ...
+    let t20 = dscale(l, t19);       // t19 = -K[4] (τ)
+    let t21 = dexp(t20);
+    let t22 = dmul(t17, t21);       // t17 = P + Dλ
+    return dadd(t13, t22);
+}
+```
+
 ## Examples
 
 Grouped as in the selector; axes, ω_max, step caps and orders are those of the paper's
-gallery (`paper/scripts/studies/s08_gallery.jl`, `s10_fractional_controller.jl`). The
-formula of `D` is shown under the selector, with a note on how the example is counted.
+gallery (`paper/scripts/studies/s08_gallery.jl`, `s10_fractional_controller.jl`). Every
+example except the FEM bar is an equation text (`examples.js`), written operation for operation
+like the Julia reference, and runs through exactly the same path as a typed equation; selecting
+it writes its text, parameter defaults / ranges and settings into the panel (**Reset** restores
+them).
 
-| example | D(λ) | axes | sliders | march |
-|---|---|---|---|---|
-| A.1 fourth-order delayed oscillator | `c₁λ⁴ + λ² + 2ζλ + 1 + (P + Dλ)e^{−τλ}` | P, D | τ, ζ, c₁ | n = 4, ω_max = 1e5 |
-| A.2 delayed oscillator | `λ² + aλ + k + (b + gλ)e^{−τλ}` (paper: k = g = 0, τ = ½) | a, b | τ, k, g | n = 2, ω_max = 1e4 |
-| A.3 distributed delay | `λ² + aλ + k + b e^{−τ₀λ}(1 − e^{−τλ})/λ` (paper: τ = 1) | a, b | τ, k, τ₀ | n = 2, ω_max = 1e4; Taylor series of (1 − e^{−x})/x for \|x\| < ½ (removable singularity) |
-| showcase 2-DOF DAE (delayed PD) | `a₁₁a₂₂ − a₁₂²` | P, D | τ, c₁, c₂ | n = 4, ω_max = 1e5 |
-| A.7 multi-mode turning | `M₁M₂ + w(1 − e^{−2πλ/Ω})(M₂ + A₂M₁)` | Ω, w | ζ₁, A₂, ω₂ | n = 4, h ≤ 0.05 for ω < 5 |
-| A.4 neutral | `λ² + aλ²e^{−τλ} + dλ + k + c e^{−τλ}` (τ = 1, d = 0, k = 1) | a, c | τ, d, k | n = 2, ω_max = 200 (fixed), h ≤ π/(2τ) everywhere |
-| A.5 high-gain neutral | same, d = 5, k = 0 | a, c | τ, d, k | as A.4 |
-| A.6 PDA control | `λ² + 2ζλ + 1 + (P + Dλ + Aλ²)e^{−τλ}` (ζ = 0.05, D = 0.1, τ = 1) | P, A | ζ, D, τ | n = 2, ω_max = 500 (fixed), h ≤ π/(2τ); dashed: \|A\| = 1 |
-| A.8 exact transcendental rod (Zhang & Stépán) | `1 − K e^{−rλ}/cosh γ`, `γ = λ√(1 + c/λ)/√(1 + ηλ)` (paper: c = 0) | r = τ/T, K | η (Kelvin–Voigt), c (external damping) | numerator counted, n_eff from the denominator (host), ω_max = 400 (fixed), h ≤ π/(2 r_max) for ω < 40 |
-| A.9 same bar, N-element FEM | `det(λ²M + λC + K + F(λ))`, rank-one feedback | r, K | η, N (2–24) | as A.8 |
-| A.11 fractional oscillator | `λ^α + cλ^β + k e^{−τλ}` (α = 1.8, β = 0.8, c = 0.5) | k, τ | α, β, c | n = α, ω_max = 1e4, principal branch |
-| A.12 fractional PI controller (Gao, Zhai & Liu, μ = 1.5) | `s^μ(Ts^ν + 1) + K e^{−Ls}(k_p s^μ + k_i)` | k_p, k_i | μ, L, K | n = μ + ν, ω_max = 1e4 |
+| example | text | axes | settings |
+|---|---|---|---|
+| A.1 fourth-order delayed oscillator | `c₁*λ^4 + λ^2 + 2*ζ*λ + 1 + (P + D*λ)*exp(-τ*λ)` | P, D | ω_max 1e5 |
+| A.2 delayed oscillator | `λ^2 + a*λ + k + (b + g*λ)*exp(-τ*λ)` | a, b | ω_max 1e4 |
+| A.3 distributed delay | `λ^2 + a*λ + k + b*τ*exp(-τ₀*λ)*exprel(-τ*λ)` | a, b | ω_max 1e4 |
+| showcase 2-DOF DAE | helpers `a₁₁`, `a₁₂`, `a₂₂`; `a₁₁*a₂₂ - a₁₂^2` | P, D | ω_max 1e5 |
+| A.7 multi-mode turning | helpers `M₁`, `M₂`; `M₁*M₂ + w*(1 - exp(-2*pi/Ω*λ))*(M₂ + A₂*M₁)` | Ω, w | h_max 0.05 for ω < 5 |
+| A.4 / A.5 neutral | `λ^2 + a*λ^2*exp(-τ*λ) + d*λ + k + c*exp(-τ*λ)` | a, c | ω_max 200, h_max `pi/(2*τ)` (whole line) |
+| A.6 PDA control | `λ^2 + 2*ζ*λ + 1 + (P + D*λ + A*λ^2)*exp(-τ*λ)` | P, A | ω_max 500, h_max `pi/(2*τ)`; dashed \|A\| = 1 |
+| A.8 exact rod | `γ = λ*sqrt(1 + c/λ)/sqrt(1 + η*λ)`; `(1 + exp(-2*γ))/2 - K*exp(-r*λ - γ)` | r, K | ω_max 400, h_max `pi/(2*max(r, 1))` for ω < 40 |
+| A.9 FEM bar (built-in) | `det(λ²M + λC + K + F(λ))`, N elements (2–24) | r, K | as A.8; n_eff from the host |
+| A.11 fractional oscillator | `λ^α + c*λ^β + k*exp(-τ*λ)` | k, τ | ω_max 1e4; branch point (auto) |
+| A.12 fractional PI (Gao, Zhai & Liu) | `λ^μ*(T*λ^ν + 1) + K*exp(-L*λ)*(k_p*λ^μ + k_i)` | k_p, k_i | ω_max 1e4; branch point (auto) |
+
+All orders are estimated (none is stored): 4, 2, 2, 4, 4, 2, 2, 2, ≈ 0 (rod), α, μ + ν.
 
 Notes on the harder ones:
 
 * **Neutral systems (A.4–A.6)**: the phase ripple of a neutral system never decays, so a
-  larger ω_max buys nothing; the window is fixed at the gallery's 200 / 200 / 500 (the
-  default 1e5 fails on these), the order n = 2 is passed exactly, and the step is capped at
-  π/(2τ) along the whole line (recomputed when the τ slider moves). Most points carry the
-  integer-residual flag (the tail oscillation reaches arcsin|a|/π < ½), as in the paper.
-* **Rod (A.8)** — the paper's recipe: the entire numerator `cosh γ − K e^{−rλ}` is
-  marched, with the effective order `n_eff = 2Φ_den(ω_max)/π` of the parameter-independent,
-  stable denominator `cosh γ`. In Float32 `cosh γ ~ e^{120}` overflows at ω = 400, so both
-  are multiplied by the analytic, zero-free `e^{−γ}`: the march sees
-  `(1 + e^{−2γ})/2 − K e^{−rλ−γ}` (no overflow, scale-free) and the denominator becomes
-  `(1 + e^{−2γ})/2`, whose phase the host measures (Float64, adaptive unwrap, ~5 ms) whenever
-  η or c change. The common `e^{−γ}` phase cancels from the count; the Julia check compares
-  this with the paper's unscaled form (identical counts at every unflagged point). The top row
-  K = 1 has the root λ = 0 on the line.
-* **FEM bar (A.9)**: `Q₀ = λ²M + λC + K` is tridiagonal, so `det Q₀` is a continuant and the
-  rank-one feedback enters through `(Q₀⁻¹)_{N1} = (−1)^{N+1} o^{N−1}/det Q₀`: the entire
-  numerator `det Q₀ + c(λ)(−1)^{N+1}o^{N−1}` costs O(N) per evaluation (no LU), divided by
-  `((4h/6)(λ + √3/h)²)^N` against overflow (poles far left, the same divisor for the host
-  denominator). It is interactive at 320 × 180 on an integrated GPU.
+  larger ω_max buys nothing; the window is the gallery's 200 / 200 / 500 (the default 1e5
+  fails on these), and the step is capped at π/(2τ) along the whole line (an expression of
+  the τ slider). Most points carry the integer-residual flag (the tail oscillation reaches
+  arcsin|a|/π < ½), as in the paper.
+* **Rod (A.8)** — the paper's recipe counts the entire numerator `cosh γ − K e^{−rλ}` with the
+  effective order of the stable denominator `cosh γ`. In Float32 `cosh γ ~ e^{120}` overflows at
+  ω = 400, so the text multiplies it by the analytic, zero-free `e^{−γ}`:
+  `(1 + e^{−2γ})/2 − K e^{−rλ−γ}`. Its order estimated on the real axis is 0 (it tends to ½),
+  which reproduces the previous host-measured n_eff of the scaled denominator (6e-10, 8e-6 at
+  the second constant set) -- identical counts. The top row K = 1 has the root λ = 0 on the line.
+* **FEM bar (A.9)** stays built-in (a loop over N elements is no closed expression; the box
+  shows a read-only description): `Q₀ = λ²M + λC + K` is tridiagonal, so `det Q₀` is a continuant
+  and the rank-one feedback enters through `(Q₀⁻¹)_{N1} = (−1)^{N+1} o^{N−1}/det Q₀`: the entire
+  numerator `det Q₀ + c(λ)(−1)^{N+1}o^{N−1}` costs O(N) per evaluation, divided by
+  `((4h/6)(λ + √3/h)²)^N` against overflow; its effective order is the host-measured phase of
+  that denominator (Float64, adaptive unwrap, ~15 ms per change of η or N).
 * **Fractional (A.11, A.12)**: `λ^μ = exp(μ log λ)` (principal branch); only σ = 0 is
-  admissible. The |D| minimum at ω₀ is the branch point, not a root, so the seed rule there
-  is switched off for these two (`branch0`).
+  admissible. The |D| minimum at ω₀ is the branch point, not a root: the branch-point switch
+  is detected automatically (`log λ` in the DAG).
 * Not included: the 50 × 50 dense determinant (A.10) and the 100-vehicle CCC ring — the paper
   keeps both on the phase-ODE back-end because the unwrap march is not reliable there.
 
@@ -72,7 +203,7 @@ long step holds a maximum and a minimum of |D| (its end slopes then do not brack
 minimum), or where deeper minima crowd out the dominant one, that root is lost and the
 stable domain shows dark streaks or speckles (very visible on the showcase).
 
-**"Exact root (refined)"** implements the paper's dominant-root recipe in the shader:
+**"Exact root (refined)"** (the default mode) implements the paper's dominant-root recipe in the shader:
 
 * 8 minima are tracked (with their ω); minima are also located inside steps whose end slopes
   do not bracket them (sign changes of `d|p|²/dt` of the step's Hermite model on 4 sub-intervals);
@@ -111,17 +242,22 @@ instead of failing.
 * `index.html` — interactive charts. Sliders recompute live (switch off "Recompute while
   dragging sliders" on slow GPUs); drag on the chart to zoom, double-click to reset; the
   hover line shows `Z`, `σ` (marked "refined" in exact mode) and the number of `D`
-  evaluations at a point. `?ex=<key>` opens an example (`fourth`, `algebraic`,
+  evaluations at a point. `?ex=<key>` opens an example (`own`, `fourth`, `algebraic`,
   `distributed`, `showcase`, `turning`, `neutral`, `neutral_hg`, `pda`, `rod`, `fem`, `frac`,
-  `gao`), `&exact=1` with exact roots — links that can be sent around.
+  `gao`), `&exact=0` for the fast mode; **Copy link** adds the full state (`#m=...`).
 * `index.html?validate=1` — computes the 160 × 90 grids of `validate/ref_counts.json`
   (every example, default and a second constant set) in both modes and reports the counts
   `Z` that differ from the Julia engine (Float32 and Float64 runs; separately those at
   unflagged points), the σ deviation of the default mode, the host-vs-Julia effective
   orders, the exact mode against Float64 reference dominant roots, a speckle measure and
-  the GPU times. `&only=rod,fem` restricts it.
+  the GPU times. Every example goes through its equation text (parser, generated WGSL,
+  estimated order, setting expressions, which are also compared with the reference's march
+  settings). `&only=rod,fem` restricts it.
 * `index.html?bench=1` — every example at its default resolution, default and exact mode
   (median of 3 after a warm-up); `?bench=hd` the same at 1920 × 1080.
+* `index.html?bench=compare` — generated vs the hand-written WGSL of the first version
+  (`handwritten.js`), same jobs, default and exact mode, median of 5 interleaved runs, with
+  the differing counts (`?bench=compare-hd` at 1920 × 1080).
 
 Regenerating the reference (Julia 1.12, CPU, ~6 min with 12 threads):
 
@@ -149,15 +285,14 @@ WebGPU needs a secure context: `https://` or `http://localhost` — not a plain-
 Per chart point `p` (one GPU invocation, 8 × 8 workgroups) the `:unwrap` march of
 `NyquistGPU.jl` (settings of the interactive server's `F32` format, `refine = none`):
 
-* `λ = σ + iω`, `σ = 0`, `ω` from `ω0 = 1e-9` to `ω_max` (per example, selectable where the
-  example allows it); one evaluation of `D` and `dD/dω` per step through complex **dual
-  numbers** (`struct CD { v, d }`, hand-written WGSL complex/dual arithmetic incl. `exp`,
-  `log`, `sqrt`, division);
+* `λ = σ + iω`, `σ = 0`, `ω` from `ω0 = 1e-9` to `ω_max` (per equation, Advanced); one evaluation of `D` and `dD/dω` per step through complex **dual
+  numbers** (`struct CD { v, d }`, WGSL complex/dual arithmetic incl. `exp`, `log`, `sqrt`,
+  division, trigonometric / hyperbolic functions and `exprel`, called by the generated code);
 * the observed phase increment `angle(D_b / D_a)` is accepted when it agrees with the
   trapezoid prediction `h (θ'_a + θ'_b)/2` within `tol = 0.3` rad; step factor
   `clamp(0.9 (tol/err)^{1/3}, 0.2, 4)`, step cap `h ≤ max(ω, 1)` plus the example's cap over
   its resonance band; sub-resolution transitions decided by the side of the root (flag 2);
-* `Z = n/2 − Φ/π` with the leading order (or effective order) `n` of the example;
+* `Z = n/2 − Φ/π` with the leading order `n` (estimated, set, or the FEM bar's effective order);
 * σ as described above; stable points are coloured by viridis (`1 − σ/σ_floor`), unstable
   points red by `Z` (capped at 6), the boundary white, failed marches grey — the colour scheme
   of `gpu/interactive/server.jl`.
@@ -172,66 +307,89 @@ Large charts are split into row bands; each band is its own submission, sized ad
 TDR / browser watchdog. The GPU time is the sum of the bands' compute-pass timestamps
 (`timestamp-query`); without that feature it falls back to wall-clock busy time ("wall").
 
-## Validation and timings (Intel UHD Graphics 630 laptop GPU, Chrome, 2026-10-06)
+## Validation and timings (Intel UHD Graphics 630 laptop GPU, Chrome, 2026-10-07)
 
 `julia --project=gpu/scripts -t auto webgpu/validate/ref_counts.jl --cpu` (NyquistGPU,
 CPU backend, Float32 and Float64), 160 × 90 grid per example, each with its own ω_max and
-step caps; default constants and a second constant set ("@alt", sliders moved):
+step caps; default constants and a second constant set ("@alt", sliders moved). The page
+runs every grid through the text path (FEM: built-in), `?validate=1`: **PASS** (also after the
+range-declaration texts, the 3D-capable march and the 50 000 step cap).
 
-* **Counts: 0 differing `Z` at unflagged points on all 24 grids** (also 0 between the
-  default and the exact pipeline). The only differences (rod: 0 vs Julia F32, 15 / 153
-  vs Julia F64; fem: 72 / 82 vs F64; neutral: 1) are flagged points with a root on the line
-  — the K = 1 row of the bar charts (λ = 0), where `Z_raw` is a half-integer and the rounding
-  is a coin flip; Julia's own F32 and F64 runs differ there the same way.
-* The scale-free bar forms agree with the paper's formulations (Float64: `cosh γ` with its
-  measured phase, n_eff = 98.85; LU form of the FEM determinant, n_eff = 23.88) at every
-  unflagged point; host (JS) and Julia effective orders agree to 1e-8.
-* Default-mode σ against the Julia F32 run: median |Δσ| 2e-8 – 2e-6, 99th percentile ≤ 3e-5.
-* Exact mode against Float64 dominant roots at 16 stable points per grid (certified by
-  counting on shifted lines for the retarded and neutral examples): within 1e-3 at 373 of
-  378 points. The exceptions: 3 neutral_hg points, where the root chain approaches the
-  asymptote Re λ = ln|a|/τ only as ω → ∞ (the certified value is that supremum, the march
-  sees roots up to ω_max); one gao@alt point where the exact mode found a root right of the
-  reference's (−1.194 + 6.08i, confirmed by a brute-force root search: the reference missed
-  it); one frac@alt point without any minimum.
-* Speckle (stable points whose clamped σ jumps against its neighbours' median by more than
-  5 % of the colour range), full chart at the default resolution, default → exact:
-  showcase 1768 → 21, gao 105 → 0, fourth 116 → 0, turning 109 → 52, pda 80 → 35 (the
-  remaining ones in exact mode are genuine ridges, e.g. where two real roots collide).
+* **Counts: 0 differing `Z` on all 24 grids against the Julia Float32 run** (also at flagged
+  points; 0 between the default and the exact pipeline). Against Julia Float64 the only
+  differences are flagged points with a root on the line (the K = 1 row of the bar charts,
+  λ = 0, where `Z_raw` is a half-integer: rod 15 / 153, fem 72 / 82, neutral 1), where Julia's
+  own F32 and F64 runs differ the same way.
+* The march settings evaluated from the texts' expressions equal the reference's (ω_max,
+  h_max, band) on every grid; the estimated orders differ from the reference's by 0 (integer
+  orders), 2e-8 (fractional oscillator), 9e-6 (Gao: `μ + ν` approached as `1/(T s^ν)` decays)
+  and 6e-10 / 8e-6 (rod: 0 vs the host-measured n_eff of the scaled denominator).
+* Default-mode σ against the Julia F32 run: median |Δσ| 5e-9 – 2e-6, 99th percentile ≤ 2e-5.
+* Exact mode against Float64 dominant roots at 16 stable points per grid: within 1e-3 at 373
+  of 378 points, the same exceptions as before (3 neutral_hg points where the root chain
+  approaches the asymptote Re λ = ln|a|/τ only as ω → ∞; one gao@alt point where the exact mode
+  found a root right of the reference's, confirmed by a brute-force search; one frac@alt point
+  without any minimum).
 
-Default resolution, default constants (`?bench=1`, median of 3):
+**Generated vs hand-written WGSL** (`?bench=compare`, default resolution, median of 5
+interleaved runs): parity. Identical counts everywhere and bit-identical results (same step
+counts at every point) for all examples but Gao, whose text follows the Julia reference's
+operation order (`K*exp(-Lλ)*(...)`) rather than the old WGSL's (`K*(exp(-Lλ)*(...))`).
+
+| example | resolution | GPU ms generated | hand-written | ratio | exact: generated | hand-written | ratio |
+|---|---|---|---|---|---|---|---|
+| fourth | 960 × 540 | 26.1 | 26.7 | 0.98 | 52.0 | 56.1 | 0.93 |
+| algebraic | 960 × 540 | 15.9 | 16.1 | 0.99 | 31.7 | 35.1 | 0.90 |
+| distributed | 960 × 540 | 28.4 | 27.7 | 1.02 | 48.5 | 52.4 | 0.93 |
+| showcase | 960 × 540 | 52.9 | 51.8 | 1.02 | 88.7 | 91.1 | 0.97 |
+| turning | 960 × 540 | 154 | 145 | 1.06 | 266 | 257 | 1.03 |
+| neutral | 480 × 270 | 117 | 116 | 1.01 | 170 | 169 | 1.01 |
+| pda | 480 × 270 | 283 | 281 | 1.01 | 403 | 400 | 1.01 |
+| rod | 480 × 270 | 206 | 208 | 0.99 | 284 | 287 | 0.99 |
+| frac | 960 × 540 | 34.5 | 35.5 | 0.97 | 60.2 | 60.8 | 0.99 |
+| gao | 480 × 270 | 178 | 178 | 1.00 | 283 | 287 | 0.99 |
+
+The things that make this parity: integer powers as repeated squaring, the shared nodes (the
+`log λ` of the fractional powers, helpers computed once), real factors as `dscale` / `daddr`
+instead of full dual products, constants folded on the host, and the uniform constants copied
+into a private array with constant indices (a loop with a dynamic index would push it to
+scratch memory).
+
+Default resolution, default parameters (`?bench=1`, median of 3):
 
 | example | resolution | GPU ms default | evals / pt | GPU ms exact | evals / pt | exact / default |
 |---|---|---|---|---|---|---|
-| fourth | 960 × 540 | 24 | 32 | 50 | 38 | 2.1 |
-| algebraic (A.2) | 960 × 540 | 15 | 22 | 32 | 26 | 2.2 |
-| distributed (A.3) | 960 × 540 | 26 | 24 | 47 | 27 | 1.8 |
-| showcase | 960 × 540 | 47 | 53 | 88 | 60 | 1.9 |
-| turning (A.7) | 960 × 540 | 137 | 139 | 230 | 162 | 1.7 |
-| neutral (A.4) | 480 × 270 | 108 | 293 | 161 | 323 | 1.5 |
-| neutral_hg (A.5) | 480 × 270 | 105 | 288 | 160 | 318 | 1.5 |
-| pda (A.6) | 480 × 270 | 249 | 704 | 357 | 735 | 1.4 |
-| rod (A.8) | 480 × 270 | 188 | 312 | 259 | 341 | 1.4 |
-| fem (A.9, N = 12) | 320 × 180 | 155 | 313 | 205 | 345 | 1.3 |
-| frac (A.11) | 960 × 540 | 32 | 27 | 54 | 39 | 1.7 |
-| gao (A.12) | 480 × 270 | 166 | 269 | 252 | 310 | 1.5 |
+| fourth | 960 × 540 | 26 | 32 | 52 | 38 | 2.0 |
+| algebraic (A.2) | 960 × 540 | 15 | 22 | 34 | 26 | 2.2 |
+| distributed (A.3) | 960 × 540 | 27 | 24 | 50 | 27 | 1.8 |
+| showcase | 960 × 540 | 51 | 53 | 99 | 60 | 1.9 |
+| turning (A.7) | 960 × 540 | 143 | 139 | 254 | 162 | 1.8 |
+| neutral (A.4) | 480 × 270 | 117 | 293 | 170 | 323 | 1.5 |
+| neutral_hg (A.5) | 480 × 270 | 105 | 288 | 158 | 318 | 1.5 |
+| pda (A.6) | 480 × 270 | 276 | 704 | 404 | 735 | 1.5 |
+| rod (A.8) | 480 × 270 | 203 | 312 | 287 | 341 | 1.4 |
+| fem (A.9, N = 12) | 320 × 180 | 169 | 313 | 228 | 345 | 1.3 |
+| frac (A.11) | 960 × 540 | 35 | 27 | 58 | 39 | 1.7 |
+| gao (A.12) | 480 × 270 | 173 | 269 | 291 | 310 | 1.7 |
 
-Full HD (1920 × 1080 = 2.07 M points, `?bench=hd`), the examples that stay below ~1 s there:
-
-| example | GPU ms default | Mpts/s | evals / pt | GPU ms exact | exact / default |
-|---|---|---|---|---|---|
-| fourth | 99 | 21.1 | 32 | 193 | 2.0 |
-| algebraic | 57 | 36.7 | 22 | 125 | 2.2 |
-| distributed | 95 | 21.8 | 24 | 182 | 1.9 |
-| showcase | 188 | 11.0 | 53 | 321 | 1.7 |
-| turning | 519 | 4.0 | 139 | 892 | 1.7 |
-| frac | 118 | 17.6 | 27 | 212 | 1.8 |
+(The evaluations per point are those of the first version; the times are within the
+run-to-run spread of this laptop GPU -- the unchanged FEM shader moved by the same 5–10 %.)
 
 ## Limitations
 
 * Float32 only; no certification of σ by counting on shifted lines (not admissible for the
   fractional and bar examples anyway), no Float16 mode, no flagged-point re-check.
-* A new model needs its `charD` in WGSL in `examples.js` (written with the dual helpers).
+* The equation must be a closed expression (no loops, determinants, piecewise definitions);
+  anything else needs a hand-written `charD` like the FEM bar. At most 16 parameters.
+* The order estimate assumes `|D(s)| ~ s^n` on the positive real axis; exponential growth
+  (advanced terms) or an order that changes over the chart is only warned about -- set n
+  then. The real-coefficient check is a warning, too (the count over ω ≥ 0 assumes it).
+* The 3D view is experimental: brute force (no adaptive refinement), at most 128³ in auto mode,
+  an 8-bit field (σ resolved to ~1/128 of the colour range), no hover read-out.
+* Auto-resolution is a heuristic (latency + throughput model of the measured frames); frames of
+  very slow equations (one march ≳ 50 ms) take about twice their single-march latency.
+* Float32: unscaled forms such as `cosh γ` of the rod overflow (grey "failed" points) and need
+  the scaling shown in A.8; a removable singularity needs `exprel` (or another entire form).
 * The grid is evaluated in full (no adaptive coarse-to-fine `run_adaptive!`).
 * `σ` of the march line is fixed at 0; the sin/cos argument reduction is exact up to
   |τω| ≈ 1e5.
