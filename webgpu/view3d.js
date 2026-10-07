@@ -142,7 +142,7 @@ export class Volume3D {
       });
     }
     this.device.queue.writeTexture({ texture: this.tex }, bytes, { bytesPerRow: nx, rowsPerImage: ny }, [nx, ny, nz]);
-    this.clearMesh();
+    // (the mesh is kept: the last completed one stays on screen until its successor is ready)
   }
 
   clearMesh() {
@@ -150,10 +150,10 @@ export class Volume3D {
     this.mesh = null;
   }
 
-  /** upload a boundary mesh (boundaryMesh) of the current volume */
-  setMesh(mesh) {
+  /** upload a boundary mesh (boundaryMesh) of a volume of grid size dims */
+  setMesh(mesh, dims) {
     this.clearMesh();
-    if (!mesh.idx.length) { this.mesh = { vb: { destroy() {} }, ib: { destroy() {} }, count: 0 }; return; }
+    if (!mesh.idx.length) { this.mesh = { vb: { destroy() {} }, ib: { destroy() {} }, count: 0, dims }; return; }
     const nv = mesh.pos.length / 3;
     const inter = new Float32Array(6 * nv);
     for (let i = 0; i < nv; i++) {
@@ -163,7 +163,7 @@ export class Volume3D {
     const vb = this.device.createBuffer({ size: inter.byteLength, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
     this.device.queue.writeBuffer(vb, 0, inter);
     // on screen without the caps that close the surface at the box faces (kept in the STL)
-    const [nx, ny, nz] = this.dims;
+    const [nx, ny, nz] = dims;
     const P = mesh.pos;
     const onFace = (a, b, c) => {
       for (let d = 0; d < 3; d++) {
@@ -183,7 +183,7 @@ export class Volume3D {
     const sub = keep.subarray(0, Math.max(k, 3));
     const ib = this.device.createBuffer({ size: sub.byteLength, usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST });
     this.device.queue.writeBuffer(ib, 0, sub);
-    this.mesh = { vb, ib, count: k };
+    this.mesh = { vb, ib, count: k, dims: dims.slice() };
   }
 
   /**
@@ -198,18 +198,19 @@ export class Volume3D {
       ctx.configure({ device: this.device, format: this.format, alphaMode: 'opaque' });
       ctx._configured = this.device;
     }
-    const useMesh = !!(opts.smooth && this.mesh);
+    // smooth: the boundary only as a mesh (the last completed one; none yet: the fog alone)
+    const useMesh = !!opts.smooth;
     const F = cameraFrame(cam, canvas.width / canvas.height);
     const f = new Float32Array(24);
     f.set(F.eye, 0); f.set(F.right, 4); f.set(F.up, 8); f.set(F.fwd, 12);
     f[16] = F.tanh; f[17] = F.aspect; f[18] = opts.fog; f[19] = useMesh ? 0 : opts.surf;
     f.set(opts.bg, 20); f[23] = 1 / Math.max(...this.dims);
     this.device.queue.writeBuffer(this.ubuf, 0, f);
-    if (useMesh) {
+    if (useMesh && this.mesh) {
       const g = new Float32Array(24);
       g.set(F.eye, 0); g.set(F.right, 4); g.set(F.up, 8); g.set(F.fwd, 12);
       g[16] = F.tanh; g[17] = F.aspect; g[18] = opts.surf;
-      g[20] = 1 / this.dims[0]; g[21] = 1 / this.dims[1]; g[22] = 1 / this.dims[2];
+      g[20] = 1 / this.mesh.dims[0]; g[21] = 1 / this.mesh.dims[1]; g[22] = 1 / this.mesh.dims[2];
       this.device.queue.writeBuffer(this.mbuf, 0, g);
     }
     const enc = this.device.createCommandEncoder();
@@ -218,7 +219,7 @@ export class Volume3D {
       colorAttachments: [{ view: ctx.getCurrentTexture().createView(), loadOp: 'clear', storeOp: 'store', clearValue: { r, g: gg, b, a: 1 } }],
     });
     const drawMesh = (pipe) => {
-      if (!useMesh || !this.mesh.count || !(opts.surf > 0)) return;
+      if (!useMesh || !this.mesh || !this.mesh.count || !(opts.surf > 0)) return;
       pass.setPipeline(pipe);
       pass.setBindGroup(0, this.mbg);
       pass.setVertexBuffer(0, this.mesh.vb);

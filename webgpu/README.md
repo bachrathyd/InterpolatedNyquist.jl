@@ -13,6 +13,7 @@ texts too. No build step, no external CDN, no account, no server-side computatio
 | `expr.js` | the equation language: tokenizer (whitelist), parser, typed expression DAG with common-subexpression sharing, WGSL generation, Float64 host evaluator, order estimate, setting expressions |
 | `engine.js` | WebGPU host code: device, pipelines (cached by the generated code; default and exact-root variant), row-band dispatches, timestamp timing, colouring pass, read-back |
 | `examples.js` | the examples as equation texts with parameter defaults / ranges, axes and march settings; the built-in FEM bar (hand-written WGSL, host effective order) |
+| `stats.js` | optional anonymous usage counts (GoatCounter); off unless configured |
 | `handwritten.js` | the hand-written WGSL of the first version, only for `?bench=compare` |
 | `march.wgsl` | the per-point `:unwrap` march (port of `gpu/src/NyquistGPU.jl`) and the exact-root polish; 2D grids and 3D grids (z slices stacked as rows) |
 | `view3d.js`, `volume.wgsl` | experimental 3D view: the combined field as a 3D texture, ray marching, orbit camera; STL export of the boundary (marching tetrahedra) |
@@ -151,12 +152,16 @@ march dispatch) and is shown by ray marching (WebGPU render pass, `volume.wgsl`)
   a fog with per-sample alpha `1 − (1 − α)^{8(−C)Δt}` in the σ colour map, so the most stable
   region is the densest;
 * **Smooth boundary** (checkbox, default on): after each 3D chart the boundary mesh of the STL
-  export (below) is built on the CPU in ~12 ms time slices (the ray-marched surface of the
-  8-bit texture is shown until it is ready, and a newer chart cancels the build) and drawn with
+  export (below) is built on the CPU in ~12 ms time slices and drawn with
   WebGPU: vertex normals are the area-weighted averages of the face normals (vertices shared
   through their grid edges), two-sided Lambert shading, premultiplied alpha with the boundary-α
   slider, in the order far side of the mesh, ray-marched interior fog, near side; the caps
   that close it at the box faces are left out on screen. Rotation only redraws (no rebuild).
+  While a new mesh is being built the last completed one stays on screen with the new fog (the
+  rough ray-marched surface is never shown while the option is on); a build is never cancelled,
+  charts that arrive meanwhile only replace the pending request, so during a slider drag every
+  finished mesh is shown and the next build starts from the newest chart (tested: 40 slider
+  steps, 30 charts, 30 mesh swaps, no frame without a mesh).
   Build time (shimmy, this laptop): 52³ 56 ms (59 204 triangles), 64³ 60 ms (92 002), 128³
   0.5–0.6 s (387 042). Off: the ray-marched surface (slow machines, very large grids).
 * **Save STL**: the boundary as a smooth, closed triangulated surface: the zero level of the
@@ -338,6 +343,26 @@ Regenerating the reference (Julia 1.12, CPU, ~6 min with 12 threads):
 ```
 julia --project=gpu/scripts -t auto webgpu/validate/ref_counts.jl --cpu [--only rod,fem]
 ```
+
+## Usage statistics (optional, GoatCounter)
+
+Anonymous counts with [GoatCounter](https://www.goatcounter.com) (no cookies, no personal data),
+**off by default**. To switch them on:
+
+1. Create a free GoatCounter account and a site code, e.g. `nyquistgpu`.
+2. In `stats.js` set `GOATCOUNTER = 'https://nyquistgpu.goatcounter.com/count'`.
+3. Optional, in the GoatCounter site settings: "Allow public counter" (then
+   `SHOW_PUBLIC_COUNTER = true` shows an "N visits" line in the footer; hidden on any error) and
+   "Ignore IPs" (your own addresses).
+
+With `GOATCOUNTER` empty nothing is loaded or sent. When set, the page loads
+`https://gc.zgo.at/count.js` asynchronously and sends only: one page view (the path, never the
+query or the hash, which holds a shared equation); `example/<key>` when a built-in example is
+opened (once per selection, not per slider move); `custom-equation` once per distinct own or
+edited equation of a session (after the text rested 5 s; decided by a local hash, the text is
+never sent); `3d-view`, `stl-export`, `copy-link`, `help-open`, `exact-off` (once per session);
+`gpu/<intel|nvidia|amd|apple|qualcomm|arm|other>` and `no-webgpu`. No parameter values, no
+equation text, nothing typed. The Help overlay says so in one line.
 
 ## Share it with colleagues
 
