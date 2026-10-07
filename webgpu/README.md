@@ -129,8 +129,12 @@ continuously at the automatic resolution, the min / max fields follow immediatel
 range lines of the text are rewritten when the interaction pauses (600 ms; rounded to 1e-4 of
 the span, a declared step is rescaled to keep the grid size). The share link carries the view.
 
-On a desktop the controls scroll in their own column and the chart stays in view; on a phone
-the layout stays stacked.
+On a desktop the controls scroll in their own column and the chart stays in view; the divider
+between them can be dragged (240 px to 70 % of the window, kept in localStorage, double-click
+resets). The example description and the syntax help are collapsed under the selector and the
+equation box, so the parameters follow the equation directly. On a phone the layout stays
+stacked, without the divider. The **? Help** button in the header (also `#help` or `?help=1`)
+opens a short usage guide.
 
 ## 3D view (experimental)
 
