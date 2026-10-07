@@ -150,14 +150,23 @@ march dispatch) and is shown by ray marching (WebGPU render pass, `volume.wgsl`)
   the boundary), 1 solid (every stable sample opaque, nothing behind shows through), in between
   a fog with per-sample alpha `1 − (1 − α)^{8(−C)Δt}` in the σ colour map, so the most stable
   region is the densest;
+* **Smooth boundary** (checkbox, default on): after each 3D chart the boundary mesh of the STL
+  export (below) is built on the CPU in ~12 ms time slices (the ray-marched surface of the
+  8-bit texture is shown until it is ready, and a newer chart cancels the build) and drawn with
+  WebGPU: vertex normals are the area-weighted averages of the face normals (vertices shared
+  through their grid edges), two-sided Lambert shading, premultiplied alpha with the boundary-α
+  slider, in the order far side of the mesh, ray-marched interior fog, near side; the caps
+  that close it at the box faces are left out on screen. Rotation only redraws (no rebuild).
+  Build time (shimmy, this laptop): 52³ 56 ms (59 204 triangles), 64³ 60 ms (92 002), 128³
+  0.5–0.6 s (387 042). Off: the ray-marched surface (slow machines, very large grids).
 * **Save STL**: the boundary as a smooth, closed triangulated surface: the zero level of the
   Float32 σ field (σ of the rightmost root, read back at full precision: negative at stable,
   positive at unstable points, continuous through 0 at the boundary), marching tetrahedra (6
   per cell, linear interpolation), padded so the surface is closed at the box faces
-  (printable), triangles oriented outward; binary STL in axis units or, with "unit box", in
-  [0, 1]³. Checked on the shimmy at 52³: 59 952 triangles, every directed edge matched exactly
-  once (watertight, consistently oriented), enclosed volume 0.807 of the unit box vs a stable
-  fraction of 0.797 of the grid points; 0.17 s;
+  (printable), triangles oriented outward (decided on the exact edge midpoints, robust also for
+  near-degenerate triangles); binary STL in axis units or, with "unit box", in [0, 1]³. Checked
+  on the shimmy at 52³, 64³ and 128³: every directed edge matched by exactly one reverse edge
+  (watertight, consistently oriented); the STL reuses the on-screen mesh;
 * the examples with a natural third parameter have a **3D view** button (shimmy: Z = ζ, with a
   thin interior and a stronger boundary; CTCR: Z = the cross-talk gain);
 * drag rotates (orbit), the wheel zooms, double-click resets the view; the box edges carry the

@@ -221,6 +221,7 @@
         <label class="row" title="3D view: opacity of the stable interior: 0 = transparent (only the boundary), 1 = solid; in between a fog that is denser where σ is more negative"><span><b>3D interior α</b><output id="alphaO"></output></span><input type="range" id="alpha" min="0" max="1" step="0.01" value="0.25"></label>
         <label class="row" title="3D view: opacity of the stability boundary surface"><span><b>3D boundary α</b><output id="surfO"></output></span><input type="range" id="surfA" min="0" max="1" step="0.01" value="0.22"></label>
       </div>
+      <label class="check" title="3D: draw the boundary as a smooth triangle mesh (marching tetrahedra on the Float32 σ field, as the STL export); off: the ray-marched surface of the 8-bit texture (faster to update on slow machines and very large grids)"><input type="checkbox" id="smooth3d" checked> Smooth boundary (3D)</label>
       <div id="marchInfo"></div>
       <div class="buttons">
         <button class="primary" id="render">Compute</button>

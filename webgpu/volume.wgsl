@@ -62,7 +62,7 @@ fn fs(v: VO) -> @location(0) vec4<f32> {
     let tf = max(ta, tb);
     let t0 = max(max(max(tn.x, tn.y), tn.z), 0.0);
     let t1 = min(min(tf.x, tf.y), tf.z);
-    if (t1 <= t0) { return vec4<f32>(u.bg.xyz, 1.0); }
+    if (t1 <= t0) { return vec4<f32>(0.0); }
     let dt = 1.0 / 320.0;
     let light = normalize(vec3<f32>(0.4, -0.5, 0.75));
     let h = u.bg.w;
@@ -95,5 +95,5 @@ fn fs(v: VO) -> @location(0) vec4<f32> {
         prev = c;
         t += dt;
     }
-    return vec4<f32>(col + (1.0 - alpha) * u.bg.xyz, 1.0);
+    return vec4<f32>(col, alpha);       // premultiplied, blended over the background / the far mesh side
 }
