@@ -15,10 +15,11 @@ texts too. No build step, no external CDN, no account, no server-side computatio
 | `examples.js` | the examples as equation texts with parameter defaults / ranges, axes and march settings; the built-in FEM bar (hand-written WGSL, host effective order) |
 | `handwritten.js` | the hand-written WGSL of the first version, only for `?bench=compare` |
 | `march.wgsl` | the per-point `:unwrap` march (port of `gpu/src/NyquistGPU.jl`) and the exact-root polish; 2D grids and 3D grids (z slices stacked as rows) |
-| `view3d.js`, `volume.wgsl` | experimental 3D view: the combined field as a 3D texture, ray marching, orbit camera |
+| `view3d.js`, `volume.wgsl` | experimental 3D view: the combined field as a 3D texture, ray marching, orbit camera; STL export of the boundary (marching tetrahedra) |
 | `display.wgsl` | colouring (port of `k_display!` / `pixel_colour` of `server.jl`) |
 | `validate/web_systems.jl` | the gallery examples in NyquistGPU form `D(λ, p, c)` (same operations as the WGSL) |
 | `validate/ref_counts.jl` | Julia script: reference counts and dominant roots from the repository engine |
+| `validate/independent.jl` | independent check of the shimmy and CTCR counts: the ODE back-end (`:bs3`, Float64, tol 1e-8) on the paper's own formulas |
 | `validate/ref_counts.json` | its output (160 × 90 grids, default and a second constant set per example), read by `?validate=1` |
 
 ## Your own equation
@@ -41,6 +42,20 @@ c = 0                                     # a fixed constant (a helper): no slid
   `exprel(x) = (eˣ − 1)/x` (entire; evaluated by its Taylor series near 0 -- for distributed
   delays, `(1 − e^{−τλ})/λ = τ·exprel(−τλ)`); constants `pi` (`π`), `i`; the variable `λ`
   (or `lambda`; the **λ** button inserts it);
+* **Distributed delays: `integral(f, θ, a, b)`** -- θ is the integration variable (any name that
+  is not λ, a constant, a function or a helper), `a`, `b` real expressions of the parameters;
+  `f` may contain θ, λ and parameters. When `f` is a sum of `p(θ)·exp(μθ)` terms (p a polynomial
+  in θ of degree ≤ 3 whose coefficients may contain λ and parameters, μ free of θ, e.g.
+  `exp(-λ*θ)` or `exp(-(λ + d)*θ)`) the integral is generated in **closed form**, stable at
+  λ = 0 in Float32: with θ = a + hu, h = b − a,
+  `∫ θ^k e^{μθ} dθ = h e^{μa} Σ_m C(k,m) b^{k−m} (−h)^m m! φ_{m+1}(μh)`,
+  `φ_j(z) = Σ_i z^i/(i+j)!` (φ₁ = exprel; Taylor series for |z| < 2 + j, else the recurrence
+  φ_j = (φ_{j−1} − 1/(j−1)!)/z) -- the removable singularity of the closed form never appears.
+  Any other kernel falls back to composite 8-point **Gauss–Legendre** with ⌈|λ|·|b − a|/3⌉
+  panels (at most 64), with a warning in the panel: slower, and approximate where
+  |λ|·|b − a| > 190, so keep ω_max small there. Nested integrals are not supported.
+  Examples: A.3 `b*integral(exp(-λ*θ), θ, τ₀, τ₀ + τ)`; the shimmy's contact-patch memory
+  `integral((2*(L - 1) + 4*θ)*exp(-λ*θ), θ, 0, 1)`.
 * Greek / Unicode names with subscripts (`τ₀`, `ζ₁`, `ω₂`, `k_p`); implicit multiplication is
   an error (`2λ` → "write 2*λ"); non-analytic functions (`abs`, `real`, `imag`, `conj`, `min`,
   `max`, ...) are rejected; a line that ends or starts with an operator, or an open
@@ -92,14 +107,30 @@ c = 0                                     # a fixed constant (a helper): no slid
   16:9 or that of a declared step grid), and the estimate follows the measured frame times
   (log-average, 30 % hysteresis). The fixed sizes stay selectable; in 3D they map to n³ with the
   same number of points (39³ … 160³).
+* **Time limit**: a field under the resolution selector, default 5 s, 1–600 s, for the fixed
+  resolutions (e.g. 60 s for a 4K image or a 202³ grid; progress is shown under the chart
+  during long runs); Auto keeps 5 s. It is part of the share link.
 * **Watchdog**: a chart is submitted in row bands (the first ~4k points, then ~60 ms each);
-  no band is submitted after 5 s, the partial chart stays and the page says "Stopped after 5 s
+  no band is submitted after the time limit, the partial chart stays and the page says "Stopped after 5 s
   … reduce ω_max or the resolution" (the automatic resolution is lowered for the next frame).
   A submitted band cannot be cancelled, so the per-thread step cap is 50 000 (the examples need
   ≤ ~750 evaluations per point); a march that hits it is a failed (grey) point. Measured: a
   neutral equation at ω_max = 1e6, tol = 0.01, 1920 × 1080 is stopped 5.8 s after the request.
 * **Mode**: the default is the **exact root (refined)** mode (below); "fast (first-order σ)" is
   the first-order estimate. Auto-resolution times the mode in use.
+
+## 2D navigation
+
+Mouse: the **wheel** zooms around the cursor, the **middle button** drags (pans) the ranges, a
+**left-drag** zooms to a box, a **double-click** resets to the declared ranges. Touch: pinch
+zooms, a two-finger drag pans (one finger only reads out the point; page scrolling outside the
+chart is not touched). The last image is shown transformed at once, the chart is recomputed
+continuously at the automatic resolution, the min / max fields follow immediately and the
+range lines of the text are rewritten when the interaction pauses (600 ms; rounded to 1e-4 of
+the span, a declared step is rescaled to keep the grid size). The share link carries the view.
+
+On a desktop the controls scroll in their own column and the chart stays in view; on a phone
+the layout stays stacked.
 
 ## 3D view (experimental)
 
@@ -110,9 +141,21 @@ march dispatch) and is shown by ray marching (WebGPU render pass, `volume.wgsl`)
 * the field `C = max(σ, σ_floor)/|σ_floor|` (≤ −0.02) at stable points and `+0.6` elsewhere is
   uploaded as an `r8unorm` 3D texture (trilinear filtering);
 * the unstable region is not drawn; the stability boundary is the zero level of `C`, a
-  translucent, Lambert-shaded sheet (normal from the gradient); the stable interior is a fog in
-  the σ colour map whose density grows with the margin `−C` (the "3D fog" slider), so the most
-  stable region is the densest;
+  Lambert-shaded sheet (normal from the gradient) with its own opacity slider ("3D boundary α":
+  0 hidden, 1 opaque); the stable interior has the "3D interior α" slider: 0 transparent (only
+  the boundary), 1 solid (every stable sample opaque, nothing behind shows through), in between
+  a fog with per-sample alpha `1 − (1 − α)^{8(−C)Δt}` in the σ colour map, so the most stable
+  region is the densest;
+* **Save STL**: the boundary as a smooth, closed triangulated surface: the zero level of the
+  Float32 σ field (σ of the rightmost root, read back at full precision: negative at stable,
+  positive at unstable points, continuous through 0 at the boundary), marching tetrahedra (6
+  per cell, linear interpolation), padded so the surface is closed at the box faces
+  (printable), triangles oriented outward; binary STL in axis units or, with "unit box", in
+  [0, 1]³. Checked on the shimmy at 52³: 59 952 triangles, every directed edge matched exactly
+  once (watertight, consistently oriented), enclosed volume 0.807 of the unit box vs a stable
+  fraction of 0.797 of the grid points; 0.17 s;
+* the examples with a natural third parameter have a **3D view** button (shimmy: Z = ζ, with a
+  thin interior and a stronger boundary; CTCR: Z = the cross-talk gain);
 * drag rotates (orbit), the wheel zooms, double-click resets the view; the box edges carry the
   axis names and ranges. Auto-resolution gives 40³–70³ at 20 fps on the test laptop.
 * Click **Z** again to go back to 2D. Not for the built-in FEM bar (fixed axes).
@@ -158,7 +201,7 @@ them).
 |---|---|---|---|
 | A.1 fourth-order delayed oscillator | `c₁*λ^4 + λ^2 + 2*ζ*λ + 1 + (P + D*λ)*exp(-τ*λ)` | P, D | ω_max 1e5 |
 | A.2 delayed oscillator | `λ^2 + a*λ + k + (b + g*λ)*exp(-τ*λ)` | a, b | ω_max 1e4 |
-| A.3 distributed delay | `λ^2 + a*λ + k + b*τ*exp(-τ₀*λ)*exprel(-τ*λ)` | a, b | ω_max 1e4 |
+| A.3 distributed delay | `λ^2 + a*λ + k + b*integral(exp(-λ*θ), θ, τ₀, τ₀ + τ)` | a, b | ω_max 1e4 |
 | showcase 2-DOF DAE | helpers `a₁₁`, `a₁₂`, `a₂₂`; `a₁₁*a₂₂ - a₁₂^2` | P, D | ω_max 1e5 |
 | A.7 multi-mode turning | helpers `M₁`, `M₂`; `M₁*M₂ + w*(1 - exp(-2*pi/Ω*λ))*(M₂ + A₂*M₁)` | Ω, w | h_max 0.05 for ω < 5 |
 | A.4 / A.5 neutral | `λ^2 + a*λ^2*exp(-τ*λ) + d*λ + k + c*exp(-τ*λ)` | a, c | ω_max 200, h_max `pi/(2*τ)` (whole line) |
@@ -166,11 +209,29 @@ them).
 | A.8 exact rod | `γ = λ*sqrt(1 + c/λ)/sqrt(1 + η*λ)`; `(1 + exp(-2*γ))/2 - K*exp(-r*λ - γ)` | r, K | ω_max 400, h_max `pi/(2*max(r, 1))` for ω < 40 |
 | A.9 FEM bar (built-in) | `det(λ²M + λC + K + F(λ))`, N elements (2–24) | r, K | as A.8; n_eff from the host |
 | A.11 fractional oscillator | `λ^α + c*λ^β + k*exp(-τ*λ)` | k, τ | ω_max 1e4; branch point (auto) |
+| shimmy (Takács, Orosz & Stépán 2009) | helpers `A = integral((2*(L - 1) + 4*θ)*exp(-λ*θ), θ, 0, 1)`, `P`, `Q`; `P - Q/(L^2 + 1/3 + Σ*(L^2 + 1 + Σ))` | V, L (3D: ζ) | ω_max 1e4 |
+| two delays, CTCR (Sipahi & Olgac 2004) | `λ^2 + 7.1*λ + a₀ + (6*λ + b₁)*exp(-τ₁*λ) + (2*λ + b₂)*exp(-τ₂*λ) + c₁₂*exp(-(τ₁ + τ₂)*λ)` | τ₁, τ₂ (3D: c₁₂) | ω_max 1e4, h_max `pi/(2*(τ₁ + τ₂))` for ω < 50 |
 | A.12 fractional PI (Gao, Zhai & Liu) | `λ^μ*(T*λ^ν + 1) + K*exp(-L*λ)*(k_p*λ^μ + k_i)` | k_p, k_i | ω_max 1e4; branch point (auto) |
 
-All orders are estimated (none is stored): 4, 2, 2, 4, 4, 2, 2, 2, ≈ 0 (rod), α, μ + ν.
+All orders are estimated (none is stored): 4, 2, 2, 4, 4, 2, 2, 2, ≈ 0 (rod), α, μ + ν, 3 (shimmy), 2 (CTCR).
 
 Notes on the harder ones:
+
+* **Shimmy** (Takács, Orosz & Stépán, Eur. J. Mech. A/Solids 2009, Eq. (31); dimensionless
+  towing speed V, caster length L, relaxation length Σ = 1.8, tyre damping ζ): the term
+  `2/λ²[(L − 1)λ + 2 − ((L + 1)λ + 2)e^{−λ}]` is the memory of the contact patch,
+  `∫₀¹ (2(L − 1) + 4θ) e^{−λθ} dθ` (checked in Float64 against the printed form at 24 points: relative
+  difference ≤ 3e-15, except at λ = 1e-6 i, where the printed form itself loses 5 digits). Term B of
+  Eq. (31) carries `1/(L − 1 − Σ)` and is multiplied by `(L − 1 − Σ)` outside the braces: the text
+  cancels the two, so nothing divides by zero at L = 1 + Σ (D is unchanged elsewhere). Retarded
+  (delay 1), n = 3 (estimated); ω_max = 1e4 (the λ³ term dominates from ω ~ 1/V on); no step cap
+  is needed. The 3D view over (V, L, ζ) is the Hopf surface of the MDBM figure.
+* **Two delays, CTCR** (Sipahi & Olgac, ACC 2004, Eq. (18), with the cross-talk term
+  `8 e^{−(τ₁+τ₂)s}`): the dendrites of the stable region in (τ₁, τ₂) ∈ [0, 3]². The two delays add up to
+  6, so the phase turns fast at low ω: without a cap the default step control (tol 0.3) jumped
+  over a root pair at 12 / 10 of 14 400 points (against the ODE back-end, see below); with
+  h ≤ π/(2(τ₁ + τ₂)_max) for ω < 50 there are none. Sliders: c₁₂ (default 8), a₀ = 21.1425,
+  b₁ = 14.8, b₂ = 7.3.
 
 * **Neutral systems (A.4–A.6)**: the phase ripple of a neutral system never decays, so a
   larger ω_max buys nothing; the window is the gallery's 200 / 200 / 500 (the default 1e5
@@ -331,6 +392,15 @@ range-declaration texts, the 3D-capable march and the 50 000 step cap).
   found a root right of the reference's, confirmed by a brute-force search; one frac@alt point
   without any minimum).
 
+**Independent check of the two newer examples** (`validate/independent.jl`, 160 × 90 grids,
+default and second parameter sets): the page's settings (`:unwrap`, Float32, the page's form of
+D) against the ODE back-end (`:bs3`, Float64, tol 1e-8) on the paper's own formula (the shimmy:
+Eq. (31) as printed, 2/λ² form and 1/(L − 1 − Σ), from ω₀ = 1e-3; CTCR: ω_max = 1e3): **0 differing
+counts** on all four grids (shimmy 77.4 % / 84.5 % stable, CTCR 59.0 % / 44.4 %). In the page
+validation both examples also give 0 differing counts against the Julia references; exact mode
+32 of 32 shimmy roots, 31 of 32 CTCR roots (one deep stable point, σ = −1.94, without any tracked
+minimum, as frac@alt).
+
 **Generated vs hand-written WGSL** (`?bench=compare`, default resolution, median of 5
 interleaved runs): parity. Identical counts everywhere and bit-identical results (same step
 counts at every point) for all examples but Gao, whose text follows the Julia reference's
@@ -371,6 +441,13 @@ Default resolution, default parameters (`?bench=1`, median of 3):
 | fem (A.9, N = 12) | 320 × 180 | 169 | 313 | 228 | 345 | 1.3 |
 | frac (A.11) | 960 × 540 | 35 | 27 | 58 | 39 | 1.7 |
 | gao (A.12) | 480 × 270 | 173 | 269 | 291 | 310 | 1.7 |
+| shimmy | 960 × 540 | 78 | 33 | 130 | 39 | 1.7 |
+| CTCR | 960 × 540 | 603 | 342 | 993 | 378 | 1.6 |
+
+A.3 through `integral(...)`: 28.6 ms (default) / 50.3 ms (exact) at 960 × 540, the same as the
+`exprel` text (identical counts in the validation). 3D grids (GPU time, exact / fast): shimmy 64³
+123 / 60 ms, 128³ 479 / 307 ms; CTCR 64³ 543 / 359 ms, 128³ 4.2 / 2.7 s. Auto (20 fps) picks
+about 40³–52³ for the shimmy and 25³ for the CTCR.
 
 (The evaluations per point are those of the first version; the times are within the
 run-to-run spread of this laptop GPU -- the unchanged FEM shader moved by the same 5–10 %.)

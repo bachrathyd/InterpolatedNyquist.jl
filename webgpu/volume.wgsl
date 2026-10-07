@@ -4,14 +4,15 @@
 //     otherwise:       C = +0.6                                       (not drawn)
 // stored as r8unorm (C + 1)/2 and trilinearly filtered. The unstable region is not drawn; the
 // stability boundary is the zero level of C (a translucent, shaded surface); the stable interior
-// is a fog coloured by the σ colour map, its density growing with the stability margin -C.
+// is a fog coloured by the σ colour map, its density growing with the stability margin -C:
+// per sample alpha 1 - (1 - a)^(8 (-C) dt) (a = 1: every stable sample is opaque).
 
 struct U {
     eye: vec4<f32>,
     right: vec4<f32>,
     up: vec4<f32>,
     fwd: vec4<f32>,
-    p: vec4<f32>,       // tan(fov/2), aspect, fog density, surface opacity
+    p: vec4<f32>,       // tan(fov/2), aspect, interior opacity a, surface opacity
     bg: vec4<f32>,      // background colour; .w = 1 / grid size (gradient step)
 }
 
@@ -70,7 +71,7 @@ fn fs(v: VO) -> @location(0) vec4<f32> {
     var t = t0;
     var prev = field(eye + dir * t + 0.5);
     for (var k = 0; k < 600; k++) {
-        if ((t > t1) || (alpha > 0.985)) { break; }
+        if ((t > t1) || (alpha > 0.999)) { break; }
         let q = eye + dir * t + 0.5;
         let c = field(q);
         if ((k > 0) && ((c < 0.0) != (prev < 0.0))) {
@@ -85,8 +86,9 @@ fn fs(v: VO) -> @location(0) vec4<f32> {
             col += (1.0 - alpha) * a * vec3<f32>(0.93, 0.95, 1.0) * shade;
             alpha += (1.0 - alpha) * a;
         }
-        if (c < 0.0) {
-            let a = 1.0 - exp(-u.p.z * (-c) * dt);
+        if ((c < 0.0) && (u.p.z > 0.0)) {
+            var a = 1.0;
+            if (u.p.z < 0.999) { a = 1.0 - exp2(8.0 * (-c) * dt * log2(1.0 - u.p.z)); }
             col += (1.0 - alpha) * a * viridis(1.0 + c);
             alpha += (1.0 - alpha) * a;
         }

@@ -8,7 +8,7 @@
 import { EXAMPLES, GROUPS, SET_DEFAULTS } from './examples.js';
 import { Engine, WebGPUUnavailable, countOf } from './engine.js';
 import { compileModel, rangeDecls, evalSetting, leadingOrder, realCoefficients, ExprError } from './expr.js';
-import { Volume3D, volumeBytes, defaultCamera, project } from './view3d.js';
+import { Volume3D, volumeBytes, defaultCamera, project, boundarySTL } from './view3d.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -16,7 +16,8 @@ const ZCAP = 6;
 const OWN_KEY = 'nyquistgpu.own.v1';
 const RES_CHOICES = ['auto', '320x180', '480x270', '960x540', '1920x1080', '3840x2160'];
 const TARGET_MS = 50;            // auto resolution: one frame in about 50 ms (20 fps)
-const DEADLINE_MS = 5000;        // watchdog: no further row band after 5 s
+const DEADLINE_MS = 5000;        // watchdog in auto mode: no further row band after 5 s
+// (a fixed resolution uses the user's time limit, state.limit seconds, 1 .. 600)
 const SET_INPUTS = ['n', 'w0', 'hmax', 'wband', 'branch'];      // text fields of Advanced
 const BG = [0x11 / 255, 0x13 / 255, 0x18 / 255];
 const exByKey = new Map(EXAMPLES.map((e) => [e.key, e]));
@@ -32,7 +33,9 @@ const state = {
   boundary: true,
   flags: false,
   live: true,
-  fog: 10,
+  limit: 5,                // time limit [s] of a chart at a fixed resolution
+  alpha: 0.25,             // 3D: interior opacity (0: only the boundary, 1: solid)
+  surf: 0.22,              // 3D: opacity of the boundary surface
   cam: defaultCamera(),
 };
 const slots = new Map();
@@ -268,7 +271,7 @@ function makeJob(slot, opts = {}) {
   if (opts.size) ({ nx, ny, nz } = opts.size);
   else if (res) {
     [nx, ny] = res.split('x').map(Number);
-    if (iz >= 0) nx = ny = nz = Math.min(160, Math.max(16, Math.round(Math.cbrt(nx * ny))));
+    if (iz >= 0) nx = ny = nz = Math.min(256, Math.max(16, Math.round(Math.cbrt(nx * ny))));
   }
   return {
     key: slot.key, code: m.code(ix, iy, iz), branch0, exact: opts.exact ?? state.exact, c: vals, npow,
@@ -435,6 +438,7 @@ function loadModelUI() {
   for (const k of SET_INPUTS) $('set_' + k).value = slot.set[k];
   syncMarchSliders();
   updateModified();
+  update3dButton();
   buildParamTable();
   renderStatus();
 }
@@ -451,6 +455,14 @@ function syncMarchSliders() {
   $('wmaxO').textContent = fmt(w);
   $('tolS').value = Math.log10(t);
   $('tolO').textContent = fmt(t) + ' rad';
+}
+
+function update3dButton() {
+  $('stlRow').hidden = !cur().axes[2];
+  const ex = curEx();
+  const b = $('view3d');
+  b.hidden = !ex.axes3d;
+  if (ex.axes3d) b.textContent = cur().axes[2] ? '2D view' : `3D view (Z = ${ex.axes3d[2]})`;
 }
 
 function updateModified() {
@@ -601,6 +613,7 @@ function setAxis(name, k) {
     }
   }
   buildParamTable();
+  update3dButton();
   saveOwn();
   request();
 }
@@ -734,6 +747,7 @@ function b64urlDecode(s) {
 function linkFor(slot) {
   const o = serialize(slot);
   o.x = state.exact ? 1 : 0;
+  if (state.limit !== 5) o.w = state.limit;
   return location.origin + location.pathname + '?ex=' + slot.key + (state.exact ? '' : '&exact=0') + '#m=' + b64urlEncode(JSON.stringify(o));
 }
 
@@ -759,6 +773,7 @@ function restoreFromHash() {
     const key = exByKey.has(o.k) ? o.k : 'own';
     state.key = key;
     if (o.x === 1 || o.x === 0) state.exact = o.x === 1;
+    if (Number.isFinite(o.w) && o.w >= 1 && o.w <= 600) state.limit = o.w;
     applySerialized(getSlot(key), o);
   } catch (e) {
     showError('The shared link could not be read (' + (e.message || e) + '); showing the default example.');
@@ -771,6 +786,11 @@ function restoreFromHash() {
 function bindChartControls() {
   $('res').addEventListener('change', () => { cur().res = $('res').value; saveOwn(); request(); });
   $('resetAxes').addEventListener('click', resetAxes);
+  $('limit').value = state.limit;
+  $('limit').addEventListener('change', () => {
+    const v = parseFloat($('limit').value);
+    if (Number.isFinite(v) && v >= 1 && v <= 600) state.limit = v; else $('limit').value = state.limit;
+  });
   $('live').addEventListener('change', () => { state.live = $('live').checked; });
   $('bnd').addEventListener('change', () => { state.boundary = $('bnd').checked; redraw(); });
   $('flags').addEventListener('change', () => { state.flags = $('flags').checked; redraw(); });
@@ -779,7 +799,31 @@ function bindChartControls() {
     const slot = cur();
     if (Number.isFinite(v) && v < 0) { slot.smin = v; $('sminLab').textContent = fmt(v); saveOwn(); if (is3D(lastJob)) request(); else redraw(); } else $('smin').value = slot.smin;
   });
-  $('fog').addEventListener('input', () => { state.fog = +$('fog').value; redraw(); });
+  const a3 = () => { $('alphaO').textContent = state.alpha.toFixed(2); $('surfO').textContent = state.surf.toFixed(2); };
+  $('alpha').addEventListener('input', () => { state.alpha = +$('alpha').value; a3(); redraw(); });
+  $('surfA').addEventListener('input', () => { state.surf = +$('surfA').value; a3(); redraw(); });
+  a3();
+  $('view3d').addEventListener('click', () => {
+    const slot = cur();
+    const ex = curEx();
+    if (!ex.axes3d || !slot.model) return;
+    if (slot.axes[2]) slot.axes = [slot.axes[0], slot.axes[1], null];
+    else if (ex.axes3d.every((n) => slot.model.params.includes(n))) {
+      slot.axes = ex.axes3d.slice();
+      if (ex.look3d) {
+        state.alpha = ex.look3d.alpha;
+        state.surf = ex.look3d.surf;
+        $('alpha').value = state.alpha;
+        $('surfA').value = state.surf;
+        a3();
+      }
+    }
+    state.cam = defaultCamera();
+    buildParamTable();
+    update3dButton();
+    saveOwn();
+    request();
+  });
   $('mode').value = state.exact ? 'exact' : 'fast';
   $('mode').addEventListener('change', () => {
     state.exact = $('mode').value === 'exact';
@@ -790,6 +834,7 @@ function bindChartControls() {
   $('bench').addEventListener('click', benchCurrent);
   $('savePng').addEventListener('click', savePng);
   $('copyLink').addEventListener('click', copyLink);
+  $('saveStl').addEventListener('click', saveStl);
 }
 
 function resetAxes() {
@@ -814,7 +859,7 @@ function resetAxes() {
 // rendering
 // ---------------------------------------------------------------------------------------------
 function displayFactor(nx) {
-  const css = $('chart').getBoundingClientRect().width || 960;
+  const css = $('chartclip').getBoundingClientRect().width || 960;
   const px = Math.max(480, css * (window.devicePixelRatio || 1));
   return Math.max(1, Math.ceil(nx / px - 1e-9));
 }
@@ -828,12 +873,12 @@ function draw3d(target = ctx) {
   if (!vol3d || !vol3d.tex) return;
   const cv = target.canvas;
   if (target === ctx) {
-    const css = $('chart').getBoundingClientRect().width || 960;
+    const css = $('chartclip').getBoundingClientRect().width || 960;
     const W = Math.round(Math.min(1600, css * (window.devicePixelRatio || 1)));
     const H = Math.round(W * 9 / 16);
     if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
   }
-  const F = vol3d.draw(target, state.cam, { fog: state.fog, surf: 0.22, bg: BG });
+  const F = vol3d.draw(target, state.cam, { fog: state.alpha, surf: state.surf, bg: BG });
   if (target === ctx) lastFrame = F;
 }
 
@@ -896,11 +941,17 @@ function setProgress(frac) {
 async function renderOnce(job, slot) {
   let rafPending = false;
   const d3 = is3D(job);
+  const deadline = job.auto ? DEADLINE_MS : 1000 * state.limit;
+  const t0 = performance.now();
+  const long = !job.auto && state.limit > 5;
   const r = await engine.compute(job, {
     targetMs: 60,
-    deadlineMs: DEADLINE_MS,
+    deadlineMs: deadline,
     onBand: (row0, frac) => {
       setProgress(frac);
+      if (long && performance.now() - t0 > 1000) {
+        $('hover').textContent = `computing ${job.nx}×${job.ny}${d3 ? '×' + job.nz : ''}: ${(100 * frac).toFixed(0)} % after ${((performance.now() - t0) / 1000).toFixed(0)} s (time limit ${state.limit} s)`;
+      }
       if (!d3 && !rafPending) {
         rafPending = true;
         requestAnimationFrame(() => { rafPending = false; engine.draw(ctx, viewOpts(job.nx)); });
@@ -910,10 +961,11 @@ async function renderOnce(job, slot) {
   setProgress(0);
   autoUpdate(job, r);
   if (r.timedOut) {
-    slot.runErr = `Stopped after ${(DEADLINE_MS / 1000).toFixed(0)} s (${(100 * r.rowsDone / (job.ny * job.nz)).toFixed(0)} % computed): the equation is too expensive or the march does not finish — reduce ω_max or the resolution${job.auto ? ' (the automatic resolution is lowered for the next frame)' : ''}.`;
+    slot.runErr = `Stopped after ${(deadline / 1000).toFixed(0)} s (time limit; ${(100 * r.rowsDone / (job.ny * job.nz)).toFixed(0)} % computed): the equation is too expensive or the march does not finish — reduce ω_max or the resolution${job.auto ? ' (the automatic resolution is lowered for the next frame)' : ''}.`;
     if (!d3) { lastJob = job; engine.draw(ctx, viewOpts(job.nx)); drawAxes(); }
     return r;
   }
+  if (long) $('hover').textContent = ' ';
   lastJob = job;
   showTiming(r, job);
   $('marchInfo').textContent = marchInfo(job);
@@ -924,6 +976,7 @@ async function renderOnce(job, slot) {
     vol3d.setVolume([job.nx, job.ny, job.nz], volumeBytes(rb, [job.nx, job.ny, job.nz], slot.smin, countOf));
     draw3d();
   } else engine.draw(ctx, viewOpts(job.nx));
+  updatePreview();
   drawAxes();
   showStats(last);
   return r;
@@ -975,7 +1028,7 @@ function overlay() {
   const g = ax.getContext('2d');
   g.setTransform(dpr, 0, 0, dpr, 0, 0);
   g.clearRect(0, 0, W, H);
-  const cr = $('chart').getBoundingClientRect();
+  const cr = $('chartclip').getBoundingClientRect();
   const wr = wrap.getBoundingClientRect();
   return { g, L: cr.left - wr.left, T: cr.top - wr.top, CW: cr.width, CH: cr.height };
 }
@@ -983,7 +1036,7 @@ function overlay() {
 function drawAxes() {
   const { g, L, T, CW, CH } = overlay();
   if (!lastJob) return;
-  const v = lastJob;
+  const v = is3D(lastJob) ? lastJob : { ...lastJob, ...curView() };
   const cs = getComputedStyle(document.documentElement);
   const ink = cs.getPropertyValue('--muted').trim() || '#666';
   g.strokeStyle = ink; g.fillStyle = ink;
@@ -1059,18 +1112,139 @@ function drawBox3D(g, L, T, CW, CH) {
 }
 
 function chartCoords(ev) {
-  const r = $('chart').getBoundingClientRect();
+  const r = $('chartclip').getBoundingClientRect();
   return { x: Math.min(Math.max(ev.clientX - r.left, 0), r.width), y: Math.min(Math.max(ev.clientY - r.top, 0), r.height), w: r.width, h: r.height };
+}
+
+// 2D view changes (wheel, middle-drag, box zoom, pinch): the axis ranges change at once, the
+// last image is shown transformed (CSS) until the new chart arrives, the chart is recomputed
+// continuously (at the automatic resolution), and the range lines of the text are rewritten
+// when the interaction pauses (600 ms) -- not on every event, so typing is not disturbed.
+function curView() {
+  const slot = cur();
+  if (lastJob && !is3D(lastJob) && lastJob.key === slot.key && slot.params[lastJob.xl] && slot.params[lastJob.yl] &&
+      slot.axes[0] === lastJob.xl && slot.axes[1] === lastJob.yl) {
+    const px = slot.params[lastJob.xl], py = slot.params[lastJob.yl];
+    return { xr: [px.min, px.max], yr: [py.min, py.max] };
+  }
+  return lastJob ? { xr: lastJob.xr, yr: lastJob.yr } : null;
+}
+
+function updatePreview() {
+  const cv = $('chart');
+  const v = curView();
+  if (!lastJob || is3D(lastJob) || !v) { cv.style.transform = ''; return; }
+  const { xr, yr } = lastJob;
+  const r = $('chartclip').getBoundingClientRect();
+  const W = r.width, H = r.height;
+  const sx = (xr[1] - xr[0]) / (v.xr[1] - v.xr[0]);
+  const sy = (yr[1] - yr[0]) / (v.yr[1] - v.yr[0]);
+  const tx = (xr[0] - v.xr[0]) / (v.xr[1] - v.xr[0]) * W;
+  const ty = (v.yr[1] - yr[1]) / (v.yr[1] - v.yr[0]) * H;
+  const id = Math.abs(sx - 1) < 1e-9 && Math.abs(sy - 1) < 1e-9 && Math.abs(tx) < 0.01 && Math.abs(ty) < 0.01;
+  cv.style.transform = id ? '' : `translate(${tx}px, ${ty}px) scale(${sx}, ${sy})`;
+}
+
+function syncRangeInputs() {
+  const slot = cur();
+  for (const row of document.querySelectorAll('#ptable .prow')) {
+    const p = slot.params[row.querySelector('.pname').textContent];
+    if (!p) continue;
+    row.querySelector('.pmin').value = fmtIn(p.min);
+    row.querySelector('.pmax').value = fmtIn(p.max);
+  }
+}
+
+let commitTimer = null;
+function commitView() {
+  clearTimeout(commitTimer);
+  commitTimer = null;
+  const slot = cur();
+  if (!slot.model || !lastJob) return;
+  for (const name of [lastJob.xl, lastJob.yl]) {
+    const p = slot.params[name];
+    if (!p) continue;
+    const d = slot.model.decls.get(name);
+    // round to 1e-4 of the span (the text stays readable; the view moves by < 0.01 %)
+    const q = Math.pow(10, Math.floor(Math.log10(p.max - p.min)) - 4);
+    const r = (x) => +(Math.round(x / q) * q).toPrecision(12);
+    const lo = r(p.min), hi = r(p.max);
+    const step = d && d.count ? +((hi - lo) / (d.count - 1)).toPrecision(4) : undefined;   // keep the grid size
+    writeRange(slot, name, lo, hi, step);
+  }
+  buildParamTable();
+}
+
+function setView(xr, yr, commitNow = false) {
+  const slot = cur();
+  if (!lastJob || is3D(lastJob) || lastJob.key !== slot.key) return;
+  const px = slot.params[lastJob.xl], py = slot.params[lastJob.yl];
+  if (!px || !py || !(xr[1] > xr[0]) || !(yr[1] > yr[0]) || ![...xr, ...yr].every(Number.isFinite)) return;
+  px.min = xr[0]; px.max = xr[1];
+  py.min = yr[0]; py.max = yr[1];
+  syncRangeInputs();
+  updatePreview();
+  drawAxes();
+  request();
+  clearTimeout(commitTimer);
+  if (commitNow) commitView(); else commitTimer = setTimeout(commitView, 600);
 }
 
 function bindPointer() {
   const cv = $('chart');
-  let start = null;
+  const box = $('chartclip');
+  let start = null;              // left drag: box zoom (2D) / orbit (3D)
+  let pan = null;                // middle drag (2D)
+  const touches = new Map();     // active touch pointers
+  let pinch = null;
   let raf = false;
   const orbit = () => { if (!raf) { raf = true; requestAnimationFrame(() => { raf = false; draw3d(); drawAxes(); }); } };
-  cv.addEventListener('pointerdown', (ev) => { start = { ...chartCoords(ev), cam: { ...state.cam } }; cv.setPointerCapture(ev.pointerId); });
-  cv.addEventListener('pointermove', (ev) => {
-    const p = chartCoords(ev);
+  const coords = chartCoords;
+  const capture = (ev) => { try { box.setPointerCapture(ev.pointerId); } catch (e) { /* synthetic event */ } };
+  box.addEventListener('mousedown', (ev) => { if (ev.button === 1) ev.preventDefault(); });   // no autoscroll
+  box.addEventListener('auxclick', (ev) => { if (ev.button === 1) ev.preventDefault(); });
+  box.addEventListener('pointerdown', (ev) => {
+    const p = coords(ev);
+    if (ev.pointerType === 'touch') {
+      touches.set(ev.pointerId, p);
+      capture(ev);
+      if (touches.size === 2 && !is3D(lastJob)) {
+        const [a, b] = [...touches.values()];
+        const v = curView();
+        if (v) pinch = { v, m: [(a.x + b.x) / 2, (a.y + b.y) / 2], d: Math.max(10, Math.hypot(a.x - b.x, a.y - b.y)) };
+        start = null;
+      } else if (touches.size === 1 && is3D(lastJob)) start = { ...p, cam: { ...state.cam } };
+      return;
+    }
+    if (ev.button === 1) {
+      ev.preventDefault();
+      const v = curView();
+      if (v && !is3D(lastJob)) { pan = { ...p, v }; capture(ev); }
+      return;
+    }
+    if (ev.button !== 0) return;
+    start = { ...p, cam: { ...state.cam } };
+    capture(ev);
+  });
+  box.addEventListener('pointermove', (ev) => {
+    const p = coords(ev);
+    if (ev.pointerType === 'touch' && touches.has(ev.pointerId)) {
+      touches.set(ev.pointerId, p);
+      if (pinch && touches.size === 2) {
+        const [a, b] = [...touches.values()];
+        const m = [(a.x + b.x) / 2, (a.y + b.y) / 2];
+        const s = pinch.d / Math.max(10, Math.hypot(a.x - b.x, a.y - b.y));
+        const { v } = pinch;
+        const W = p.w, H = p.h;
+        const cx0 = v.xr[0] + pinch.m[0] / W * (v.xr[1] - v.xr[0]);
+        const cy0 = v.yr[1] - pinch.m[1] / H * (v.yr[1] - v.yr[0]);
+        const wx = (v.xr[1] - v.xr[0]) * s, wy = (v.yr[1] - v.yr[0]) * s;
+        const x0 = cx0 - m[0] / W * wx;
+        const y1 = cy0 + m[1] / H * wy;
+        setView([x0, x0 + wx], [y1 - wy, y1]);
+        return;
+      }
+    }
     if (is3D(lastJob)) {
       if (start) {
         state.cam.yaw = start.cam.yaw - (p.x - start.x) * 0.01;
@@ -1080,52 +1254,75 @@ function bindPointer() {
       return;
     }
     hover(p);
-    if (start) {
+    if (pan) {
+      const { v } = pan;
+      const dx = (p.x - pan.x) / p.w * (v.xr[1] - v.xr[0]);
+      const dy = (p.y - pan.y) / p.h * (v.yr[1] - v.yr[0]);
+      setView([v.xr[0] - dx, v.xr[1] - dx], [v.yr[0] + dy, v.yr[1] + dy]);
+      return;
+    }
+    if (start && ev.pointerType !== 'touch') {
       zoomRect = { x0: Math.min(start.x, p.x), y0: Math.min(start.y, p.y), x1: Math.max(start.x, p.x), y1: Math.max(start.y, p.y) };
       drawAxes();
     }
   });
-  cv.addEventListener('pointerup', (ev) => {
-    const z = zoomRect;
-    start = null; zoomRect = null;
-    if (is3D(lastJob)) return;
-    drawAxes();
-    const slot = cur();
-    if (z && z.x1 - z.x0 > 6 && z.y1 - z.y0 > 6 && lastJob && lastJob.key === slot.key && slot.params[lastJob.xl] && slot.params[lastJob.yl]) {
-      const p = chartCoords(ev);
-      const { xr, yr } = lastJob;
-      const X = (x) => xr[0] + x / p.w * (xr[1] - xr[0]);
-      const Y = (y) => yr[1] - y / p.h * (yr[1] - yr[0]);
-      const r4 = (v) => +v.toPrecision(4);
-      // keep the number of grid points of a declared step
-      const zoomTo = (name, lo, hi) => {
-        const d = slot.model.decls.get(name);
-        const step = d && d.count ? +((hi - lo) / (d.count - 1)).toPrecision(4) : undefined;
-        writeRange(slot, name, lo, hi, step);
-      };
-      zoomTo(lastJob.xl, r4(X(z.x0)), r4(X(z.x1)));
-      zoomTo(lastJob.yl, r4(Y(z.y1)), r4(Y(z.y0)));
-      buildParamTable();
-      request();
+  const end = (ev) => {
+    if (ev.pointerType === 'touch') {
+      touches.delete(ev.pointerId);
+      if (touches.size < 2 && pinch) { pinch = null; commitView(); }
+      if (touches.size === 0) start = null;
+      return;
     }
-  });
-  cv.addEventListener('wheel', (ev) => {
-    if (!is3D(lastJob)) return;
+    if (pan) { pan = null; commitView(); return; }
+    const z = zoomRect;
+    const st = start;
+    start = null; zoomRect = null;
+    if (is3D(lastJob) || !st) return;
+    drawAxes();
+    const v = curView();
+    if (z && z.x1 - z.x0 > 6 && z.y1 - z.y0 > 6 && v) {
+      const p = coords(ev);
+      const X = (x) => v.xr[0] + x / p.w * (v.xr[1] - v.xr[0]);
+      const Y = (y) => v.yr[1] - y / p.h * (v.yr[1] - v.yr[0]);
+      setView([X(z.x0), X(z.x1)], [Y(z.y1), Y(z.y0)], true);
+    }
+  };
+  box.addEventListener('pointerup', end);
+  box.addEventListener('pointercancel', end);
+  box.addEventListener('wheel', (ev) => {
     ev.preventDefault();
-    state.cam.dist = Math.max(1.0, Math.min(8, state.cam.dist * Math.exp(ev.deltaY * 0.001)));
-    orbit();
+    if (is3D(lastJob)) {
+      state.cam.dist = Math.max(1.0, Math.min(8, state.cam.dist * Math.exp(ev.deltaY * 0.001)));
+      orbit();
+      return;
+    }
+    const v = curView();
+    if (!v) return;
+    const p = coords(ev);
+    const dy = ev.deltaMode === 1 ? ev.deltaY * 33 : ev.deltaMode === 2 ? ev.deltaY * 400 : ev.deltaY;
+    const f = Math.exp(Math.max(-1, Math.min(1, dy * 0.0015)));
+    const cx = v.xr[0] + p.x / p.w * (v.xr[1] - v.xr[0]);
+    const cy = v.yr[1] - p.y / p.h * (v.yr[1] - v.yr[0]);
+    setView([cx + (v.xr[0] - cx) * f, cx + (v.xr[1] - cx) * f], [cy + (v.yr[0] - cy) * f, cy + (v.yr[1] - cy) * f]);
   }, { passive: false });
-  cv.addEventListener('dblclick', () => {
-    if (is3D(lastJob)) { state.cam = defaultCamera(); orbit(); } else resetAxes();
+  box.addEventListener('dblclick', () => {
+    if (is3D(lastJob)) { state.cam = defaultCamera(); orbit(); } else { clearTimeout(commitTimer); resetAxes(); }
   });
-  cv.addEventListener('pointerleave', () => { $('hover').textContent = is3D(lastJob) ? '3D view: drag to rotate, wheel to zoom, double-click to reset the view.' : ' '; });
+  box.addEventListener('pointerleave', () => {
+    $('hover').textContent = is3D(lastJob) ? '3D view: drag to rotate, wheel to zoom, double-click to reset the view.' :
+      '2D: wheel zooms at the cursor, middle-drag pans, left-drag zooms to a box, double-click resets; touch: pinch / two-finger drag.';
+  });
 }
 
 function hover(p) {
-  if (!last) return;
+  if (!last || is3D(lastJob)) return;
   const { nx, ny, xr, yr } = last;
-  const ix = Math.round(p.x / p.w * (nx - 1));
-  const iy = Math.round((1 - p.y / p.h) * (ny - 1));
+  const v = curView() || last;
+  const xv = v.xr[0] + p.x / p.w * (v.xr[1] - v.xr[0]);
+  const yv = v.yr[1] - p.y / p.h * (v.yr[1] - v.yr[0]);
+  const ix = Math.round((xv - xr[0]) / (xr[1] - xr[0]) * (nx - 1));
+  const iy = Math.round((yv - yr[0]) / (yr[1] - yr[0]) * (ny - 1));
+  if (ix < 0 || iy < 0 || ix >= nx || iy >= ny) { $('hover').textContent = ' '; return; }
   const i = ix + iy * nx;
   const x = xr[0] + ix * (xr[1] - xr[0]) / (nx - 1);
   const y = yr[0] + iy * (yr[1] - yr[0]) / (ny - 1);
@@ -1187,6 +1384,19 @@ async function savePng() {
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   }, 'image/png');
+}
+
+function saveStl() {
+  if (!last || !is3D(lastJob)) return;
+  const j = lastJob;
+  const t0 = performance.now();
+  const { blob, triangles } = boundarySTL(last, [j.nx, j.ny, j.nz], [j.xr, j.yr, j.zr], cur().smin, countOf, $('stlUnit').checked);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${j.key}_${j.xl}_${j.yl}_${j.zl}_${j.nx}x${j.ny}x${j.nz}.stl`.replace(/[^\w.-]+/g, '_');
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  logMsg(`STL: ${triangles} triangles (closed at the box faces), ${(blob.size / 1e6).toFixed(1)} MB, ${(performance.now() - t0).toFixed(0)} ms`);
 }
 
 function diffCanvas(nx, ny, zw, zr) {

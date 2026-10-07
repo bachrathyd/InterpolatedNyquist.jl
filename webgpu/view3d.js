@@ -86,7 +86,7 @@ export class Volume3D {
     this.device.queue.writeTexture({ texture: this.tex }, bytes, { bytesPerRow: nx, rowsPerImage: ny }, [nx, ny, nz]);
   }
 
-  /** ray-march into a canvas context (W x H set by the caller); opts { fog, surf, bg: [r, g, b] } */
+  /** ray-march into a canvas context (W x H set by the caller); opts { fog (interior opacity 0..1), surf, bg: [r, g, b] } */
   draw(ctx, cam, opts) {
     if (!this.tex) return null;
     const canvas = ctx.canvas;
@@ -111,4 +111,115 @@ export class Volume3D {
     this.device.queue.submit([enc.finish()]);
     return F;
   }
+}
+
+/**
+ * Stability boundary of a read-back 3D chart as a closed binary STL.
+ * Field (full Float32 precision): f = σ of the rightmost root (stable points: ≤ -1e-6,
+ * unstable: ≥ +1e-6), clipped to [smin, -smin]; no σ: ±|smin|/2 by the count. The zero level of f
+ * is the boundary (σ passes 0 continuously there), extracted by marching tetrahedra (6 per cell,
+ * linear interpolation: a smooth surface, no voxel faces). The grid is padded with an unstable
+ * layer and the vertices are clamped to the box, so the surface is closed at the box faces
+ * (printable). Triangles are oriented outward (from the stable side to the unstable one).
+ * ranges: [xr, yr, zr]; unit: true -> coordinates in the unit box [0, 1]^3.
+ * -> { blob, triangles }
+ */
+export function boundarySTL(rb, dims, ranges, smin, countOf, unit) {
+  const [nx, ny, nz] = dims;
+  const m = Math.abs(smin);
+  const X = nx + 2, Y = ny + 2, Z = nz + 2;
+  // padding: 'very unstable' -- the zero crossing towards it lies at the boundary node itself
+  // (t = v/(v - 1e30) ~ 0), which closes the surface exactly at the box faces
+  const PAD = 1e30;
+  const f = new Float32Array(X * Y * Z).fill(PAD);
+  for (let k = 0; k < nz; k++) {
+    for (let j = 0; j < ny; j++) {
+      for (let i = 0; i < nx; i++) {
+        const q = i + nx * (j + ny * k);
+        const Zc = countOf(rb, q);
+        const has = (rb.flags[q] & 256) && Number.isFinite(rb.s[q]);
+        let v;
+        if (Zc === 0) v = has ? Math.min(-1e-6, Math.max(rb.s[q], -m)) : -m / 2;
+        else v = has ? Math.max(1e-6, Math.min(rb.s[q], m)) : m / 2;
+        f[(i + 1) + X * ((j + 1) + Y * (k + 1))] = v;
+      }
+    }
+  }
+  const [xr, yr, zr] = ranges;
+  const map = (g, n, r) => {                  // padded grid coordinate -> axis units
+    const t = (g - 1) / (n - 1);
+    return unit ? t : r[0] + t * (r[1] - r[0]);
+  };
+  // the 8 cube corners and the 6 tetrahedra around the main diagonal 0-6
+  const C = [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0], [0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]];
+  const T = [[0, 1, 2, 6], [0, 2, 3, 6], [0, 3, 7, 6], [0, 7, 4, 6], [0, 4, 5, 6], [0, 5, 1, 6]];
+  const tri = [];
+  const p = new Array(4), v = new Array(4);
+  const P = new Array(8), V = new Array(8);
+  const cut = (a0, b0) => {
+    // always from the stable (negative) end: the same point for every tetrahedron sharing the edge
+    const [a, b] = v[a0] < 0 ? [a0, b0] : [b0, a0];
+    const t = v[a] / (v[a] - v[b]);
+    return [p[a][0] + t * (p[b][0] - p[a][0]), p[a][1] + t * (p[b][1] - p[a][1]), p[a][2] + t * (p[b][2] - p[a][2])];
+  };
+  const same = (P1, P2) => P1[0] === P2[0] && P1[1] === P2[1] && P1[2] === P2[2];
+  const emit = (A, B, Cc, pos, neg) => {
+    if (same(A, B) || same(B, Cc) || same(A, Cc)) return;            // degenerate (at the box faces)
+    // outward: the normal points from the stable (negative) to the unstable (positive) vertices
+    const u = [B[0] - A[0], B[1] - A[1], B[2] - A[2]];
+    const w = [Cc[0] - A[0], Cc[1] - A[1], Cc[2] - A[2]];
+    const nrm = [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]];
+    const avg = (ids) => [0, 1, 2].map((d) => ids.reduce((s, i) => s + p[i][d], 0) / ids.length);
+    const pp = avg(pos), pn = avg(neg);
+    const dir = (pp[0] - pn[0]) * nrm[0] + (pp[1] - pn[1]) * nrm[1] + (pp[2] - pn[2]) * nrm[2];
+    tri.push(dir >= 0 ? [A, B, Cc] : [A, Cc, B]);
+  };
+  for (let k = 0; k < Z - 1; k++) {
+    for (let j = 0; j < Y - 1; j++) {
+      for (let i = 0; i < X - 1; i++) {
+        let neg = 0;
+        for (let c = 0; c < 8; c++) {
+          const [a, b, d] = C[c];
+          V[c] = f[(i + a) + X * ((j + b) + Y * (k + d))];
+          if (V[c] < 0) neg++;
+        }
+        if (neg === 0 || neg === 8) continue;
+        for (let c = 0; c < 8; c++) P[c] = [map(i + C[c][0], nx, xr), map(j + C[c][1], ny, yr), map(k + C[c][2], nz, zr)];
+        for (const t of T) {
+          for (let q = 0; q < 4; q++) { p[q] = P[t[q]]; v[q] = V[t[q]]; }
+          const ins = [0, 1, 2, 3].filter((q) => v[q] < 0);
+          const out = [0, 1, 2, 3].filter((q) => v[q] >= 0);
+          if (ins.length === 0 || ins.length === 4) continue;
+          if (ins.length === 1 || ins.length === 3) {
+            const [s] = ins.length === 1 ? ins : out;
+            const o = (ins.length === 1 ? out : ins);
+            emit(cut(s, o[0]), cut(s, o[1]), cut(s, o[2]), out, ins);
+          } else {
+            const [a, b] = ins;
+            const [c1, d] = out;
+            const q1 = cut(a, c1), q2 = cut(a, d), q3 = cut(b, d), q4 = cut(b, c1);
+            emit(q1, q2, q3, out, ins);
+            emit(q1, q3, q4, out, ins);
+          }
+        }
+      }
+    }
+  }
+  const buf = new ArrayBuffer(84 + 50 * tri.length);
+  const dv = new DataView(buf);
+  const head = 'NyquistGPU WebGPU: stability boundary (zero level of sigma), marching tetrahedra';
+  for (let i = 0; i < 80; i++) dv.setUint8(i, i < head.length ? head.charCodeAt(i) & 127 : 32);
+  dv.setUint32(80, tri.length, true);
+  let o = 84;
+  for (const [A, B, Cc] of tri) {
+    const u = [B[0] - A[0], B[1] - A[1], B[2] - A[2]];
+    const w = [Cc[0] - A[0], Cc[1] - A[1], Cc[2] - A[2]];
+    let nrm = [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]];
+    const l = Math.hypot(...nrm) || 1;
+    nrm = nrm.map((x) => x / l);
+    for (const val of [...nrm, ...A, ...B, ...Cc]) { dv.setFloat32(o, val, true); o += 4; }
+    dv.setUint16(o, 0, true);
+    o += 2;
+  }
+  return { blob: new Blob([buf], { type: 'model/stl' }), triangles: tri.length };
 }

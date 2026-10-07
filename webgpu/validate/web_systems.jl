@@ -153,7 +153,69 @@ function D_gao(λ, p, c)
     return sm * (Tc * exp(ν * L) + 1) + Kp * exp(-Ld * λ) * (p[1] * sm + p[2])
 end
 
+# --- integral(...) closed forms of the page: φ_k(w) = Σ_j w^j/(j+k)! (k ≥ 2; φ_1 = exprel) -------
+function phik(w::Complex{S}, k) where {S}
+    if abs(w) < 2 + k
+        c = one(S)
+        for i in 1:(23 + k)
+            c /= S(i)
+        end
+        r = Complex{S}(c)
+        for j in 22:-1:0
+            c *= S(j + 1 + k)
+            r = w * r + c
+        end
+        return r
+    end
+    r = exp(w)
+    f = one(S)
+    for i in 1:k
+        r = (r - f) / w
+        f /= S(i)
+    end
+    return r
+end
+exprelT(x) = E1T(-x)          # (e^x - 1)/x, the page's dexprel (E1T(y) = (1 - e^{-y})/y)
+
+# --- shimmy, stretched-string tyre (Takács, Orosz & Stépán 2009, Eq. 31),  p = (V, L), c = (Σ, ζ)
+# contact-patch memory  2/λ²[(L-1)λ + 2 - ((L+1)λ + 2)e^{-λ}] = ∫₀¹ (2(L-1) + 4θ) e^{-λθ} dθ
+#   = (2(L-1) + 4) φ_1(-λ) - 4 φ_2(-λ)   (the page's closed form of integral(...))
+function D_shimmy(λ, p, c)
+    V, L = p
+    Σ, ζ = c
+    o = one(V)
+    A = (2 * (L - 1) + 4) * exprelT(-λ) - 4 * phik(-λ, 2)
+    P = Σ * (V * V) * (λ * λ * λ) + 2 * V * (V + Σ * ζ) * (λ * λ) + (Σ + 4 * ζ * V) * λ + 2
+    Q = (L - 1 - Σ) * (A + (L - 1 - Σ) * (2 * Σ * ζ * V * λ + Σ + 4 * ζ * V) +
+         (L + 1 + Σ) * (2 * Σ * ζ * V * λ + Σ - 4 * ζ * V) * exp(-λ)) + 4 * ζ * V * L * (1 + Σ) * (2 + Σ * λ)
+    return P - Q / (L * L + o / 3 + Σ * (L * L + 1 + Σ))
+end
+# Eq. (31) as printed (Float64 cross-check only; cancels near λ = 0, divides by L - 1 - Σ)
+function D_shimmy_paper(λ, p, c)
+    V, L = p
+    Σ, ζ = c
+    denom = L^2 + 1 / 3 + Σ * (L^2 + 1 + Σ)
+    nf = L - 1 - Σ
+    tA = (2 / λ^2) * ((L - 1) * λ + 2 - ((L + 1) * λ + 2) * exp(-λ))
+    tB = 4ζ * V * L * (1 + Σ) * (2 + Σ * λ) / nf
+    tC = nf * (2Σ * ζ * V * λ + Σ + 4ζ * V)
+    tD = (L + 1 + Σ) * (2Σ * ζ * V * λ + Σ - 4ζ * V) * exp(-λ)
+    poly = Σ * V^2 * λ^3 + 2V * (V + Σ * ζ) * λ^2 + (Σ + 4ζ * V) * λ + 2
+    return poly - nf / denom * (tA + tB + tC + tD)
+end
+
+# --- two delays with cross-talk, CTCR (Sipahi & Olgac 2004, Eq. 18),  p = (τ1, τ2),
+#     c = (c12, a0, b1, b2)
+function D_ctcr(λ, p, c)
+    τ1, τ2 = p
+    c12, a0, b1, b2 = c
+    S = typeof(τ1)
+    return λ * λ + S(7.1) * λ + a0 + (6 * λ + b1) * exp(-τ1 * λ) + (2 * λ + b2) * exp(-τ2 * λ) +
+           c12 * exp(-(τ1 + τ2) * λ)
+end
+
 neutral_kw(c) = (hmax = π / (2 * c[1]), ωband = Inf)
+const CTCR_KW = (hmax = π / 12, ωband = 50.0)    # h ≤ π/(2(τ1 + τ2)_max) for ω < 50
 pda_kw(c) = (hmax = π / (2 * c[3]), ωband = Inf)
 const BAR_KW = (hmax = π / 21, ωband = 40.0)        # r = τ/T up to 10.5: π/(2 r_max) over ω < 40
 
@@ -176,6 +238,10 @@ const WEB = Dict(
         kw = c -> BAR_KW, cert = false),
     "frac" => (D = D_frac, c = (1.8, 0.8, 0.5), alt = (1.6, 0.5, 1.0),
         xr = (0.0, 5.0), yr = (0.1, 2.0), wmax = 1e4, npow = (c, w) -> c[1], kw = c -> (;), cert = false),
+    "shimmy" => (D = D_shimmy, c = (1.8, 0.02), alt = (1.2, 0.06),
+        xr = (0.001, 0.6), yr = (-0.2, 7.0), wmax = 1e4, npow = (c, w) -> 3.0, kw = c -> (;), cert = true),
+    "ctcr" => (D = D_ctcr, c = (8.0, 21.1425, 14.8, 7.3), alt = (12.0, 18.0, 14.8, 7.3),
+        xr = (0.0, 3.0), yr = (0.0, 3.0), wmax = 1e4, npow = (c, w) -> 2.0, kw = c -> CTCR_KW, cert = true),
     "gao" => (D = D_gao, c = (1.5, 0.4, 5.0, 10.0, 0.5), alt = (1.2, 0.3, 4.0, 10.0, 0.5),
         xr = (-1.0, 6.0), yr = (-1.0, 25.0), wmax = 1e4, npow = (c, w) -> c[1] + c[5], kw = c -> (;), cert = false),
 )
