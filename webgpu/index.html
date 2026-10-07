@@ -110,6 +110,8 @@
   button.ax { padding: 2px 7px; font-size: 12px; min-width: 26px; }
   button.ax.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
   #orderInfo { margin: 8px 0 4px; }
+  .msl { margin-top: 10px; }
+  .msl output { font-size: 12px; }
   #wgslOut { font: 11.5px/1.35 ui-monospace, Consolas, monospace; background: var(--chip); padding: 6px 8px; border-radius: 6px; overflow-x: auto; max-height: 320px; color: var(--ink); margin: 0; }
   #linkOut { margin-top: 8px; font-size: 12px; }
   #linkMsg { font-size: 12px; color: var(--muted); margin-top: 6px; }
@@ -133,17 +135,20 @@
       <div class="eqbar"><label for="eq"><b>D(λ) =</b> <span class="muted" id="eqMod"></span></label>
         <span class="buttons tight"><button id="insLam" title="Insert λ at the cursor">λ</button><button id="resetEx" title="Restore this example's equation, parameters and settings">Reset</button></span></div>
       <textarea id="eq" rows="4" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" aria-describedby="eqHelp"></textarea>
-      <div class="help" id="eqHelp"><code>+ - * / ^</code>, <code>exp log sqrt sin cos tan sinh cosh tanh exprel pow(a,b)</code>, <code>pi</code>, <code>i</code>, variable <code>λ</code> (or <code>lambda</code>). Lines <code>name = expr</code> define helpers, the last line is D; <code>#</code> comments. Every other name is a parameter. Write <code>2*λ</code>, not <code>2λ</code>. Ctrl+Enter applies at once.</div>
+      <div class="help" id="eqHelp"><code>+ - * / ^</code>, <code>exp log sqrt sin cos tan sinh cosh tanh exprel pow(a,b)</code>, <code>pi</code>, <code>i</code>, variable <code>λ</code> (or <code>lambda</code>). <code>P = 0:2</code> declares a parameter range (<code>P = 0:2 @ 0.5</code> with its value, <code>P = 0:0.01:2</code> with a step: the grid along an axis); <code>name = expr</code> is a helper and <code>name = 3</code> a fixed constant (no slider); the last line is D; <code>#</code> comments. Every other name is a parameter. Write <code>2*λ</code>, not <code>2λ</code>. Ctrl+Enter applies at once.</div>
       <div id="eqStatus" class="status"></div>
-      <div class="phead"><b>Parameters</b><span>min · slider · max · X / Y: chart axes</span></div>
+      <div class="phead"><b>Parameters</b><span>min · slider · max · X / Y / Z: axes (Z: 3D)</span></div>
       <div id="ptable"></div>
+      <div class="grid2 msl">
+        <label class="row"><span><b>ω<sub>max</sub></b><output id="wmaxO"></output></span><input type="range" id="wmaxS" min="1" max="6" step="0.01"></label>
+        <label class="row"><span><b>tolerance</b><output id="tolO"></output></span><input type="range" id="tolS" min="-2" max="0" step="0.01"></label>
+      </div>
+      <div class="help">ω<sub>max</sub>: end of the march along λ = iω (log scale; neutral systems need a small one, 200–500). Tolerance: the largest accepted difference (rad) between the phase change of a step and its trapezoid prediction: smaller is safer and slower.</div>
       <div id="orderInfo" class="formula"></div>
       <details id="adv">
         <summary>Advanced: order n and march settings</summary>
         <div class="grid2">
-          <label class="row"><span><b>order n</b></span><input type="text" id="set_n" placeholder="estimated" title="leading order n of D (Z = n/2 - Δarg D/π); empty: estimated from ln|D(s)| on the real axis"></label>
-          <label class="row"><span><b>ω<sub>max</sub></b></span><input type="text" id="set_wmax" placeholder="1e5"></label>
-          <label class="row"><span><b>tolerance (rad)</b></span><input type="text" id="set_tol" placeholder="0.3"></label>
+          <label class="row"><span><b>order n override</b></span><input type="text" id="set_n" placeholder="automatic" title="leading order n of D (Z = n/2 - Δarg D/π); empty: computed automatically from ln|D(s)| on the real axis"></label>
           <label class="row"><span><b>ω₀ (start)</b></span><input type="text" id="set_w0" placeholder="1e-9"></label>
           <label class="row"><span><b>step cap h<sub>max</sub></b></span><input type="text" id="set_hmax" placeholder="none"></label>
           <label class="row"><span><b>… for ω below</b></span><input type="text" id="set_wband" placeholder="whole line"></label>
@@ -154,7 +159,7 @@
             <option value="on">yes: the |D| minimum at ω₀ is no root</option>
             <option value="off">no</option>
           </select></label>
-        <div class="formula">Settings are expressions of the parameters (an axis parameter stands for max |value| over its range) with <code>pi</code>, <code>inf</code>, <code>min</code>, <code>max</code>, <code>abs</code>, e.g. h<sub>max</sub> = <code>pi/(2*τ)</code>. <b>Neutral systems</b> (the highest power of λ also multiplies a delay term): the phase ripple never decays and the default ω<sub>max</sub> = 1e5 fails; use a small ω<sub>max</sub> such as 200–500 with h<sub>max</sub> = <code>pi/(2*τ)</code> on the whole line.</div>
+        <div class="formula">Leave n empty: it is computed automatically (shown above the Advanced section). Settings are expressions of the parameters (an axis parameter stands for max |value| over its range) with <code>pi</code>, <code>inf</code>, <code>min</code>, <code>max</code>, <code>abs</code>, e.g. h<sub>max</sub> = <code>pi/(2*τ)</code>. <b>Neutral systems</b> (the highest power of λ also multiplies a delay term): the phase ripple never decays and the default ω<sub>max</sub> = 1e5 fails; use a small ω<sub>max</sub> such as 200–500 with h<sub>max</sub> = <code>pi/(2*τ)</code> on the whole line.</div>
         <div id="setStatus" class="status" style="color:var(--warn)"></div>
         <details><summary>Generated WGSL</summary><pre id="wgslOut"></pre></details>
       </details>
@@ -163,22 +168,26 @@
       <h2>Chart</h2>
       <label class="row"><span><b>Resolution</b></span>
         <select id="res">
-          <option value="320x180">320 × 180 (0.06 Mpts)</option>
-          <option value="480x270">480 × 270 (0.13 Mpts)</option>
-          <option value="960x540" selected>960 × 540 (0.52 Mpts)</option>
-          <option value="1920x1080">1920 × 1080 (2.07 Mpts)</option>
+          <option value="auto" selected>Auto (20 fps)</option>
+          <option value="320x180">320 × 180 (0.06 Mpts; 3D: 39³)</option>
+          <option value="480x270">480 × 270 (0.13 Mpts; 3D: 51³)</option>
+          <option value="960x540">960 × 540 (0.52 Mpts; 3D: 80³)</option>
+          <option value="1920x1080">1920 × 1080 (2.07 Mpts; 3D: 128³)</option>
+          <option value="3840x2160">3840 × 2160 (8.29 Mpts; 3D: 160³)</option>
         </select></label>
       <div class="buttons"><button id="resetAxes">Reset axes</button></div>
-      <div class="formula" style="margin-top:8px">The axes are the parameters marked X and Y, over their [min, max]. Drag on the chart to zoom, double-click to reset.</div>
+      <div class="formula" style="margin-top:8px">Auto: the grid is sized from a timed probe and the measured frame times so that a chart takes about 50 ms; a computation is stopped after 5 s. The axes are the parameters marked X and Y over their [min, max]; drag to zoom, double-click to reset. A third axis (Z) gives the experimental 3D view: drag to rotate, wheel to zoom.</div>
     </div>
     <div class="panel">
       <h2>Display and march</h2>
-      <label class="check" title="Track the 8 deepest |D| minima, polish each by damped Newton steps in the complex plane and colour by the largest real part (about 1.5-2x the cost)"><input type="checkbox" id="exact"> <span><b>Exact root (refined)</b>: Newton-polished dominant root</span></label>
+      <label class="row" title="Exact: the 8 deepest |D| minima are polished by damped Newton steps in the complex plane, σ = the largest real part (1.5-2x the cost of fast). Fast: the first-order estimate of the 4 deepest minima."><span><b>σ of stable points</b></span>
+        <select id="mode"><option value="exact">exact root (refined, Newton-polished)</option><option value="fast">fast (first-order σ)</option></select></label>
       <label class="check"><input type="checkbox" id="live" checked> Recompute while dragging sliders</label>
       <label class="check"><input type="checkbox" id="bnd" checked> White stability boundaries</label>
       <label class="check"><input type="checkbox" id="flags"> Tint flagged points (magenta)</label>
       <div class="grid2">
         <label class="row"><span><b>σ colour floor</b></span><input type="number" id="smin" step="0.05"></label>
+        <label class="row" title="3D view: density of the fog of the stable region (denser where σ is more negative)"><span><b>3D fog</b></span><input type="range" id="fog" min="0" max="40" step="0.5" value="10"></label>
       </div>
       <div id="marchInfo"></div>
       <div class="buttons">

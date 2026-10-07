@@ -8,6 +8,9 @@
 // functions exp log (ln) sqrt sin cos tan sinh cosh tanh exprel pow(a, b); constants pi (π),
 // i; the variable λ (or `lambda`). Every other identifier is a parameter. A line that starts or
 // ends with an operator, or an open parenthesis, continues on the next line.
+// Parameter ranges (not helpers):  P = 2.1:20,  P = 2.1:0.1:10 (start:step:stop; the step sets
+// the grid size along an axis),  P = 2.1:20 @ 5 (initial value; default: the midpoint).
+// A plain  name = number  is a fixed constant (a helper).
 //
 // Safety: the text is tokenized with a whitelist and parsed into an AST; the WGSL and the
 // host (Float64) evaluator are generated from a typed expression DAG built from the AST. No
@@ -39,7 +42,7 @@ const CONSTS = { pi: [Math.PI, 0], π: [Math.PI, 0], i: [0, 1] };
 const LAMBDA = new Set(['λ', 'lambda']);
 const SUPER = { '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4', '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9' };
 const OPCHARS = { '+': '+', '-': '-', '−': '-', '–': '-', '*': '*', '·': '*', '⋅': '*', '×': '*', '/': '/', '÷': '/',
-  '^': '^', '(': '(', ')': ')', ',': ',', '=': '=' };
+  '^': '^', '(': '(', ')': ')', ',': ',', '=': '=', ':': ':', '@': '@' };
 const SPACE = new Set([' ', '\t', '\r', ' ', ' ', ' ', '​']);
 const NUM_RE = /(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?/y;
 const ID_RE = /[\p{L}_][\p{L}\p{Nd}\p{M}_₀-₉]*/uy;
@@ -109,7 +112,7 @@ function tokenize(src) {
     const nx = toks[j];
     if (!prev || prev.t === 'nl') continue;
     if (depth > 0) continue;
-    if (prev.t === 'op' && prev.v !== ')') continue;
+    if (prev.t === 'op' && prev.v !== ')' && prev.v !== ':' && prev.v !== '@') continue;
     if (nx && nx.t === 'op' && '+-*/^'.includes(nx.v)) continue;
     out.push(t);
   }
@@ -218,6 +221,38 @@ function parseStatement(toks) {
     name = toks[0].v;
     body = toks.slice(2);
     if (!body.length) throw new ExprError(`nothing after '${name} ='`, toks[1].line, toks[1].col);
+    // a parameter range  name = start:stop  or  start:step:stop,  optionally  @ value
+    let depth = 0;
+    const cuts = [];
+    let at = -1;
+    body.forEach((t, k) => {
+      if (t.t !== 'op') return;
+      if (t.v === '(') depth++;
+      else if (t.v === ')') depth--;
+      else if (depth === 0 && t.v === ':' && at < 0) cuts.push(k);
+      else if (depth === 0 && t.v === '@') {
+        if (at >= 0) throw new ExprError("a second '@'", t.line, t.col);
+        at = k;
+      }
+    });
+    if (cuts.length || at >= 0) {
+      if (!cuts.length) throw new ExprError(`'@' belongs to a range:  ${name} = min:max @ value`, body[at].line, body[at].col);
+      if (cuts.length > 2) throw new ExprError('a range is  start:stop  or  start:step:stop', body[cuts[2]].line, body[cuts[2]].col);
+      const end = at >= 0 ? at : body.length;
+      const bounds = [-1, ...cuts, end];
+      const part = (a, b, what, ref) => {
+        const seg = body.slice(a + 1, b);
+        if (!seg.length) throw new ExprError(`the ${what} of the range is missing`, ref.line, ref.col);
+        const q = new Parser(seg);
+        const e = q.expr();
+        if (q.peek().t !== 'eof') q.fail(`unexpected ${describe(q.peek())}`);
+        return e;
+      };
+      const names = cuts.length === 1 ? ['start', 'stop'] : ['start', 'step', 'stop'];
+      const parts = names.map((w, k) => part(bounds[k], bounds[k + 1], w, k ? body[bounds[k]] : toks[1]));
+      const value = at >= 0 ? part(at, body.length, 'value after @', body[at]) : null;
+      return { kind: 'decl', name, parts, value, line: toks[0].line, col: toks[0].col };
+    }
   }
   const p = new Parser(body);
   const ast = p.expr();
@@ -227,15 +262,18 @@ function parseStatement(toks) {
     if (rest.t === 'op' && rest.v === ')') p.fail("unmatched ')'", rest);
     p.fail(`unexpected ${describe(rest)}`, rest);
   }
-  return { name, ast, line: toks[0].line, col: toks[0].col };
+  return { kind: 'stmt', name, ast, line: toks[0].line, col: toks[0].col };
 }
 
-/** statements of a program; the last one (or the line `D = ...`) is D */
+/** { stmts, decls }: the statements (the last one, or the line `D = ...`, is D) and the
+ * parameter-range declarations (anywhere) */
 export function parseProgram(src) {
   if (typeof src !== 'string') throw new ExprError('no equation');
   if (src.length > 20000) throw new ExprError('the equation is too long (20000 characters at most)');
-  const stmts = splitStatements(tokenize(src)).map(parseStatement);
-  if (!stmts.length) throw new ExprError('empty: type D(λ), e.g.   λ^2 + a*λ + b*exp(-τ*λ)');
+  const all = splitStatements(tokenize(src)).map(parseStatement);
+  const decls = all.filter((s) => s.kind === 'decl');
+  const stmts = all.filter((s) => s.kind !== 'decl');
+  if (!stmts.length) throw new ExprError(decls.length ? 'D(λ) is missing: after the parameter ranges, the last line is the characteristic function' : 'empty: type D(λ), e.g.   λ^2 + a*λ + b*exp(-τ*λ)');
   const dIdx = stmts.findIndex((s) => s.name === 'D');
   if (dIdx >= 0 && dIdx !== stmts.length - 1) {
     const s = stmts[dIdx + 1];
@@ -246,7 +284,23 @@ export function parseProgram(src) {
       throw new ExprError('only the last line can be a plain expression (it is D); write  name = expression  for a helper', s.line, s.col);
     }
   });
-  return stmts;
+  return { stmts, decls };
+}
+
+// a constant (range bound): numbers, pi, arithmetic
+function constValue(ast, what) {
+  const ir = new IR();
+  const ctx = {
+    settings: false,
+    isName: () => false,
+    ident: (a) => {
+      if (CONSTS[a.name] && a.name !== 'i') return ir.lit(CONSTS[a.name][0]);
+      throw new ExprError(`the ${what} must be a number (pi allowed), not '${a.name}'`, a.line, a.col);
+    },
+  };
+  const n = ir.nodes[lowerAst(ir, ast, ctx)];
+  if (n.op !== 'lit' || n.val.im !== 0 || !Number.isFinite(n.val.re)) throw new ExprError(`the ${what} is not a finite real number`, ast.line, ast.col);
+  return n.val.re;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -524,6 +578,38 @@ function emitNode(nd, A, T, B) {
   }
 }
 
+// parameter ranges: name = start:stop | start:step:stop [@ value]  ->  Map name -> { min, max,
+// step, count (grid points along an axis), value, line }
+function buildDecls(declStmts, defAt, stmts, reserved) {
+  const decls = new Map();
+  for (const s of declStmts) {
+    const nm = s.name;
+    reserved(nm, s);
+    if (decls.has(nm)) throw new ExprError(`the range of '${nm}' is declared twice (lines ${decls.get(nm).line} and ${s.line})`, s.line, s.col);
+    if (defAt.has(nm)) throw new ExprError(`'${nm}' is declared as a parameter range and defined as a helper (line ${stmts[defAt.get(nm)].line})`, s.line, s.col);
+    const v = s.parts.map((a, k) => constValue(a, s.parts.length === 3 && k === 1 ? 'step' : 'range bound'));
+    const min = v[0];
+    const max = v[v.length - 1];
+    const step = v.length === 3 ? v[1] : null;
+    if (!(max > min)) throw new ExprError(`the range of '${nm}' must have start < stop`, s.line, s.col);
+    let count = null;
+    if (step !== null) {
+      if (!(step > 0)) throw new ExprError(`the step of '${nm}' must be positive`, s.line, s.col);
+      count = Math.floor((max - min) / step + 1e-9) + 1;
+      if (count < 2) throw new ExprError(`the step of '${nm}' is larger than its range`, s.line, s.col);
+    }
+    const value = s.value ? constValue(s.value, 'value after @') : null;
+    decls.set(nm, { min, max, step, count, value, line: s.line });
+  }
+  return decls;
+}
+
+/** the parameter ranges of a text without compiling D (built-in examples) */
+export function rangeDecls(src) {
+  const all = splitStatements(tokenize(src)).map(parseStatement);
+  return buildDecls(all.filter((s) => s.kind === 'decl'), new Map(), [], () => {});
+}
+
 // ---------------------------------------------------------------------------------------------
 // model
 // ---------------------------------------------------------------------------------------------
@@ -531,26 +617,30 @@ function emitNode(nd, A, T, B) {
  * Compile the text of a characteristic function.
  * -> { params: [names] (first appearance, only those D depends on), helpers, warnings,
  *      branchAuto (λ^x with non-integer x, log λ or sqrt λ: a branch point at λ = 0),
- *      code(ix, iy) -> WGSL `fn charD(l: CD, p: vec2<f32>) -> CD` (param ix -> p.x, iy -> p.y,
- *      others -> K[j]), evalD(λ, values) -> D(λ) in Float64, nodes (DAG size) }
+ *      code(ix, iy, iz) -> WGSL `fn charD(l: CD, p: vec2<f32>) -> CD` (param ix -> p.x, iy -> p.y,
+ *      iz -> PZ (3D grids), others -> K[j]), evalD(λ, values) -> D(λ) in Float64, nodes (DAG size) }
  */
 export function compileModel(src) {
-  const stmts = parseProgram(src);
+  const { stmts, decls: declStmts } = parseProgram(src);
   const ir = new IR();
   const defAt = new Map();
   const helpers = new Map();
   const used = new Map();
-  const pnames = [];
   const last = stmts.length - 1;
-  stmts.forEach((s, k) => {
-    if (s.name === null || (k === last && s.name === 'D')) return;
-    const nm = s.name;
+  const reserved = (nm, s) => {
     if (LAMBDA.has(nm)) throw new ExprError(`'${nm}' is the variable and cannot be defined`, s.line, s.col);
     if (CONSTS[nm]) throw new ExprError(`'${nm}' is a constant and cannot be redefined`, s.line, s.col);
     if (ARITY[nm] || NON_ANALYTIC.has(nm)) throw new ExprError(`'${nm}' is a function name`, s.line, s.col);
+  };
+  stmts.forEach((s, k) => {
+    if (s.name === null || (k === last && s.name === 'D')) return;
+    const nm = s.name;
+    reserved(nm, s);
     if (defAt.has(nm)) throw new ExprError(`'${nm}' is defined twice (lines ${stmts[defAt.get(nm)].line} and ${s.line})`, s.line, s.col);
     defAt.set(nm, k);
   });
+  const decls = buildDecls(declStmts, defAt, stmts, reserved);
+  const pnames = [...decls.keys()];          // declared parameters first, in declaration order
   let cur = 0;
   const ctx = {
     settings: false,
@@ -612,8 +702,8 @@ export function compileModel(src) {
   }
 
   const codeCache = new Map();
-  function code(ix, iy) {
-    const ck = ix + ',' + iy;
+  function code(ix, iy, iz = -1) {
+    const ck = ix + ',' + iy + ',' + iz;
     if (codeCache.has(ck)) return codeCache.get(ck);
     const name = (id) => {
       const n = ir.nodes[id];
@@ -621,7 +711,7 @@ export function compileModel(src) {
       if (n.op === 'lam') return 'l';
       if (n.op === 'par') {
         const j = pidx.get(n.name);
-        return j === ix ? 'p.x' : j === iy ? 'p.y' : `K[${j}]`;
+        return j === ix ? 'p.x' : j === iy ? 'p.y' : j === iz ? 'PZ' : `K[${j}]`;
       }
       return `t${id}`;
     };
@@ -651,7 +741,7 @@ export function compileModel(src) {
     return r[root];
   }
 
-  return { params, helpers: [...helpers.keys()], warnings, branchAuto, code, evalD, nodes: order.length };
+  return { params, decls, helpers: [...helpers.keys()], warnings, branchAuto, code, evalD, nodes: order.length };
 }
 
 // ---------------------------------------------------------------------------------------------

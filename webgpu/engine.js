@@ -4,7 +4,7 @@
 // the colouring render pass (display.wgsl).
 
 const RES_BYTES = 16;            // struct Res { z: f32, s: f32, steps: u32, flags: u32 }
-const PARAM_BYTES = 144;         // struct Params of march.wgsl
+const PARAM_BYTES = 160;         // struct Params of march.wgsl
 const MAX_CONSTS = 16;           // K[0..15]
 const MAX_PIPELINES = 40;        // compiled pipelines kept (oldest dropped)
 const VIEW_BYTES = 48;           // struct View of display.wgsl
@@ -12,9 +12,11 @@ const MAX_BANDS = 512;           // timestamp slots: 2 per band
 const BIG = 3.0e38;
 
 // march defaults of NyquistGPU.plan_sweep for :unwrap (the server's "F32" format)
+// (maxsteps 50000 instead of 200000: bounds one row band of an expensive typed equation; the
+// examples need at most ~750 evaluations per point)
 export const MARCH_DEFAULTS = {
   sigma: 0.0, w0: 1e-9, wmax: 1e5, h0: 1e-2, tol: 0.3, hrel: 1.0, hmax: Infinity, wband: 0.0,
-  maxsteps: 200000, qtrust: 4.0, growmax: 4.0,
+  maxsteps: 50000, qtrust: 4.0, growmax: 4.0,
 };
 
 export class WebGPUUnavailable extends Error {}
@@ -172,28 +174,37 @@ export class Engine {
     const f = new Float32Array(b);
     const u = new Uint32Array(b);
     const { nx, ny, xr, yr } = job;
+    const nz = job.nz || 1;
     f[0] = xr[0]; f[1] = nx > 1 ? (xr[1] - xr[0]) / (nx - 1) : 0;
     f[2] = yr[0]; f[3] = ny > 1 ? (yr[1] - yr[0]) / (ny - 1) : 0;
-    u[4] = nx; u[5] = ny; u[6] = row0; u[7] = rows;
+    u[4] = nx; u[5] = ny * nz; u[6] = row0; u[7] = rows;
     f[8] = m.w0; f[9] = m.wmax; f[10] = m.h0; f[11] = m.tol;
     const fin = (v) => (Number.isFinite(v) ? v : BIG);       // WGSL does not promise IEEE infinities
     f[12] = m.hrel; f[13] = fin(m.hmax); f[14] = fin(m.wband); f[15] = job.npow;
     f[16] = m.qtrust; f[17] = m.growmax; u[18] = m.maxsteps; f[19] = m.sigma;
     for (let i = 0; i < MAX_CONSTS; i++) f[20 + i] = i < job.c.length ? job.c[i] : 0;
+    const zr = job.zr || [0, 0];
+    f[36] = zr[0]; f[37] = nz > 1 ? (zr[1] - zr[0]) / (nz - 1) : 0;
+    u[38] = ny; u[39] = 0;
     this.device.queue.writeBuffer(this.paramBuf, 0, b);
   }
 
   /**
    * Compute one chart.  job = { code (WGSL fn charD), branch0, exact, c (K[0..15]), npow, nx, ny,
-   * xr, yr (the axis parameters p.x, p.y), march (MARCH_DEFAULTS overrides) }
-   * opts = { targetMs, onBand(rowlo, frac), isCancelled() }
-   * -> { gpuMs, wallMs, bands, npts, tsUsed, cancelled }
+   * xr, yr (the axis parameters p.x, p.y), nz, zr (3D: the third axis PZ; the grid is stored
+   * as nx x (ny nz) rows), march (MARCH_DEFAULTS overrides) }
+   * opts = { targetMs, onBand(rowlo, frac), isCancelled(), deadlineMs }
+   * deadlineMs: no further band is submitted after this wall time (a submitted band cannot be
+   * stopped; the first bands are small, then sized to targetMs) -> { timedOut: true, ... }
+   * -> { gpuMs, wallMs, bands, npts, tsUsed, cancelled, timedOut }
    */
   async compute(job, opts = {}) {
     const dev = this.device;
-    const { nx, ny } = job;
+    const nx = job.nx;
+    const ny = job.ny * (job.nz || 1);              // rows of the stored grid
     const { pipeline, bgCache } = await this.pipeline(job.code, !!job.exact, !!job.branch0);   // (first: a failed compile keeps the chart)
     const fresh = this.ensureBuffers(nx, ny);
+    this.grid3d = (job.nz || 1) > 1;           // a 3D grid is not drawn by the 2D colouring pass
     let bg = bgCache.get(this.resBuf);
     if (!bg) {
       bg = dev.createBindGroup({
@@ -205,7 +216,8 @@ export class Engine {
     this.rowlo = fresh ? ny : 0;          // fresh buffer: rows below the progress are blank
     const target = opts.targetMs ?? 60;
     const minRows = Math.max(1, Math.ceil(ny / (MAX_BANDS - 8)));
-    let rowsBand = Math.max(minRows, Math.min(ny, 8 * Math.round(Math.max(1, 4096 / nx))));
+    // the first band is small (~4k points): an expensive equation is noticed before much is queued
+    let rowsBand = Math.max(minRows, Math.min(ny, Math.max(1, Math.round(4096 / nx))));
     let row = ny;
     let nb = 0;
     const inflight = [];
@@ -227,8 +239,10 @@ export class Engine {
       if (fresh) this.rowlo = b.row0;
       opts.onBand?.(b.row0, 1 - b.row0 / ny);
     };
+    let timedOut = false;
     while (row > 0) {
       if (opts.isCancelled?.()) { cancelled = true; break; }
+      if (opts.deadlineMs && performance.now() - t0 > opts.deadlineMs) { cancelled = true; timedOut = true; break; }
       const rows = Math.min(rowsBand, row);
       const row0 = row - rows;
       this.writeParams(job, row0, rows);
@@ -251,7 +265,7 @@ export class Engine {
     }
     while (inflight.length) await settle();
     const wallMs = performance.now() - t0;
-    if (cancelled) return { cancelled: true, wallMs, bands: nb, npts: nx * ny };
+    if (cancelled) return { cancelled: true, timedOut, wallMs, bands: nb, npts: nx * ny, rowsDone: ny - row };
     this.rowlo = 0;
     let gpuMs = busyMs;
     let tsUsed = false;
@@ -272,12 +286,12 @@ export class Engine {
       }
       if (ok) { gpuMs = Number(ns) / 1e6; tsUsed = true; }
     }
-    return { gpuMs, wallMs, bands: nb, npts: nx * ny, tsUsed, cancelled: false };
+    return { gpuMs, wallMs, bands: nb, npts: nx * ny, tsUsed, cancelled: false, timedOut: false };
   }
 
   /** Colour the current result buffer into a canvas context (f x f box filter). */
   draw(ctx, view) {
-    if (!this.resBuf) return;
+    if (!this.resBuf || this.grid3d) return;
     const f = view.f;
     const dw = Math.ceil(this.nx / f);
     const dh = Math.ceil(this.ny / f);

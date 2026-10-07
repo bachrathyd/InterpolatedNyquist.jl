@@ -37,6 +37,8 @@ struct Params {
     hrel: f32, hmax: f32, wband: f32, npow: f32,
     qtrust: f32, growmax: f32, maxsteps: u32, sigma: f32,
     c: array<vec4<f32>, 4>,     // the model constants K[0..15]
+    z0: f32, dz: f32,           // 3D grids: the third axis parameter PZ = z0 + iz dz
+    nys: u32, pad0: u32,        // rows per z slice (ny); the grid has ny * nz rows
 }
 
 struct Res {
@@ -61,6 +63,7 @@ const EPS32: f32 = 1.1920929e-7;
 const FLOATMIN: f32 = 1.17549435e-38;
 
 var<private> K: array<f32, 16>;
+var<private> PZ: f32;            // the third axis parameter (3D grids)
 
 // ---------------------------------------------------------------------------
 // elementary functions
@@ -679,13 +682,16 @@ fn march(p: vec2<f32>) -> Res {
 @compute @workgroup_size(8, 8)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let ix = gid.x;
-    let iy = P.row0 + gid.y;
-    if ((ix >= P.nx) || (iy >= P.ny) || (gid.y >= P.rows)) { return; }
+    let row = P.row0 + gid.y;                 // row of the (ny * nz)-row grid
+    if ((ix >= P.nx) || (row >= P.ny) || (gid.y >= P.rows)) { return; }
+    let iz = row / P.nys;
+    let iy = row - iz * P.nys;
+    PZ = P.z0 + f32(iz) * P.dz;
     // (unrolled: constant indices keep K in registers)
     K[0] = P.c[0].x; K[1] = P.c[0].y; K[2] = P.c[0].z; K[3] = P.c[0].w;
     K[4] = P.c[1].x; K[5] = P.c[1].y; K[6] = P.c[1].z; K[7] = P.c[1].w;
     K[8] = P.c[2].x; K[9] = P.c[2].y; K[10] = P.c[2].z; K[11] = P.c[2].w;
     K[12] = P.c[3].x; K[13] = P.c[3].y; K[14] = P.c[3].z; K[15] = P.c[3].w;
     let p = vec2<f32>(P.x0 + f32(ix) * P.dx, P.y0 + f32(iy) * P.dy);
-    R[iy * P.nx + ix] = march(p);
+    R[row * P.nx + ix] = march(p);
 }

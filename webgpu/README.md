@@ -14,7 +14,8 @@ texts too. No build step, no external CDN, no account, no server-side computatio
 | `engine.js` | WebGPU host code: device, pipelines (cached by the generated code; default and exact-root variant), row-band dispatches, timestamp timing, colouring pass, read-back |
 | `examples.js` | the examples as equation texts with parameter defaults / ranges, axes and march settings; the built-in FEM bar (hand-written WGSL, host effective order) |
 | `handwritten.js` | the hand-written WGSL of the first version, only for `?bench=compare` |
-| `march.wgsl` | the per-point `:unwrap` march (port of `gpu/src/NyquistGPU.jl`) and the exact-root polish |
+| `march.wgsl` | the per-point `:unwrap` march (port of `gpu/src/NyquistGPU.jl`) and the exact-root polish; 2D grids and 3D grids (z slices stacked as rows) |
+| `view3d.js`, `volume.wgsl` | experimental 3D view: the combined field as a 3D texture, ray marching, orbit camera |
 | `display.wgsl` | colouring (port of `k_display!` / `pixel_colour` of `server.jl`) |
 | `validate/web_systems.jl` | the gallery examples in NyquistGPU form `D(λ, p, c)` (same operations as the WGSL) |
 | `validate/ref_counts.jl` | Julia script: reference counts and dominant roots from the repository engine |
@@ -27,6 +28,10 @@ also works where storage is blocked) or edit any example's text. The box takes
 
 ```
 # comment
+K = -0.75:1                               # parameter range (chart range of an axis)
+r = 0.02:0.05:10.5                        # with a step: 210 grid points along this axis
+η = 0.002:0.05 @ 0.01                     # range and initial value (default: the midpoint)
+c = 0                                     # a fixed constant (a helper): no slider
 γ = λ*sqrt(1 + c/λ)/sqrt(1 + η*λ)        # helper: usable in later lines, computed once
 (1 + exp(-2*γ))/2 - K*exp(-r*λ - γ)       # the last line (or a line  D = ...) is D(λ)
 ```
@@ -40,30 +45,77 @@ also works where storage is blocked) or edit any example's text. The box takes
   an error (`2λ` → "write 2*λ"); non-analytic functions (`abs`, `real`, `imag`, `conj`, `min`,
   `max`, ...) are rejected; a line that ends or starts with an operator, or an open
   parenthesis, continues on the next line; parse errors are shown with a caret under the line.
-* Every identifier that is not λ, a function, a constant or a helper is a **parameter** (in the
-  order of first appearance, at most 16). Each has a row: value, min, slider, max, and **X / Y**
-  buttons. The two axis parameters span the chart over their [min, max] (drag-zoom writes the
-  new ranges back); the others are live sliders. A new parameter starts at 1 on [0, 2] (or at
-  its old value when a line `name = number` was deleted).
+* Every identifier that is not λ, a function, a constant or a helper is a **parameter** (the
+  declared ones in declaration order, then by first appearance; at most 16). Each has a row:
+  value, min, slider, max, and **X / Y / Z** buttons. The two axis parameters span the chart over
+  their [min, max]; the others are live sliders.
+* **Parameter ranges in the text** (Julia-like): `P = 2.1:20` declares the range [2.1, 20],
+  `P = 2.1:0.1:10` start:step:stop (on an axis the step sets the grid of the next frame along it,
+  here 80 points; the automatic resolution may refine it later), `P = 2.1:20 @ 5` also the
+  initial value (default: the midpoint). Bounds are constants (`0:2*pi`). These lines declare
+  parameters, they are not helpers; a plain `name = number` stays a fixed constant without a
+  slider. Undeclared parameters get [0, 2] at 1 (or their old value when a line `name = number`
+  was deleted). **Text and table stay in sync**: editing min / max in the table (or drag-zooming
+  the chart) rewrites the declaration line, or adds one; reset axes restores the example's
+  lines. Every example declares its paper ranges and defaults this way, so the text alone
+  defines it.
 * Typing recompiles 400 ms after the last key (Ctrl+Enter at once). The pipeline is rebuilt
   only when the text or the axis choice changes (cached by the generated code); sliders only
   rewrite the uniform buffer.
-* **Order n** (`Z = n/2 − Φ/π`): estimated on the host as the least-squares slope of `ln|D(s)|`
+* **Order n** (`Z = n/2 − Φ/π`): always computed automatically on the host (shown under the
+  sliders; an override exists only in Advanced), as the least-squares slope of `ln|D(s)|`
   over 9 log-spaced real `s ∈ [s*/10, s*]`, `s* = 1e8` (reduced while `|D|` is not finite),
   at an interior point of the axis ranges; one decade lower as a check (exponential growth,
   e.g. an advanced term, gives a warning), and at the four chart corners (a warning if n
   changes over the chart). Re-estimated on every slider move (a few hundred host
   evaluations). Fractional powers give a non-integer n, as they should. A real-coefficient
   check `D(λ̄) = conj D(λ)` warns about complex coefficients.
-* **Advanced**: n (override), ω_max (default 1e5), tolerance (0.3 rad), ω₀ (1e-9), step cap
+* **ω_max** (a log-scale slider, 10 … 1e6; each example sets its default) and the **tolerance**
+  (a slider on its exponent: 10^x rad, x ∈ [−2, 0], default 0.3): the march accepts a step when
+  the observed phase change agrees with the trapezoid prediction within this tolerance, so a
+  smaller value means shorter steps, more robust counts and more time.
+* **Advanced**: n (override), ω₀ (1e-9), step cap
   h_max for ω below a band (empty band: the whole line), branch point at λ = 0 (auto: `λ^x`
   with non-integer x, `log λ`, `sqrt λ` -- the |D| minimum at ω₀ is then no root estimate).
   These are expressions of the parameters (`pi/(2*τ)`; an axis parameter stands for
   max |value| over its range) with `pi`, `inf`, `min`, `max`, `abs`. Neutral systems need a
   small explicit ω_max (200–500) and `h_max = pi/(2*τ)` (hint in the panel).
 * **Copy link** puts the equation, parameter values and ranges, axes, settings, resolution and
-  the exact flag into the URL hash (`#m=` base64url of a small JSON) and restores it on load;
-  `?ex=<key>&exact=1` links still work.
+  the mode into the URL hash (`#m=` base64url of a small JSON) and restores it on load;
+  `?ex=<key>` links still work (`&exact=0`: fast mode; `&exact=1`: exact, the default).
+
+## Resolution, watchdog, modes
+
+* **Auto (20 fps)** (default): when the equation, the mode or the dimension changes, probe grids
+  10², 20², 40², ... (3D: 10³, 20³, ...) are timed until one takes > 12 ms; the grid is then sized
+  so that a frame takes about 50 ms (clamped to 20 × 20 … 3840 × 2160, in 3D 16³ … 128³, aspect
+  16:9 or that of a declared step grid), and the estimate follows the measured frame times
+  (log-average, 30 % hysteresis). The fixed sizes stay selectable; in 3D they map to n³ with the
+  same number of points (39³ … 160³).
+* **Watchdog**: a chart is submitted in row bands (the first ~4k points, then ~60 ms each);
+  no band is submitted after 5 s, the partial chart stays and the page says "Stopped after 5 s
+  … reduce ω_max or the resolution" (the automatic resolution is lowered for the next frame).
+  A submitted band cannot be cancelled, so the per-thread step cap is 50 000 (the examples need
+  ≤ ~750 evaluations per point); a march that hits it is a failed (grey) point. Measured: a
+  neutral equation at ω_max = 1e6, tol = 0.01, 1920 × 1080 is stopped 5.8 s after the request.
+* **Mode**: the default is the **exact root (refined)** mode (below); "fast (first-order σ)" is
+  the first-order estimate. Auto-resolution times the mode in use.
+
+## 3D view (experimental)
+
+Mark a third parameter with **Z**: the chart becomes a brute-force grid over the three axis
+ranges (the third parameter is a per-slice uniform, the slices are stacked as rows of the same
+march dispatch) and is shown by ray marching (WebGPU render pass, `volume.wgsl`):
+
+* the field `C = max(σ, σ_floor)/|σ_floor|` (≤ −0.02) at stable points and `+0.6` elsewhere is
+  uploaded as an `r8unorm` 3D texture (trilinear filtering);
+* the unstable region is not drawn; the stability boundary is the zero level of `C`, a
+  translucent, Lambert-shaded sheet (normal from the gradient); the stable interior is a fog in
+  the σ colour map whose density grows with the margin `−C` (the "3D fog" slider), so the most
+  stable region is the densest;
+* drag rotates (orbit), the wheel zooms, double-click resets the view; the box edges carry the
+  axis names and ranges. Auto-resolution gives 40³–70³ at 20 fps on the test laptop.
+* Click **Z** again to go back to 2D. Not for the built-in FEM bar (fixed axes).
 * "Generated WGSL" (in Advanced) shows the shader code of the current equation.
 
 **Safety.** The text is tokenized against a whitelist and parsed to an AST; WGSL and the host
@@ -151,7 +203,7 @@ long step holds a maximum and a minimum of |D| (its end slopes then do not brack
 minimum), or where deeper minima crowd out the dominant one, that root is lost and the
 stable domain shows dark streaks or speckles (very visible on the showcase).
 
-**"Exact root (refined)"** implements the paper's dominant-root recipe in the shader:
+**"Exact root (refined)"** (the default mode) implements the paper's dominant-root recipe in the shader:
 
 * 8 minima are tracked (with their ω); minima are also located inside steps whose end slopes
   do not bracket them (sign changes of `d|p|²/dt` of the step's Hermite model on 4 sub-intervals);
@@ -192,7 +244,7 @@ instead of failing.
   hover line shows `Z`, `σ` (marked "refined" in exact mode) and the number of `D`
   evaluations at a point. `?ex=<key>` opens an example (`own`, `fourth`, `algebraic`,
   `distributed`, `showcase`, `turning`, `neutral`, `neutral_hg`, `pda`, `rod`, `fem`, `frac`,
-  `gao`), `&exact=1` with exact roots; **Copy link** adds the full state (`#m=...`).
+  `gao`), `&exact=0` for the fast mode; **Copy link** adds the full state (`#m=...`).
 * `index.html?validate=1` — computes the 160 × 90 grids of `validate/ref_counts.json`
   (every example, default and a second constant set) in both modes and reports the counts
   `Z` that differ from the Julia engine (Float32 and Float64 runs; separately those at
@@ -260,7 +312,8 @@ TDR / browser watchdog. The GPU time is the sum of the bands' compute-pass times
 `julia --project=gpu/scripts -t auto webgpu/validate/ref_counts.jl --cpu` (NyquistGPU,
 CPU backend, Float32 and Float64), 160 × 90 grid per example, each with its own ω_max and
 step caps; default constants and a second constant set ("@alt", sliders moved). The page
-runs every grid through the text path (FEM: built-in), `?validate=1`: **PASS**.
+runs every grid through the text path (FEM: built-in), `?validate=1`: **PASS** (also after the
+range-declaration texts, the 3D-capable march and the 50 000 step cap).
 
 * **Counts: 0 differing `Z` on all 24 grids against the Julia Float32 run** (also at flagged
   points; 0 between the default and the exact pipeline). Against Julia Float64 the only
@@ -331,6 +384,10 @@ run-to-run spread of this laptop GPU -- the unchanged FEM shader moved by the sa
 * The order estimate assumes `|D(s)| ~ s^n` on the positive real axis; exponential growth
   (advanced terms) or an order that changes over the chart is only warned about -- set n
   then. The real-coefficient check is a warning, too (the count over ω ≥ 0 assumes it).
+* The 3D view is experimental: brute force (no adaptive refinement), at most 128³ in auto mode,
+  an 8-bit field (σ resolved to ~1/128 of the colour range), no hover read-out.
+* Auto-resolution is a heuristic (latency + throughput model of the measured frames); frames of
+  very slow equations (one march ≳ 50 ms) take about twice their single-march latency.
 * Float32: unscaled forms such as `cosh γ` of the rod overflow (grey "failed" points) and need
   the scaling shown in A.8; a removable singularity needs `exprel` (or another entire form).
 * The grid is evaluated in full (no adaptive coarse-to-fine `run_adaptive!`).

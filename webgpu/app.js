@@ -1,17 +1,24 @@
-// UI of the WebGPU stability-chart demo: the equation box (text -> expr.js -> generated WGSL),
-// the parameter table (sliders, ranges, X / Y axis choice), march settings, a render scheduler
-// (the newest settings win, a running chart is finished first), axes, box zoom, hover
-// read-out, timing, shareable links, and the ?validate=1 / ?bench=1 / ?bench=compare modes.
+// UI of the WebGPU stability-chart demo: the equation box (text -> expr.js -> generated WGSL)
+// with parameter-range lines kept in sync with the parameter table (sliders, ranges, X / Y / Z
+// axis choice), march settings, automatic resolution (about 20 frames per second), a 5 s
+// watchdog, a render scheduler (the newest settings win, a running chart is finished first),
+// 2D axes / box zoom / hover read-out, the experimental 3D view, shareable links, and the
+// ?validate=1 / ?bench=1 / ?bench=compare modes.
 
 import { EXAMPLES, GROUPS, SET_DEFAULTS } from './examples.js';
 import { Engine, WebGPUUnavailable, countOf } from './engine.js';
-import { compileModel, evalSetting, leadingOrder, realCoefficients, ExprError } from './expr.js';
+import { compileModel, rangeDecls, evalSetting, leadingOrder, realCoefficients, ExprError } from './expr.js';
+import { Volume3D, volumeBytes, defaultCamera, project } from './view3d.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
 const ZCAP = 6;
 const OWN_KEY = 'nyquistgpu.own.v1';
-const RES_CHOICES = ['320x180', '480x270', '960x540', '1920x1080'];
+const RES_CHOICES = ['auto', '320x180', '480x270', '960x540', '1920x1080', '3840x2160'];
+const TARGET_MS = 50;            // auto resolution: one frame in about 50 ms (20 fps)
+const DEADLINE_MS = 5000;        // watchdog: no further row band after 5 s
+const SET_INPUTS = ['n', 'w0', 'hmax', 'wband', 'branch'];      // text fields of Advanced
+const BG = [0x11 / 255, 0x13 / 255, 0x18 / 255];
 const exByKey = new Map(EXAMPLES.map((e) => [e.key, e]));
 const dict = () => Object.create(null);          // name-keyed maps (parameter names are user text)
 
@@ -21,15 +28,19 @@ class UserError extends Error {
 
 const state = {
   key: exByKey.has(params.get('ex')) ? params.get('ex') : 'fourth',
-  exact: params.get('exact') === '1',
+  exact: params.get('exact') !== '0',             // default: exact roots; &exact=0: fast mode
   boundary: true,
   flags: false,
   live: true,
+  fog: 10,
+  cam: defaultCamera(),
 };
 const slots = new Map();
 let engine = null;
+let vol3d = null;
 let last = null;           // last read-back chart { nx, ny, xr, yr, z, s, steps, flags, xl, yl }
 let lastJob = null;
+let lastFrame = null;      // camera frame of the last 3D draw
 
 function logMsg(s) {
   console.log(s);
@@ -49,16 +60,16 @@ const fmt = (v) => {
 };
 const fmtIn = (v) => String(+(+v).toPrecision(6));
 const fmtN = (n) => (Number.isInteger(n) ? String(n) : n.toFixed(4));
+const sig2 = (v) => +v.toPrecision(2);
+const is3D = (job) => !!job && job.nz > 1;
 
 // ---------------------------------------------------------------------------------------------
 // slots: the state of each example (equation text, parameters, axes, settings)
 // ---------------------------------------------------------------------------------------------
 function freshSlot(ex) {
-  const p = dict();
-  for (const [n, value, min, max, step] of ex.params) p[n] = { value, min, max, step };
   return {
-    key: ex.key, text: ex.text, params: p, axes: ex.axes.slice(), set: { ...SET_DEFAULTS, ...ex.set },
-    smin: ex.smin, res: ex.res || '960x540', model: null, modelText: null, err: null, consts: dict(), jobWarns: [],
+    key: ex.key, text: ex.text, params: dict(), axes: [...ex.axes.slice(0, 2), null], set: { ...SET_DEFAULTS, ...ex.set },
+    smin: ex.smin, res: 'auto', model: null, modelText: null, err: null, consts: dict(), declSig: dict(), jobWarns: [],
   };
 }
 
@@ -73,16 +84,16 @@ function getSlot(key) {
 const cur = () => getSlot(state.key);
 const curEx = () => exByKey.get(state.key);
 
-function defaultParam(ex, name, slot) {
-  const d = ex.params.find((p) => p[0] === name);
-  if (d) return { value: d[1], min: d[2], max: d[3], step: d[4] };
+function defaultParam(slot, name, d) {
+  if (d) return { min: d.min, max: d.max, step: d.step, value: d.value ?? (d.min + d.max) / 2 };
   const v = slot.consts[name];                  // a deleted helper  name = number
   if (Number.isFinite(v)) return v === 0 ? { value: 0, min: -1, max: 1 } : { value: v, min: Math.min(0, 2 * v), max: Math.max(0, 2 * v) };
   return { value: 1, min: 0, max: 2 };
 }
 
-function builtinModel(ex) {
-  return { params: ex.params.map((p) => p[0]), builtin: true, helpers: [], warnings: [], branchAuto: false, code: () => ex.builtin.wgsl, evalD: null, nodes: 0 };
+function builtinModel(ex, text) {
+  const decls = rangeDecls(text);
+  return { params: [...decls.keys()], decls, builtin: true, helpers: [], warnings: [], branchAuto: false, code: () => ex.builtin.wgsl, evalD: null, nodes: 0 };
 }
 
 /** (re)compile the slot's text; on an error the last valid model stays (the chart keeps it) */
@@ -90,24 +101,36 @@ function compileSlot(slot) {
   if (slot.model && slot.modelText === slot.text) return true;
   const ex = exByKey.get(slot.key);
   let m;
-  if (ex.builtin) m = builtinModel(ex);
-  else {
-    try {
-      m = compileModel(slot.text);
-    } catch (e) {
-      if (!(e instanceof ExprError)) console.error(e);
-      slot.err = e;
-      slot.modelText = slot.text;
-      return false;
-    }
+  try {
+    m = ex.builtin ? builtinModel(ex, slot.text) : compileModel(slot.text);
+  } catch (e) {
+    if (!(e instanceof ExprError)) console.error(e);
+    slot.err = e;
+    slot.modelText = slot.text;
+    return false;
   }
   slot.err = null;
   slot.model = m;
   slot.modelText = slot.text;
-  for (const n of m.params) if (!slot.params[n]) slot.params[n] = defaultParam(ex, n, slot);
-  // axes: keep the valid ones in place, fill the others with the first free parameters
+  // parameters: a declared range (name = min:max @ value) sets min / max (and the value) when
+  // the declaration is new or changed; undeclared parameters keep their table values
+  for (const n of m.params) {
+    const d = m.decls.get(n);
+    const sig = d ? `${d.min}|${d.max}|${d.step}|${d.value}` : null;
+    let p = slot.params[n];
+    if (!p) p = slot.params[n] = defaultParam(slot, n, d);
+    else if (d && slot.declSig[n] !== sig) {
+      p.min = d.min;
+      p.max = d.max;
+      p.step = d.step;
+      if (d.value !== null) p.value = d.value;
+      else if (!(p.value >= d.min && p.value <= d.max)) p.value = (d.min + d.max) / 2;
+    }
+    if (d) slot.declSig[n] = sig;
+  }
+  // axes: keep the valid ones in place, fill X / Y with the first free parameters (Z optional)
   const ax = slot.axes.map((a) => (a && m.params.includes(a) ? a : null));
-  if (ax[0] && ax[0] === ax[1]) ax[1] = null;
+  for (let k = 0; k < 3; k++) for (let j = 0; j < k; j++) if (ax[k] && ax[k] === ax[j]) ax[k] = null;
   for (let k = 0; k < 2; k++) {
     if (ax[k]) continue;
     ax[k] = m.params.find((n) => !ax.includes(n)) || null;
@@ -124,10 +147,51 @@ function harvestConsts(slot) {
   }
 }
 
+/**
+ * Write the range of parameter `name` into the text: rewrite its declaration line (keeping a
+ * trailing comment, the step and an @ value) or insert one before the first non-comment line.
+ * step: undefined = keep the declared step, null = none, number = new step.
+ */
+function writeRange(slot, name, min, max, step) {
+  const m = slot.model;
+  if (!m) return;
+  const d = m.decls.get(name);
+  const f = (v) => String(+(+v).toPrecision(6));
+  let st = step === undefined ? (d ? d.step : null) : step;
+  if (st !== null && !(Math.floor((max - min) / st + 1e-9) >= 1)) st = null;
+  let body = `${name} = ${f(min)}:${st !== null ? f(st) + ':' : ''}${f(max)}`;
+  const p = slot.params[name];
+  const isAxis = slot.axes.includes(name);
+  if (d && d.value !== null && !isAxis) body += ` @ ${f(p.value)}`;
+  const lines = slot.text.split('\n');
+  if (d && lines[d.line - 1] !== undefined) {
+    const L = lines[d.line - 1];
+    const h = L.indexOf('#');
+    const pad = h >= 0 ? Math.max(1, h - body.length) : 0;
+    lines[d.line - 1] = h >= 0 ? body + ' '.repeat(pad) + L.slice(h) : body;
+  } else {
+    let k = 0;
+    while (k < lines.length && /^\s*(#.*)?$/.test(lines[k])) k++;
+    lines.splice(k, 0, body);
+  }
+  slot.text = lines.join('\n');
+  compileSlot(slot);
+  if (slot === cur()) {
+    $('eq').value = slot.text;
+    fitTextarea();
+    updateModified();
+  }
+  saveOwn();
+}
+
 // ---------------------------------------------------------------------------------------------
 // jobs
 // ---------------------------------------------------------------------------------------------
-/** chart job of a slot -> { code, branch0, exact, c, npow, nx, ny, xr, yr, xl, yl, march, info, warns, ... } */
+/**
+ * Chart job of a slot -> { code, branch0, exact, c, npow, nx, ny, nz, xr, yr, zr, xl, yl, zl,
+ * march, info, warns, auto, counts }. opts: { exact, res ('WxH'), size: { nx, ny, nz } };
+ * with the slot's resolution 'auto' and no res / size the sizes are left to autoSize().
+ */
 function makeJob(slot, opts = {}) {
   const ex = exByKey.get(slot.key);
   const m = slot.model;
@@ -136,15 +200,18 @@ function makeJob(slot, opts = {}) {
   if (names.length < 2) throw new UserError(`The chart needs two parameters as its axes; D has ${names.length ? 'only ' + names[0] : 'none'}.`);
   const ix = names.indexOf(slot.axes[0]);
   const iy = names.indexOf(slot.axes[1]);
+  const iz = slot.axes[2] ? names.indexOf(slot.axes[2]) : -1;
   if (ix < 0 || iy < 0 || ix === iy) throw new UserError('Select two different parameters as the chart axes (X and Y).');
   const P = names.map((n) => slot.params[n]);
   const vals = P.map((p) => p.value);
   if (!vals.every(Number.isFinite)) throw new UserError('a parameter value is not a number');
   const xr = [P[ix].min, P[ix].max];
   const yr = [P[iy].min, P[iy].max];
-  if (!(xr[1] > xr[0]) || !(yr[1] > yr[0])) throw new UserError('axis range: max must be larger than min');
+  const zr = iz >= 0 ? [P[iz].min, P[iz].max] : null;
+  if (!(xr[1] > xr[0]) || !(yr[1] > yr[0]) || (zr && !(zr[1] > zr[0]))) throw new UserError('axis range: max must be larger than min');
+  const axisIdx = [ix, iy, iz];
   const env = dict();
-  names.forEach((n, i) => { env[n] = (i === ix || i === iy) ? Math.max(Math.abs(P[i].min), Math.abs(P[i].max)) : P[i].value; });
+  names.forEach((n, i) => { env[n] = axisIdx.includes(i) ? Math.max(Math.abs(P[i].min), Math.abs(P[i].max)) : P[i].value; });
   const S = (k, dflt, check, what) => {
     let v;
     try { v = evalSetting(slot.set[k], env); } catch (e) { throw new UserError(`${what}: ${e.message}`, 'set'); }
@@ -165,9 +232,10 @@ function makeJob(slot, opts = {}) {
   const pv = vals.slice();
   pv[ix] = xr[0] + 0.382 * (xr[1] - xr[0]);
   pv[iy] = yr[0] + 0.618 * (yr[1] - yr[0]);
+  if (iz >= 0) pv[iz] = zr[0] + 0.447 * (zr[1] - zr[0]);
   if (nset !== null) {
     npow = nset;
-    info = `n = ${fmtN(npow)} (set)`;
+    info = `n = ${fmtN(npow)} (set in Advanced)`;
   } else if (m.builtin) {
     const r = ex.builtin.prep(vals, wmax);
     npow = r.npow;
@@ -176,10 +244,10 @@ function makeJob(slot, opts = {}) {
     const lo = leadingOrder(m.evalD, pv);
     if (!Number.isFinite(lo.n)) throw new UserError(lo.warn);
     npow = lo.n;
-    info = `n = ${fmtN(npow)} (estimated: slope of ln|D(s)|, s ∈ [${fmt(lo.hi / 10)}, ${fmt(lo.hi)}])`;
+    info = `n = ${fmtN(npow)} (automatic: slope of ln|D(s)|, s ∈ [${fmt(lo.hi / 10)}, ${fmt(lo.hi)}])`;
     if (lo.warn) warns.push(lo.warn);
     for (const [a, b] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
-      const q = vals.slice();
+      const q = pv.slice();
       q[ix] = xr[a];
       q[iy] = yr[b];
       const r = leadingOrder(m.evalD, q);
@@ -193,19 +261,122 @@ function makeJob(slot, opts = {}) {
     }
   }
   const branch0 = slot.set.branch === 'on' || (slot.set.branch !== 'off' && m.branchAuto);
-  const hl = ex.hlines && ex.hlines.param === names[iy] ? ex.hlines.at : null;
-  const [nx, ny] = (opts.res || slot.res).split('x').map(Number);
+  const hl = ex.hlines && ex.hlines.param === names[iy] && iz < 0 ? ex.hlines.at : null;
+  const cnt = (i) => (i >= 0 && m.decls.get(names[i]) ? m.decls.get(names[i]).count : null);
+  let nx = 10, ny = 10, nz = iz >= 0 ? 10 : 1;
+  const res = opts.res || (slot.res !== 'auto' ? slot.res : null);
+  if (opts.size) ({ nx, ny, nz } = opts.size);
+  else if (res) {
+    [nx, ny] = res.split('x').map(Number);
+    if (iz >= 0) nx = ny = nz = Math.min(160, Math.max(16, Math.round(Math.cbrt(nx * ny))));
+  }
   return {
-    key: slot.key, code: m.code(ix, iy), branch0, exact: opts.exact ?? state.exact, c: vals, npow,
-    nx, ny, xr, yr, xl: names[ix], yl: names[iy], hlines: hl, smin: slot.smin,
+    key: slot.key, code: m.code(ix, iy, iz), branch0, exact: opts.exact ?? state.exact, c: vals, npow,
+    nx, ny, nz, xr, yr, zr, xl: names[ix], yl: names[iy], zl: iz >= 0 ? names[iz] : null, hlines: hl, smin: slot.smin,
     march: { wmax, tol, hmax, wband: Number.isFinite(hmax) ? wband : 0, w0 }, info, warns,
+    auto: !opts.size && !res, counts: [cnt(ix), cnt(iy), cnt(iz)],
   };
 }
 
 function marchInfo(job) {
   const m = job.march;
   const cap = Number.isFinite(m.hmax) ? `, h ≤ ${fmt(m.hmax)}${Number.isFinite(m.wband) ? ` for ω < ${fmt(m.wband)}` : ' on the whole line'}` : '';
-  return `${job.info}, ω_max = ${fmt(m.wmax)}${cap}${m.tol !== 0.3 ? `, tol = ${fmt(m.tol)}` : ''}${job.branch0 ? ', branch point at 0' : ''}${job.exact ? ' · exact roots' : ''}`;
+  const g = is3D(job) ? `${job.nx}×${job.ny}×${job.nz}` : `${job.nx}×${job.ny}`;
+  return `${g}${job.auto ? ' (auto)' : ''} · ${job.info}, ω_max = ${fmt(m.wmax)}, tol = ${fmt(m.tol)}${cap}${job.branch0 ? ', branch point at 0' : ''} · ${job.exact ? 'exact roots' : 'fast (first-order σ)'}`;
+}
+
+// ---------------------------------------------------------------------------------------------
+// automatic resolution. Frame time model t(N) = lat + c N: a small grid is latency-bound (the
+// longest single march), a large one throughput-bound. Probe grids 10², 20², 40², ... (3D: 10³,
+// 20³, ...) when the equation, mode or dimension changes: lat = the 10² time, c from the largest
+// probe; then c follows the measured frames. The grid gets N = max(TARGET - lat, lat) / c points
+// (a frame of ~50 ms, or 2 lat where one march alone takes longer than that).
+// ---------------------------------------------------------------------------------------------
+const auto = { key: null, skey: null, lat: 0, cost: null, size: null, fromSteps: false, aspect: 16 / 9 };
+
+async function probe(job) {
+  const d3 = is3D(job);
+  let s = 10;
+  let lat = null;
+  let cost = null;
+  for (;;) {
+    const r = await engine.compute({ ...job, nx: s, ny: s, nz: d3 ? s : 1 }, { deadlineMs: DEADLINE_MS });
+    if (r.timedOut) return { lat: r.wallMs, cost: r.wallMs / Math.max(1, r.rowsDone * s) };
+    if (lat === null) lat = r.wallMs;
+    cost = Math.max(r.wallMs - lat, 0.25 * r.wallMs) / r.npts;
+    if (r.wallMs > Math.max(12, 3 * lat) || s >= (d3 ? 40 : 160)) break;
+    s *= 2;
+  }
+  return { lat, cost };
+}
+
+const budget = () => Math.max(TARGET_MS - auto.lat, auto.lat) / Math.max(auto.cost, 1e-9);
+
+function sizeFor(N, d3, aspect) {
+  if (d3) {
+    const n = Math.min(128, Math.max(16, Math.round(Math.cbrt(N))));
+    return { nx: n, ny: n, nz: n };
+  }
+  let ny = Math.round(Math.sqrt(N / aspect));
+  ny = Math.min(2160, Math.max(20, ny));
+  const nx = Math.min(3840, Math.max(20, Math.round(ny * aspect)));
+  return { nx, ny, nz: 1 };
+}
+
+async function autoSize(job) {
+  const d3 = is3D(job);
+  const key = `${job.code}|${job.exact}|${job.branch0}|${d3}`;
+  const skey = `${job.key}|${job.xl}|${job.yl}|${job.zl}|${job.counts.join()}`;
+  if (auto.key !== key) {
+    const p = await probe(job);
+    auto.key = key;
+    auto.lat = p.lat;
+    auto.cost = p.cost;
+    auto.size = null;
+  }
+  if (auto.skey !== skey) {
+    auto.skey = skey;
+    auto.aspect = 16 / 9;
+    // a declared step (name = start:step:stop) gives the next frame's grid along that axis
+    const [cx, cy, cz] = job.counts;
+    if (cx || cy || cz) {
+      if (d3) {
+        // the stepped axes as declared (at most 256), the others share the frame budget
+        const c3 = [cx, cy, cz].map((c) => (c ? Math.min(c, 256) : null));
+        const prod = c3.reduce((a, c) => a * (c || 1), 1);
+        const k = c3.filter((c) => !c).length;
+        const rest = k ? Math.min(128, Math.max(16, Math.round(Math.pow(Math.max(1, budget() / prod), 1 / k)))) : 0;
+        auto.size = { nx: c3[0] || rest, ny: c3[1] || rest, nz: c3[2] || rest };
+      } else {
+        const nx = cx || Math.round(cy * 16 / 9);
+        const ny = cy || Math.round(cx * 9 / 16);
+        auto.size = { nx: Math.min(3840, Math.max(2, nx)), ny: Math.min(2160, Math.max(2, ny)), nz: 1 };
+        auto.aspect = auto.size.nx / auto.size.ny;
+      }
+      auto.fromSteps = true;
+      return auto.size;
+    }
+  }
+  if (auto.fromSteps && auto.size) return auto.size;
+  const want = sizeFor(budget(), d3, auto.aspect);
+  const n = (s) => s.nx * s.ny * s.nz;
+  if (auto.size && (auto.size.nz > 1) === d3 && Math.abs(Math.log(n(want) / n(auto.size))) < Math.log(1.3)) return auto.size;
+  return want;
+}
+
+function autoUpdate(job, r) {
+  if (!job.auto) return;
+  if (r.timedOut) {
+    const meas = r.wallMs / Math.max(1, r.rowsDone * job.nx);
+    auto.cost = Math.max(auto.cost || 0, meas) * 1.5;
+    auto.size = null;
+    auto.fromSteps = false;
+    return;
+  }
+  const meas = Math.max(r.wallMs - auto.lat, 0.25 * r.wallMs) / r.npts;
+  auto.cost = auto.cost ? Math.exp(0.5 * Math.log(auto.cost) + 0.5 * Math.log(meas)) : meas;
+  auto.size = { nx: job.nx, ny: job.ny, nz: job.nz };
+  auto.fromSteps = false;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -236,7 +407,13 @@ function buildExampleSelect() {
 }
 
 function setUrl() {
-  try { history.replaceState(null, '', '?ex=' + state.key + (state.exact ? '&exact=1' : '')); } catch (e) { /* ignore */ }
+  try { history.replaceState(null, '', '?ex=' + state.key + (state.exact ? '' : '&exact=0')); } catch (e) { /* ignore */ }
+}
+
+function fitTextarea() {
+  const ta = $('eq');
+  ta.style.height = 'auto';
+  ta.style.height = Math.min(420, ta.scrollHeight + 4) + 'px';
 }
 
 function loadModelUI() {
@@ -250,14 +427,30 @@ function loadModelUI() {
   ta.value = slot.text;
   ta.readOnly = !!ex.builtin;
   ta.classList.toggle('ro', !!ex.builtin);
+  fitTextarea();
   $('insLam').disabled = !!ex.builtin;
   $('res').value = slot.res;
   $('smin').value = slot.smin;
   $('sminLab').textContent = fmt(slot.smin);
-  for (const k of Object.keys(SET_DEFAULTS)) $('set_' + k).value = slot.set[k];
+  for (const k of SET_INPUTS) $('set_' + k).value = slot.set[k];
+  syncMarchSliders();
   updateModified();
   buildParamTable();
   renderStatus();
+}
+
+// ω_max (log scale 10 .. 1e6) and the phase tolerance 10^x rad (x in [-2, 0])
+function settingNumber(slot, k, dflt) {
+  try { const v = evalSetting(slot.set[k], dict()); return v === null ? dflt : v; } catch (e) { return dflt; }
+}
+function syncMarchSliders() {
+  const slot = cur();
+  const w = settingNumber(slot, 'wmax', 1e5);
+  const t = settingNumber(slot, 'tol', 0.3);
+  $('wmaxS').value = Math.log10(w);
+  $('wmaxO').textContent = fmt(w);
+  $('tolS').value = Math.log10(t);
+  $('tolO').textContent = fmt(t) + ' rad';
 }
 
 function updateModified() {
@@ -306,14 +499,15 @@ function buildParamTable() {
   if (!m) return;
   for (const name of m.params) {
     const p = slot.params[name];
-    const axis = slot.axes[0] === name ? 0 : slot.axes[1] === name ? 1 : -1;
+    const axis = slot.axes.indexOf(name);
+    const d = m.decls.get(name);
     const row = el('div', 'prow' + (axis >= 0 ? ' axis' : ''));
     const top = el('div', 'ptop');
     const nm = el('b', 'pname', name);
-    nm.title = name;
+    nm.title = name + (d ? ' (range declared in the text)' : ' (automatic range: declare it as  ' + name + ' = min:max)');
     top.appendChild(nm);
     let val = null;
-    if (axis >= 0) top.appendChild(el('span', 'axlab', axis === 0 ? 'x axis' : 'y axis'));
+    if (axis >= 0) top.appendChild(el('span', 'axlab', ['x', 'y', 'z'][axis] + ' axis' + (d && d.count ? ` · ${d.count} pts` : '')));
     else {
       val = el('input', 'pval');
       val.type = 'number';
@@ -323,9 +517,10 @@ function buildParamTable() {
       top.appendChild(val);
     }
     const axb = el('span', 'axbtns');
-    for (const k of [0, 1]) {
-      const b = el('button', 'ax' + (axis === k ? ' on' : ''), k ? 'Y' : 'X');
-      b.title = `use ${name} as the ${k ? 'y' : 'x'} axis of the chart`;
+    for (const k of [0, 1, 2]) {
+      const b = el('button', 'ax' + (axis === k ? ' on' : ''), ['X', 'Y', 'Z'][k]);
+      b.title = k < 2 ? `use ${name} as the ${k ? 'y' : 'x'} axis of the chart` :
+        (axis === 2 ? 'back to a 2D chart' : `3D (experimental): use ${name} as the third axis`);
       b.disabled = !!ex.builtin;
       b.addEventListener('click', () => setAxis(name, k));
       axb.appendChild(b);
@@ -338,7 +533,7 @@ function buildParamTable() {
       inp.type = 'number';
       inp.step = 'any';
       inp.value = fmtIn(v);
-      inp.title = t;
+      inp.title = t + (d ? ' (writes the range line of the text)' : ' (adds a range line to the text)');
     }
     bot.appendChild(mn);
     let sl = null;
@@ -376,15 +571,11 @@ function buildParamTable() {
       const o = { min: p.min, max: p.max };
       o[k] = v;
       if (!Number.isFinite(v) || !(o.max > o.min)) { inp.value = fmtIn(p[k]); return; }
-      p[k] = v;
-      if (sl) {
-        sl.min = p.min;
-        sl.max = p.max;
-        sl.step = p.step || (p.max - p.min) / 1000;
-        sl.value = p.value;
-      }
-      saveOwn();
-      if (axis >= 0) request();
+      p.min = o.min;
+      p.max = o.max;
+      writeRange(slot, name, o.min, o.max);
+      buildParamTable();
+      request();
     });
     range(mn, 'min');
     range(mx, 'max');
@@ -398,10 +589,17 @@ function paramChanged(final) {
 
 function setAxis(name, k) {
   const slot = cur();
-  const o = 1 - k;
-  if (slot.axes[k] === name) return;
-  if (slot.axes[o] === name) slot.axes[o] = slot.axes[k];
-  slot.axes[k] = name;
+  if (k === 2 && slot.axes[2] === name) slot.axes[2] = null;        // Z off: back to 2D
+  else {
+    if (slot.axes[k] === name) return;
+    const j = slot.axes.indexOf(name);
+    if (j >= 0) slot.axes[j] = slot.axes[k];
+    slot.axes[k] = name;
+    if (!slot.axes[0] || !slot.axes[1]) {                          // keep X and Y filled
+      const free = slot.model.params.filter((n) => !slot.axes.includes(n));
+      for (const q of [0, 1]) if (!slot.axes[q]) slot.axes[q] = free.shift() || null;
+    }
+  }
   buildParamTable();
   saveOwn();
   request();
@@ -426,7 +624,7 @@ function applyText() {
 
 function bindModelControls() {
   const ta = $('eq');
-  ta.addEventListener('input', () => { clearTimeout(eqTimer); eqTimer = setTimeout(applyText, 400); });
+  ta.addEventListener('input', () => { fitTextarea(); clearTimeout(eqTimer); eqTimer = setTimeout(applyText, 400); });
   ta.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); applyText(); } });
   $('insLam').addEventListener('click', () => {
     if (ta.readOnly) return;
@@ -442,7 +640,7 @@ function bindModelControls() {
     loadModelUI();
     request();
   });
-  for (const k of Object.keys(SET_DEFAULTS)) {
+  for (const k of SET_INPUTS) {
     $('set_' + k).addEventListener('change', () => {
       const slot = cur();
       slot.set[k] = String($('set_' + k).value).slice(0, 200);
@@ -450,6 +648,20 @@ function bindModelControls() {
       request();
     });
   }
+  $('wmaxS').addEventListener('input', () => {
+    const v = sig2(Math.pow(10, +$('wmaxS').value));
+    cur().set.wmax = String(v);
+    $('wmaxO').textContent = fmt(v);
+    paramChanged(false);
+  });
+  $('wmaxS').addEventListener('change', () => paramChanged(true));
+  $('tolS').addEventListener('input', () => {
+    const v = sig2(Math.pow(10, +$('tolS').value));
+    cur().set.tol = String(v);
+    $('tolO').textContent = fmt(v) + ' rad';
+    paramChanged(false);
+  });
+  $('tolS').addEventListener('change', () => paramChanged(true));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -471,13 +683,7 @@ function applySerialized(slot, o) {
   if (!o || typeof o !== 'object') return;
   const ex = exByKey.get(slot.key);
   if (typeof o.t === 'string' && !ex.builtin) slot.text = o.t.slice(0, 20000);
-  if (o.p && typeof o.p === 'object') {
-    for (const [n, a] of Object.entries(o.p)) {
-      if (n.length > 40 || !Array.isArray(a) || a.length !== 3 || !a.every(Number.isFinite) || !(a[2] > a[0])) continue;
-      slot.params[n] = { min: a[0], value: a[1], max: a[2], step: slot.params[n] ? slot.params[n].step : undefined };
-    }
-  }
-  if (Array.isArray(o.a) && !ex.builtin) slot.axes = [0, 1].map((k) => (typeof o.a[k] === 'string' ? o.a[k] : null));
+  if (Array.isArray(o.a) && !ex.builtin) slot.axes = [0, 1, 2].map((k) => (typeof o.a[k] === 'string' ? o.a[k] : null));
   if (o.s && typeof o.s === 'object') {
     for (const k of Object.keys(SET_DEFAULTS)) slot.set[k] = typeof o.s[k] === 'string' ? o.s[k].slice(0, 200) : SET_DEFAULTS[k];
     if (ex.set) for (const k of Object.keys(ex.set)) if (typeof o.s[k] !== 'string') slot.set[k] = ex.set[k];
@@ -486,7 +692,14 @@ function applySerialized(slot, o) {
   if (RES_CHOICES.includes(o.r)) slot.res = o.r;
   slot.modelText = null;
   slot.model = null;
-  compileSlot(slot);
+  compileSlot(slot);                       // (declared ranges first, then the link's values)
+  if (o.p && typeof o.p === 'object') {
+    for (const [n, a] of Object.entries(o.p)) {
+      if (n.length > 40 || !Array.isArray(a) || a.length !== 3 || !a.every(Number.isFinite) || !(a[2] > a[0])) continue;
+      const q = slot.params[n];
+      slot.params[n] = { min: a[0], value: a[1], max: a[2], step: q ? q.step : undefined };
+    }
+  }
 }
 
 let saveTimer = null;
@@ -521,7 +734,7 @@ function b64urlDecode(s) {
 function linkFor(slot) {
   const o = serialize(slot);
   o.x = state.exact ? 1 : 0;
-  return location.origin + location.pathname + '?ex=' + slot.key + (state.exact ? '&exact=1' : '') + '#m=' + b64urlEncode(JSON.stringify(o));
+  return location.origin + location.pathname + '?ex=' + slot.key + (state.exact ? '' : '&exact=0') + '#m=' + b64urlEncode(JSON.stringify(o));
 }
 
 async function copyLink() {
@@ -564,11 +777,12 @@ function bindChartControls() {
   $('smin').addEventListener('change', () => {
     const v = parseFloat($('smin').value);
     const slot = cur();
-    if (Number.isFinite(v) && v < 0) { slot.smin = v; $('sminLab').textContent = fmt(v); saveOwn(); redraw(); } else $('smin').value = slot.smin;
+    if (Number.isFinite(v) && v < 0) { slot.smin = v; $('sminLab').textContent = fmt(v); saveOwn(); if (is3D(lastJob)) request(); else redraw(); } else $('smin').value = slot.smin;
   });
-  $('exact').checked = state.exact;
-  $('exact').addEventListener('change', () => {
-    state.exact = $('exact').checked;
+  $('fog').addEventListener('input', () => { state.fog = +$('fog').value; redraw(); });
+  $('mode').value = state.exact ? 'exact' : 'fast';
+  $('mode').addEventListener('change', () => {
+    state.exact = $('mode').value === 'exact';
     setUrl();
     request();
   });
@@ -581,12 +795,18 @@ function bindChartControls() {
 function resetAxes() {
   const slot = cur();
   const ex = curEx();
+  let d0;
+  try { d0 = rangeDecls(ex.text); } catch (e) { d0 = new Map(); }
   for (const n of slot.axes) {
-    const d = ex.params.find((p) => p[0] === n);
-    if (d && slot.params[n]) { slot.params[n].min = d[2]; slot.params[n].max = d[3]; }
+    const d = n && d0.get(n);
+    if (d && slot.params[n]) {
+      slot.params[n].min = d.min;
+      slot.params[n].max = d.max;
+      writeRange(slot, n, d.min, d.max, d.step);
+    }
   }
+  state.cam = defaultCamera();
   buildParamTable();
-  saveOwn();
   request();
 }
 
@@ -604,9 +824,23 @@ function viewOpts(nx) {
 }
 
 let ctx = null;
+function draw3d(target = ctx) {
+  if (!vol3d || !vol3d.tex) return;
+  const cv = target.canvas;
+  if (target === ctx) {
+    const css = $('chart').getBoundingClientRect().width || 960;
+    const W = Math.round(Math.min(1600, css * (window.devicePixelRatio || 1)));
+    const H = Math.round(W * 9 / 16);
+    if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
+  }
+  const F = vol3d.draw(target, state.cam, { fog: state.fog, surf: 0.22, bg: BG });
+  if (target === ctx) lastFrame = F;
+}
+
 function redraw() {
-  if (!engine || !engine.resBuf) return;
-  engine.draw(ctx, viewOpts(engine.nx));
+  if (!engine) return;
+  if (is3D(lastJob)) draw3d();
+  else if (engine.resBuf) engine.draw(ctx, viewOpts(engine.nx));
   drawAxes();
 }
 
@@ -638,7 +872,8 @@ async function pump() {
       $('orderInfo').textContent = job.info;
       $('wgslOut').textContent = job.code.trim();
       try {
-        await renderOnce(job);
+        if (job.auto) Object.assign(job, await autoSize(job));
+        await renderOnce(job, slot);
       } catch (e) {
         if (!e.charD) throw e;
         slot.runErr = e.message;
@@ -658,35 +893,48 @@ function setProgress(frac) {
   $('progress').firstElementChild.style.width = (100 * frac).toFixed(1) + '%';
 }
 
-async function renderOnce(job) {
+async function renderOnce(job, slot) {
   let rafPending = false;
+  const d3 = is3D(job);
   const r = await engine.compute(job, {
     targetMs: 60,
+    deadlineMs: DEADLINE_MS,
     onBand: (row0, frac) => {
       setProgress(frac);
-      if (!rafPending) {
+      if (!d3 && !rafPending) {
         rafPending = true;
         requestAnimationFrame(() => { rafPending = false; engine.draw(ctx, viewOpts(job.nx)); });
       }
     },
   });
   setProgress(0);
+  autoUpdate(job, r);
+  if (r.timedOut) {
+    slot.runErr = `Stopped after ${(DEADLINE_MS / 1000).toFixed(0)} s (${(100 * r.rowsDone / (job.ny * job.nz)).toFixed(0)} % computed): the equation is too expensive or the march does not finish — reduce ω_max or the resolution${job.auto ? ' (the automatic resolution is lowered for the next frame)' : ''}.`;
+    if (!d3) { lastJob = job; engine.draw(ctx, viewOpts(job.nx)); drawAxes(); }
+    return r;
+  }
   lastJob = job;
-  engine.draw(ctx, viewOpts(job.nx));
-  drawAxes();
-  showTiming(r);
+  showTiming(r, job);
   $('marchInfo').textContent = marchInfo(job);
   const rb = await engine.readback();
   last = { ...rb, xr: job.xr, yr: job.yr, xl: job.xl, yl: job.yl };
+  if (d3) {
+    if (!vol3d) vol3d = await Volume3D.create(engine.device, engine.format);
+    vol3d.setVolume([job.nx, job.ny, job.nz], volumeBytes(rb, [job.nx, job.ny, job.nz], slot.smin, countOf));
+    draw3d();
+  } else engine.draw(ctx, viewOpts(job.nx));
+  drawAxes();
   showStats(last);
   return r;
 }
 
-function showTiming(r) {
-  $('sGpu').innerHTML = `${r.gpuMs.toFixed(r.gpuMs < 100 ? 1 : 0)} <small>ms${r.tsUsed ? '' : ' (wall)'}${state.exact ? ' · exact' : ''}</small>`;
+function showTiming(r, job) {
+  $('sGpu').innerHTML = `${r.gpuMs.toFixed(r.gpuMs < 100 ? 1 : 0)} <small>ms${r.tsUsed ? '' : ' (wall)'}${job.exact ? ' · exact' : ' · fast'}</small>`;
   $('sMpts').innerHTML = `${(r.npts / r.gpuMs / 1e3).toFixed(2)} <small>Mpts/s</small>`;
   $('sWall').innerHTML = `${r.wallMs.toFixed(0)} <small>ms</small>`;
-  $('sPts').innerHTML = `${(r.npts / 1e6).toFixed(2)}M <small>· ${r.bands}</small>`;
+  const g = is3D(job) ? `${job.nx}³` : `${job.nx}×${job.ny}`;
+  $('sPts').innerHTML = `${g} <small>· ${(r.npts / 1e6).toFixed(2)}M${job.auto ? ' · auto' : ''}</small>`;
 }
 
 function showStats(L) {
@@ -702,7 +950,7 @@ function showStats(L) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// axes, zoom, hover
+// axes, zoom, hover (2D); box edges and orbit camera (3D)
 // ---------------------------------------------------------------------------------------------
 function niceTicks(a, b, n) {
   const span = b - a;
@@ -715,7 +963,7 @@ function niceTicks(a, b, n) {
 }
 
 let zoomRect = null;
-function drawAxes() {
+function overlay() {
   const wrap = $('plotwrap');
   const ax = $('axes');
   const dpr = window.devicePixelRatio || 1;
@@ -727,16 +975,21 @@ function drawAxes() {
   const g = ax.getContext('2d');
   g.setTransform(dpr, 0, 0, dpr, 0, 0);
   g.clearRect(0, 0, W, H);
-  if (!lastJob) return;
   const cr = $('chart').getBoundingClientRect();
   const wr = wrap.getBoundingClientRect();
-  const L = cr.left - wr.left, T = cr.top - wr.top, CW = cr.width, CH = cr.height;
+  return { g, L: cr.left - wr.left, T: cr.top - wr.top, CW: cr.width, CH: cr.height };
+}
+
+function drawAxes() {
+  const { g, L, T, CW, CH } = overlay();
+  if (!lastJob) return;
   const v = lastJob;
   const cs = getComputedStyle(document.documentElement);
   const ink = cs.getPropertyValue('--muted').trim() || '#666';
   g.strokeStyle = ink; g.fillStyle = ink;
   g.font = '12px system-ui, sans-serif';
   g.lineWidth = 1;
+  if (is3D(v)) { drawBox3D(g, L, T, CW, CH); return; }
   g.textAlign = 'center'; g.textBaseline = 'top';
   for (const t of niceTicks(v.xr[0], v.xr[1], Math.max(3, Math.floor(CW / 90)))) {
     const x = L + (t - v.xr[0]) / (v.xr[1] - v.xr[0]) * CW;
@@ -771,6 +1024,40 @@ function drawAxes() {
   }
 }
 
+function drawBox3D(g, L, T, CW, CH) {
+  const F = lastFrame;
+  if (!F) return;
+  const v = lastJob;
+  const P = (p) => { const q = project(F, p, CW, CH); return q ? [L + q[0], T + q[1]] : null; };
+  const h = 0.5;
+  g.save();
+  g.beginPath(); g.rect(L, T, CW, CH); g.clip();
+  g.strokeStyle = 'rgba(205, 210, 225, 0.45)';
+  for (const a of [-h, h]) {
+    for (const b of [-h, h]) {
+      for (const [p, q] of [[[-h, a, b], [h, a, b]], [[a, -h, b], [a, h, b]], [[a, b, -h], [a, b, h]]]) {
+        const s = P(p), e = P(q);
+        if (s && e) { g.beginPath(); g.moveTo(...s); g.lineTo(...e); g.stroke(); }
+      }
+    }
+  }
+  g.fillStyle = 'rgba(230, 233, 240, 0.95)';
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  const label = (p0, p1, name, r, dx, dy) => {
+    const a = P(p0), b = P(p1), m = P(p0.map((x, i) => (x + p1[i]) / 2));
+    if (!a || !b || !m) return;
+    g.font = '12px system-ui, sans-serif';
+    g.fillText(fmt(r[0]), a[0] + dx, a[1] + dy);
+    g.fillText(fmt(r[1]), b[0] + dx, b[1] + dy);
+    g.font = '600 13px system-ui, sans-serif';
+    g.fillText(name, m[0] + 1.6 * dx, m[1] + 1.4 * dy);
+  };
+  label([-h, -h, -h], [h, -h, -h], v.xl, v.xr, 0, 14);
+  label([h, -h, -h], [h, h, -h], v.yl, v.yr, 10, 12);
+  label([-h, -h, -h], [-h, -h, h], v.zl, v.zr, -18, 0);
+  g.restore();
+}
+
 function chartCoords(ev) {
   const r = $('chart').getBoundingClientRect();
   return { x: Math.min(Math.max(ev.clientX - r.left, 0), r.width), y: Math.min(Math.max(ev.clientY - r.top, 0), r.height), w: r.width, h: r.height };
@@ -779,9 +1066,19 @@ function chartCoords(ev) {
 function bindPointer() {
   const cv = $('chart');
   let start = null;
-  cv.addEventListener('pointerdown', (ev) => { start = chartCoords(ev); cv.setPointerCapture(ev.pointerId); });
+  let raf = false;
+  const orbit = () => { if (!raf) { raf = true; requestAnimationFrame(() => { raf = false; draw3d(); drawAxes(); }); } };
+  cv.addEventListener('pointerdown', (ev) => { start = { ...chartCoords(ev), cam: { ...state.cam } }; cv.setPointerCapture(ev.pointerId); });
   cv.addEventListener('pointermove', (ev) => {
     const p = chartCoords(ev);
+    if (is3D(lastJob)) {
+      if (start) {
+        state.cam.yaw = start.cam.yaw - (p.x - start.x) * 0.01;
+        state.cam.pitch = Math.max(-1.45, Math.min(1.45, start.cam.pitch + (p.y - start.y) * 0.01));
+        orbit();
+      }
+      return;
+    }
     hover(p);
     if (start) {
       zoomRect = { x0: Math.min(start.x, p.x), y0: Math.min(start.y, p.y), x1: Math.max(start.x, p.x), y1: Math.max(start.y, p.y) };
@@ -791,6 +1088,7 @@ function bindPointer() {
   cv.addEventListener('pointerup', (ev) => {
     const z = zoomRect;
     start = null; zoomRect = null;
+    if (is3D(lastJob)) return;
     drawAxes();
     const slot = cur();
     if (z && z.x1 - z.x0 > 6 && z.y1 - z.y0 > 6 && lastJob && lastJob.key === slot.key && slot.params[lastJob.xl] && slot.params[lastJob.yl]) {
@@ -798,17 +1096,29 @@ function bindPointer() {
       const { xr, yr } = lastJob;
       const X = (x) => xr[0] + x / p.w * (xr[1] - xr[0]);
       const Y = (y) => yr[1] - y / p.h * (yr[1] - yr[0]);
-      const px = slot.params[lastJob.xl];
-      const py = slot.params[lastJob.yl];
-      px.min = +X(z.x0).toPrecision(6); px.max = +X(z.x1).toPrecision(6);
-      py.min = +Y(z.y1).toPrecision(6); py.max = +Y(z.y0).toPrecision(6);
+      const r4 = (v) => +v.toPrecision(4);
+      // keep the number of grid points of a declared step
+      const zoomTo = (name, lo, hi) => {
+        const d = slot.model.decls.get(name);
+        const step = d && d.count ? +((hi - lo) / (d.count - 1)).toPrecision(4) : undefined;
+        writeRange(slot, name, lo, hi, step);
+      };
+      zoomTo(lastJob.xl, r4(X(z.x0)), r4(X(z.x1)));
+      zoomTo(lastJob.yl, r4(Y(z.y1)), r4(Y(z.y0)));
       buildParamTable();
-      saveOwn();
       request();
     }
   });
-  cv.addEventListener('dblclick', resetAxes);
-  cv.addEventListener('pointerleave', () => { $('hover').textContent = ' '; });
+  cv.addEventListener('wheel', (ev) => {
+    if (!is3D(lastJob)) return;
+    ev.preventDefault();
+    state.cam.dist = Math.max(1.0, Math.min(8, state.cam.dist * Math.exp(ev.deltaY * 0.001)));
+    orbit();
+  }, { passive: false });
+  cv.addEventListener('dblclick', () => {
+    if (is3D(lastJob)) { state.cam = defaultCamera(); orbit(); } else resetAxes();
+  });
+  cv.addEventListener('pointerleave', () => { $('hover').textContent = is3D(lastJob) ? '3D view: drag to rotate, wheel to zoom, double-click to reset the view.' : ' '; });
 }
 
 function hover(p) {
@@ -844,22 +1154,21 @@ async function timeJob(job, reps) {
 }
 
 async function benchCurrent() {
-  if (busy) return;
+  if (busy || !lastJob) return;
   busy = true;
   $('bench').disabled = true;
   try {
-    const job = makeJob(cur());
+    const job = lastJob;
     const t = await timeJob(job, 5);
-    lastJob = job;
-    redraw();
-    logMsg(`benchmark ${job.key} ${job.nx}x${job.ny}: GPU median ${t.gpu.toFixed(1)} ms (min ${t.gpuMin.toFixed(1)})${t.ts ? '' : ' [wall]'}, ` +
+    logMsg(`benchmark ${job.key} ${job.nx}x${job.ny}${is3D(job) ? 'x' + job.nz : ''} (${job.exact ? 'exact' : 'fast'}): GPU median ${t.gpu.toFixed(1)} ms (min ${t.gpuMin.toFixed(1)})${t.ts ? '' : ' [wall]'}, ` +
       `wall ${t.wall.toFixed(1)} ms, ${(t.npts / t.gpu / 1e3).toFixed(2)} Mpts/s, ${t.bands} submissions`);
   } catch (e) {
     logMsg('benchmark failed: ' + e.message);
   } finally {
     busy = false;
     $('bench').disabled = false;
-    if (want) pump();
+    want = true;
+    pump();
   }
 }
 
@@ -867,11 +1176,14 @@ async function savePng() {
   if (!engine || !engine.resBuf || !lastJob) return;
   const cv = document.createElement('canvas');
   const c2 = cv.getContext('webgpu');
-  engine.draw(c2, { ...viewOpts(engine.nx), f: 1 });
+  if (is3D(lastJob)) {
+    cv.width = 1600; cv.height = 900;
+    draw3d(c2);
+  } else engine.draw(c2, { ...viewOpts(engine.nx), f: 1 });
   cv.toBlob((blob) => {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `${lastJob.key}_${lastJob.xl}_${lastJob.yl}_${lastJob.nx}x${lastJob.ny}.png`.replace(/[^\w.-]+/g, '_');
+    a.download = `${lastJob.key}_${lastJob.xl}_${lastJob.yl}${lastJob.zl ? '_' + lastJob.zl : ''}_${lastJob.nx}x${lastJob.ny}${is3D(lastJob) ? 'x' + lastJob.nz : ''}.png`.replace(/[^\w.-]+/g, '_');
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   }, 'image/png');
@@ -1150,6 +1462,7 @@ async function runCompare() {
   return window.__compare;
 }
 
+
 // ---------------------------------------------------------------------------------------------
 async function main() {
   getSlot('own');
@@ -1162,7 +1475,7 @@ async function main() {
   bindPointer();
   loadModelUI();
   drawAxes();
-  window.__app = { state, slots, getSlot, makeJob, compileSlot, linkFor, applyText };
+  window.__app = { state, slots, auto, getSlot, makeJob, compileSlot, linkFor, applyText, writeRange };
   window.addEventListener('resize', () => redraw());
   try {
     engine = await Engine.create(logMsg);

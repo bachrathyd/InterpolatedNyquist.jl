@@ -8,9 +8,9 @@
 // operation for operation like the Julia reference (gpu/scripts/systems.jl,
 // webgpu/validate/web_systems.jl), so the Float32 rounding matches closely.
 //
-// Fields: key, group, title, formula (shown under the selector), note, text (the equation),
-// params: [[name, value, min, max, step?], ...] (defaults; an axis parameter's [min, max] is
-// its chart range), axes: [x, y] (parameter names), set (march settings as expressions of
+// Fields: key, group, title, formula (shown under the selector), note, text (the equation; its
+// range lines  name = min:max @ value  give each parameter's paper range and default value; an
+// axis parameter's range is its chart range), axes: [x, y] (parameter names), set (march settings as expressions of
 // the parameters: n (order; empty = estimated), wmax, tol, hmax, wband (h <= hmax for
 // ω < wband; empty = the whole line), w0, branch ('auto' / 'on' / 'off': D has a branch
 // point at λ = 0, its |D| minimum at ω0 is no root estimate)); an axis parameter in a
@@ -107,8 +107,12 @@ export const EXAMPLES = [
     group: 'ret',
     title: 'A.1 Fourth-order delayed oscillator',
     formula: 'D(λ) = c₁λ⁴ + λ² + 2ζλ + 1 + (P + Dλ)·e^{−τλ}',
-    text: 'c₁*λ^4 + λ^2 + 2*ζ*λ + 1 + (P + D*λ)*exp(-τ*λ)',
-    params: [['c₁', 0.03, 0.005, 0.1], ['ζ', 0.02, 0.0, 0.2], ['P', 1.0, -2.0, 4.0], ['D', 1.0, -2.0, 5.0], ['τ', 0.5, 0.1, 1.5]],
+    text: 'c₁ = 0.005:0.1 @ 0.03\n' +
+      'ζ = 0:0.2 @ 0.02\n' +
+      'P = -2:4                # x axis\n' +
+      'D = -2:5                # y axis\n' +
+      'τ = 0.1:1.5 @ 0.5\n' +
+      'c₁*λ^4 + λ^2 + 2*ζ*λ + 1 + (P + D*λ)*exp(-τ*λ)',
     axes: ['P', 'D'],
     set: { wmax: '1e5' },
     cmap: ['c₁', 'ζ', 'τ'],
@@ -120,8 +124,12 @@ export const EXAMPLES = [
     group: 'ret',
     title: 'A.2 Delayed oscillator',
     formula: 'D(λ) = λ² + aλ + k + (b + gλ)·e^{−τλ}     (paper: k = g = 0, τ = 1/2)',
-    text: 'λ^2 + a*λ + k + (b + g*λ)*exp(-τ*λ)',
-    params: [['a', 1.0, -1.0, 10.0], ['k', 0.0, -1.0, 2.0], ['b', 1.0, -1.0, 10.0], ['g', 0.0, -0.5, 1.0], ['τ', 0.5, 0.1, 2.0]],
+    text: 'a = -1:10         # x axis\n' +
+      'k = -1:2 @ 0\n' +
+      'b = -1:10         # y axis\n' +
+      'g = -0.5:1 @ 0\n' +
+      'τ = 0.1:2 @ 0.5\n' +
+      'λ^2 + a*λ + k + (b + g*λ)*exp(-τ*λ)',
     axes: ['a', 'b'],
     set: { wmax: '1e4' },
     cmap: ['τ', 'k', 'g'],
@@ -134,8 +142,13 @@ export const EXAMPLES = [
     title: 'A.3 Distributed delay',
     formula: 'D(λ) = λ² + aλ + k + b·e^{−τ₀λ}(1 − e^{−τλ})/λ     (paper: k = τ₀ = 0, τ = 1)',
     note: 'Uniform kernel ∫ x(t − τ₀ − ϑ) dϑ over [0, τ] in closed form, written with exprel(x) = (eˣ − 1)/x: the removable singularity at λ = 0 is evaluated by its Taylor series for |x| < 1/2.',
-    text: '# (1 - e^{-τλ})/λ = τ·exprel(-τλ),  exprel(x) = (e^x - 1)/x\nλ^2 + a*λ + k + b*τ*exp(-τ₀*λ)*exprel(-τ*λ)',
-    params: [['a', 0.5, -0.5, 2.0], ['k', 0.0, -1.0, 2.0], ['b', 1.0, -1.0, 5.0], ['τ', 1.0, 0.2, 3.0], ['τ₀', 0.0, 0.0, 1.0]],
+    text: '# (1 - e^{-τλ})/λ = τ·exprel(-τλ),  exprel(x) = (e^x - 1)/x\n' +
+      'a = -0.5:2      # x axis\n' +
+      'k = -1:2 @ 0\n' +
+      'b = -1:5        # y axis\n' +
+      'τ = 0.2:3 @ 1\n' +
+      'τ₀ = 0:1 @ 0\n' +
+      'λ^2 + a*λ + k + b*τ*exp(-τ₀*λ)*exprel(-τ*λ)',
     axes: ['a', 'b'],
     set: { wmax: '1e4' },
     cmap: ['τ', 'k', 'τ₀'],
@@ -147,12 +160,19 @@ export const EXAMPLES = [
     group: 'ret',
     title: 'Showcase: constrained 2-DOF DAE (delayed PD)',
     formula: 'D(λ) = a₁₁a₂₂ − a₁₂²,  a₁₁ = m₁λ² + (c₁+c₂)λ + k₁+k₂ + (P + Dλ)e^{−τλ}',
-    text: 'a₁₁ = m₁*λ^2 + (c₁ + c₂)*λ + (k₁ + k₂) + (P + D*λ)*exp(-τ*λ)\n' +
+    text: 'm₁ = 0.2:2 @ 1\n' +
+      'c₁ = 0:0.5 @ 0.05\n' +
+      'c₂ = 0:0.5 @ 0.05\n' +
+      'k₁ = -2:1 @ -1\n' +
+      'k₂ = 0:2 @ 1\n' +
+      'P = 0.5:3             # x axis\n' +
+      'D = -0.5:3.5          # y axis\n' +
+      'τ = 0.1:1.5 @ 0.5\n' +
+      'm₂₃ = 0.1:1.5 @ 0.5\n' +
+      'a₁₁ = m₁*λ^2 + (c₁ + c₂)*λ + (k₁ + k₂) + (P + D*λ)*exp(-τ*λ)\n' +
       'a₁₂ = -(c₂*λ + k₂)\n' +
       'a₂₂ = m₂₃*λ^2 + c₂*λ + k₂\n' +
       'a₁₁*a₂₂ - a₁₂^2',
-    params: [['m₁', 1.0, 0.2, 2.0], ['c₁', 0.05, 0.0, 0.5], ['c₂', 0.05, 0.0, 0.5], ['k₁', -1.0, -2.0, 1.0], ['k₂', 1.0, 0.0, 2.0],
-      ['P', 1.5, 0.5, 3.0], ['D', 1.0, -0.5, 3.5], ['τ', 0.5, 0.1, 1.5], ['m₂₃', 0.5, 0.1, 1.5]],
     axes: ['P', 'D'],
     set: { wmax: '1e5' },
     cmap: ['m₁', 'm₂₃', 'k₁', 'k₂', 'c₁', 'c₂', 'τ'],
@@ -165,8 +185,15 @@ export const EXAMPLES = [
     title: 'A.7 Multi-mode turning lobes',
     formula: 'D(λ) = M₁M₂ + w(1 − e^{−2πλ/Ω})(M₂ + A₂M₁),  M₁ = λ² + 2ζ₁λ + 1,  M₂ = λ² + 2ζ₂ω₂λ + ω₂²',
     note: 'The rational form 1 + w(1 − e^{−τλ})(1/M₁ + A₂/M₂) with the stable modal denominators cleared (entire, n = 4); step cap h ≤ 0.05 for ω < 5 (regenerative root chain).',
-    text: 'M₁ = λ^2 + 2*ζ₁*λ + 1\nM₂ = λ^2 + 2*ζ₂*ω₂*λ + ω₂^2\nM₁*M₂ + w*(1 - exp(-2*pi/Ω*λ))*(M₂ + A₂*M₁)',
-    params: [['ζ₁', 0.02, 0.005, 0.1], ['ζ₂', 0.03, 0.005, 0.1], ['ω₂', 2.4, 1.2, 4.0], ['w', 0.5, 0.01, 1.1], ['Ω', 0.6, 0.10, 1.2], ['A₂', 0.45, 0.0, 1.5]],
+    text: 'ζ₁ = 0.005:0.1 @ 0.02\n' +
+      'ζ₂ = 0.005:0.1 @ 0.03\n' +
+      'ω₂ = 1.2:4 @ 2.4\n' +
+      'w = 0.01:1.1            # y axis\n' +
+      'Ω = 0.1:1.2             # x axis\n' +
+      'A₂ = 0:1.5 @ 0.45\n' +
+      'M₁ = λ^2 + 2*ζ₁*λ + 1\n' +
+      'M₂ = λ^2 + 2*ζ₂*ω₂*λ + ω₂^2\n' +
+      'M₁*M₂ + w*(1 - exp(-2*pi/Ω*λ))*(M₂ + A₂*M₁)',
     axes: ['Ω', 'w'],
     set: { wmax: '1e5', hmax: '0.05', wband: '5' },
     cmap: ['ζ₁', 'A₂', 'ζ₂', 'ω₂', null],
@@ -179,8 +206,12 @@ export const EXAMPLES = [
     title: 'A.4 Neutral DDE',
     formula: 'D(λ) = λ² + aλ²e^{−τλ} + dλ + k + c·e^{−τλ}     (paper: τ = 1, d = 0, k = 1)',
     note: NEUTRAL_NOTE + ' |a| > 1: essential instability.',
-    text: 'λ^2 + a*λ^2*exp(-τ*λ) + d*λ + k + c*exp(-τ*λ)',
-    params: [['a', 0.0, -1.2, 1.2], ['τ', 1.0, 0.3, 2.0], ['d', 0.0, 0.0, 2.0], ['k', 1.0, 0.0, 3.0], ['c', 0.0, -1.2, 1.2]],
+    text: 'a = -1.2:1.2    # x axis\n' +
+      'τ = 0.3:2 @ 1\n' +
+      'd = 0:2 @ 0\n' +
+      'k = 0:3 @ 1\n' +
+      'c = -1.2:1.2    # y axis\n' +
+      'λ^2 + a*λ^2*exp(-τ*λ) + d*λ + k + c*exp(-τ*λ)',
     axes: ['a', 'c'],
     set: { wmax: '200', hmax: 'pi/(2*τ)' },
     cmap: ['τ', 'd', 'k'],
@@ -193,8 +224,12 @@ export const EXAMPLES = [
     title: 'A.5 High-gain neutral DDE',
     formula: 'D(λ) = λ² + aλ²e^{−τλ} + dλ + k + c·e^{−τλ}     (paper: τ = 1, d = 5, k = 0)',
     note: 'The damped high-gain variant of A.4. ' + NEUTRAL_NOTE,
-    text: 'λ^2 + a*λ^2*exp(-τ*λ) + d*λ + k + c*exp(-τ*λ)',
-    params: [['a', 0.0, -1.2, 1.2], ['τ', 1.0, 0.3, 2.0], ['d', 5.0, 1.0, 10.0], ['k', 0.0, 0.0, 3.0], ['c', 1.0, -1.0, 10.0]],
+    text: 'a = -1.2:1.2    # x axis\n' +
+      'τ = 0.3:2 @ 1\n' +
+      'd = 1:10 @ 5\n' +
+      'k = 0:3 @ 0\n' +
+      'c = -1:10       # y axis\n' +
+      'λ^2 + a*λ^2*exp(-τ*λ) + d*λ + k + c*exp(-τ*λ)',
     axes: ['a', 'c'],
     set: { wmax: '200', hmax: 'pi/(2*τ)' },
     cmap: ['τ', 'd', 'k'],
@@ -207,8 +242,12 @@ export const EXAMPLES = [
     title: 'A.6 PDA control (neutral, essential instability)',
     formula: 'D(λ) = λ² + 2ζλ + 1 + (P + Dλ + Aλ²)·e^{−τλ}     (paper: ζ = 0.05, D = 0.1, τ = 1)',
     note: 'Delayed acceleration feedback makes the loop neutral: for |A| > 1 the essential spectrum sits at Re λ = ln|A|/τ > 0 (dashed lines) and the count saturates (≈ ω_max τ/2π). ω_max = 500, h ≤ π/(2τ).',
-    text: 'λ^2 + 2*ζ*λ + 1 + (P + D*λ + A*λ^2)*exp(-τ*λ)',
-    params: [['ζ', 0.05, 0.0, 0.3], ['P', 0.0, -1.1, 1.4], ['D', 0.1, -0.5, 0.5], ['A', 0.0, -1.15, 1.15], ['τ', 1.0, 0.3, 2.0]],
+    text: 'ζ = 0:0.3 @ 0.05\n' +
+      'P = -1.1:1.4         # x axis\n' +
+      'D = -0.5:0.5 @ 0.1\n' +
+      'A = -1.15:1.15       # y axis\n' +
+      'τ = 0.3:2 @ 1\n' +
+      'λ^2 + 2*ζ*λ + 1 + (P + D*λ + A*λ^2)*exp(-τ*λ)',
     axes: ['P', 'A'],
     set: { wmax: '500', hmax: 'pi/(2*τ)' },
     cmap: ['ζ', 'D', 'τ'],
@@ -223,9 +262,12 @@ export const EXAMPLES = [
     formula: 'D(λ) = 1 − K·e^{−rλ}/cosh γ,   γ = λ√(1 + c/λ)/√(1 + ηλ)     (r = τ/T; paper: c = 0)',
     note: 'Bar with delayed boundary feedback, exact (no discretization), Kelvin–Voigt damping η, external damping c. Counted on the entire numerator cosh γ − K e^{−rλ}; in Float32 cosh γ ~ e^{120} overflows at ω = 400, so it is multiplied by the analytic, zero-free e^{−γ}: the march sees (1 + e^{−2γ})/2 − K e^{−rλ−γ}, whose leading order is n ≈ 0 (the e^{−γ} phase cancels against that of the stable denominator). ω_max = 400, h ≤ π/(2 r_max) for ω < 40. K = 1: a root at λ = 0 on the line.',
     text: '# numerator cosh γ - K e^{-rλ}, times e^{-γ} (no overflow in Float32)\n' +
+      'c = 0:1 @ 0\n' +
+      'η = 0.002:0.05 @ 0.01\n' +
+      'K = -0.75:1             # y axis\n' +
+      'r = 0.02:10.5           # x axis\n' +
       'γ = λ*sqrt(1 + c/λ)/sqrt(1 + η*λ)\n' +
       '(1 + exp(-2*γ))/2 - K*exp(-r*λ - γ)',
-    params: [['c', 0.0, 0.0, 1.0], ['η', 0.01, 0.002, 0.05], ['K', 0.5, -0.75, 1.0], ['r', 2.0, 0.02, 10.5]],
     axes: ['r', 'K'],
     set: { ...BAR_SET },
     cmap: ['η', 'c'],
@@ -242,8 +284,11 @@ export const EXAMPLES = [
       '#   D(λ) = det(λ²M + λC + K + F(λ)),  F = c(λ) e₁ e_Nᵀ,  c(λ) = -K (1 + ηλ) e^{-rλ} / h\n' +
       '# evaluated by the continuant recurrence of the tridiagonal λ²M + λC + K (O(N) per point).\n' +
       '# Parameters: η (Kelvin-Voigt damping), N (elements); axes r = τ/T and K.\n' +
-      '# Copy the rod example (A.8) for an editable exact-bar equation.',
-    params: [['η', 0.01, 0.002, 0.05], ['N', 12, 2, 24, 1], ['r', 2.0, 0.02, 10.5], ['K', 0.5, -0.75, 1.0]],
+      '# Copy the rod example (A.8) for an editable exact-bar equation.\n' +
+      'η = 0.002:0.05 @ 0.01\n' +
+      'N = 2:1:24 @ 12          # step 1: integer slider\n' +
+      'r = 0.02:10.5           # x axis\n' +
+      'K = -0.75:1             # y axis',
     axes: ['r', 'K'],
     set: { ...BAR_SET },
     cmap: ['η', 'N'],
@@ -286,8 +331,12 @@ fn charD(l: CD, p: vec2<f32>) -> CD {
     title: 'A.11 Fractional-order oscillator',
     formula: 'D(λ) = λ^α + c·λ^β + k·e^{−τλ}     (paper: α = 1.8, β = 0.8, c = 0.5)',
     note: 'Principal branch, λ^μ = exp(μ log λ); n = α (non-integer, estimated). Only σ = 0 is admissible (a shifted line would cross the branch cut); the march starts at ω₀ = 1e-9, next to the branch point (branch point at λ = 0 detected: its |D| minimum is no root estimate).',
-    text: 'λ^α + c*λ^β + k*exp(-τ*λ)',
-    params: [['α', 1.8, 1.1, 1.99], ['c', 0.5, 0.0, 2.0], ['β', 0.8, 0.0, 1.0], ['k', 2.0, 0.0, 5.0], ['τ', 1.0, 0.1, 2.0]],
+    text: 'α = 1.1:1.99 @ 1.8\n' +
+      'c = 0:2 @ 0.5\n' +
+      'β = 0:1 @ 0.8\n' +
+      'k = 0:5              # x axis\n' +
+      'τ = 0.1:2            # y axis\n' +
+      'λ^α + c*λ^β + k*exp(-τ*λ)',
     axes: ['k', 'τ'],
     set: { wmax: '1e4' },
     cmap: ['α', 'β', 'c'],
@@ -300,9 +349,14 @@ fn charD(l: CD, p: vec2<f32>) -> CD {
     title: 'A.12 Fractional PI controller (Gao, Zhai & Liu)',
     formula: 'D(s) = s^μ(T s^ν + 1) + K e^{−Ls}(k_p s^μ + k_i),   plant K e^{−Ls}/(T s^ν + 1),  C(s) = k_p + k_i/s^μ',
     note: 'Gao, Zhai & Liu (2017), Example 1, μ = 1.5 (K = 5, L = 0.4, T = 10, ν = 0.5); n = μ + ν (estimated); σ = 0 only (branch cut).',
-    text: 'λ^μ*(T*λ^ν + 1) + K*exp(-L*λ)*(k_p*λ^μ + k_i)',
-    params: [['μ', 1.5, 0.3, 1.9], ['T', 10.0, 1.0, 20.0], ['ν', 0.5, 0.1, 1.0], ['K', 5.0, 1.0, 10.0], ['L', 0.4, 0.05, 1.0],
-      ['k_p', 1.0, -1.0, 6.0], ['k_i', 5.0, -1.0, 25.0]],
+    text: 'μ = 0.3:1.9 @ 1.5\n' +
+      'T = 1:20 @ 10\n' +
+      'ν = 0.1:1 @ 0.5\n' +
+      'K = 1:10 @ 5\n' +
+      'L = 0.05:1 @ 0.4\n' +
+      'k_p = -1:6          # x axis\n' +
+      'k_i = -1:25         # y axis\n' +
+      'λ^μ*(T*λ^ν + 1) + K*exp(-L*λ)*(k_p*λ^μ + k_i)',
     axes: ['k_p', 'k_i'],
     set: { wmax: '1e4' },
     cmap: ['μ', 'L', 'K', 'T', 'ν'],
