@@ -34,7 +34,7 @@ export class ExprError extends Error {
 }
 
 export const MAX_PARAMS = 16;            // K[0..15] of march.wgsl
-const ARITY = { exp: 1, log: 1, ln: 1, sqrt: 1, sin: 1, cos: 1, tan: 1, sinh: 1, cosh: 1, tanh: 1, exprel: 1, pow: 2 };
+const ARITY = { exp: 1, log: 1, ln: 1, sqrt: 1, sin: 1, cos: 1, tan: 1, sinh: 1, cosh: 1, tanh: 1, exprel: 1, pow: 2, integral: 4 };
 const SETTING_ARITY = { min: 2, max: 2, abs: 1 };          // real-valued settings only
 const NON_ANALYTIC = new Set(['abs', 'real', 'imag', 'conj', 'min', 'max', 'arg', 'angle', 'sign', 'floor', 'ceil',
   'round', 're', 'im', 'Re', 'Im', 'hypot', 'mod', 'cabs', 'abs2']);
@@ -330,19 +330,28 @@ function ctanhH(a) {
   const t = cdivH(cx(1 - e.re, -e.im), cx(1 + e.re, e.im));
   return cx(s * t.re, s * t.im);
 }
-function cexprelH(a) {
-  if (Math.hypot(a.re, a.im) < 0.5) {
-    // Σ x^k/(k+1)!, k = 0..19 (Horner)
-    let r = cx(1 / 20922789888000, 0);         // 1/20!   ... built downwards
-    let f = 20922789888000;
-    for (let k = 19; k >= 1; k--) {
-      f /= (k + 1);
-      r = cx(a.re * r.re - a.im * r.im + 1 / f, a.re * r.im + a.im * r.re);
+const cexprelH = (a) => cphiH(a, 1);              // exprel = φ_1
+// φ_k(z) = Σ_{j≥0} z^j/(j+k)!  (φ_1 = exprel): Taylor for |z| < 2 + k, else the recurrence
+// φ_i = (φ_{i-1} - 1/(i-1)!)/z from φ_0 = e^z
+function cphiH(a, k) {
+  if (Math.hypot(a.re, a.im) < 2 + k) {
+    const J = 40;
+    let c = 1;
+    for (let i = 1; i <= J + k; i++) c /= i;
+    let r = cx(c, 0);
+    for (let j = J - 1; j >= 0; j--) {
+      c *= j + 1 + k;
+      r = cx(a.re * r.re - a.im * r.im + c, a.re * r.im + a.im * r.re);
     }
     return r;
   }
-  const e = cexpH(a);
-  return cdivH(cx(e.re - 1, e.im), a);
+  let r = cexpH(a);
+  let f = 1;
+  for (let i = 1; i <= k; i++) {
+    r = cdivH(cx(r.re - f, r.im), a);
+    f /= i;
+  }
+  return r;
 }
 const CF = {
   add: (a, b) => cx(a.re + b.re, a.im + b.im),
@@ -361,6 +370,9 @@ const CF = {
   tanh: ctanhH,
   tan: (a) => { const t = ctanhH(cx(-a.im, a.re)); return cx(t.im, -t.re); },
   exprel: cexprelH,
+  phi2: (a) => cphiH(a, 2),
+  phi3: (a) => cphiH(a, 3),
+  phi4: (a) => cphiH(a, 4),
   min: (a, b) => cx(Math.min(a.re, b.re)),
   max: (a, b) => cx(Math.max(a.re, b.re)),
   abs: (a) => cx(Math.hypot(a.re, a.im)),
@@ -370,7 +382,7 @@ const CF = {
 // typed expression DAG
 // ---------------------------------------------------------------------------------------------
 const maxTy = (a, b) => ((a === 'D' || b === 'D') ? 'D' : (a === 'C' || b === 'C') ? 'C' : 'R');
-const SAME_TY = new Set(['neg', 'inv', 'exp', 'sin', 'cos', 'tan', 'sinh', 'cosh', 'tanh', 'exprel']);
+const SAME_TY = new Set(['neg', 'inv', 'exp', 'sin', 'cos', 'tan', 'sinh', 'cosh', 'tanh', 'exprel', 'phi2', 'phi3', 'phi4']);
 
 class IR {
   constructor() {
@@ -398,6 +410,7 @@ class IR {
   add(a, b) { if (this.isLit(a, 0)) return b; if (this.isLit(b, 0)) return a; return this.op2('add', a, b); }
   sub(a, b) { if (this.isLit(b, 0)) return a; if (this.isLit(a, 0)) return this.neg(b); return this.op2('sub', a, b); }
   mul(a, b) {
+    if (this.isLit(a, 0) || this.isLit(b, 0)) return this.lit(0);      // (symbolic zeros of integral(...))
     if (this.isLit(a, 1)) return b;
     if (this.isLit(b, 1)) return a;
     if (this.isLit(a, -1)) return this.neg(b);
@@ -480,6 +493,10 @@ function lowerAst(ir, ast, ctx) {
     }
     case 'call': {
       const f = ast.f;
+      if (f === 'integral') {
+        if (!ctx.integral) throw new ExprError('integral(...) is only available in the equation', ast.line, ast.col);
+        return ctx.integral(ast);
+      }
       const ar = ARITY[f] ?? (ctx.settings ? SETTING_ARITY[f] : undefined);
       if (ar === undefined) {
         if (NON_ANALYTIC.has(f)) {
@@ -564,6 +581,13 @@ function emitNode(nd, A, T, B) {
     case 'exp': return ta === 'R' ? `exp(${a})` : ta === 'C' ? `cexp(${a})` : `dexp(${a})`;
     case 'log': return ta === 'R' ? `clog(${R(a)})` : ta === 'C' ? `clog(${a})` : `dlog(${a})`;
     case 'sqrt': return ta === 'R' ? `csqrt(${R(a)})` : ta === 'C' ? `csqrt(${a})` : `dsqrt(${a})`;
+    case 'phi2': case 'phi3': case 'phi4': {
+      const k = nd.op[3];
+      if (ta === 'D') return `dphik(${a}, ${k})`;
+      if (ta === 'C') return `dphik(${Z(a)}, ${k}).v`;
+      return `rphik(${a}, ${k})`;
+    }
+    case 'quad': return `quad${nd.q}(l, p, ${a}, ${b})`;
     case 'sin': case 'cos': case 'tan': case 'sinh': case 'cosh': case 'tanh': case 'exprel': {
       const f = nd.op;
       if (ta === 'D') return `d${f}(${a})`;
@@ -662,7 +686,185 @@ export function compileModel(src) {
       if (!pnames.includes(n)) pnames.push(n);
       return ir.par(n);
     },
+    integral: (ast) => lowerIntegral(ast),
   };
+
+  // ---- integral(f, θ, a, b) ------------------------------------------------------------------
+  // closed form when f = Σ_k q_k θ^k e^{μθ} (θ-free q_k, μ; degree ≤ 3): with θ = a + h u,
+  // θ = b - h(1-u):  ∫_a^b θ^k e^{μθ} dθ = h e^{μa} Σ_m C(k,m) b^{k-m} (-h)^m m! φ_{m+1}(μh),
+  // φ_j(z) = Σ_i z^i/(i+j)! (φ_1 = exprel; stable at z = 0). Otherwise composite Gauss-Legendre.
+  const quads = [];
+  let inIntegral = false;
+  const depends = (ast, v) => {
+    switch (ast.t) {
+      case 'id': return ast.name === v;
+      case 'num': return false;
+      case 'neg': return depends(ast.a, v);
+      case 'bin': return depends(ast.a, v) || depends(ast.b, v);
+      case 'call': return ast.args.some((x) => depends(x, v));
+      default: return false;
+    }
+  };
+  const MAXDEG = 3;
+  function thetaForm(ast, v) {
+    const L = (a) => lowerAst(ir, a, ctx);
+    const ZERO = ir.lit(0);
+    if (!depends(ast, v)) return [{ mu: ZERO, poly: [L(ast)] }];
+    const merge = (A, B, sgn) => {
+      const out = A.map((t) => ({ mu: t.mu, poly: t.poly.slice() }));
+      for (const t of B) {
+        const q = sgn < 0 ? t.poly.map((c) => ir.neg(c)) : t.poly;
+        const o = out.find((x) => x.mu === t.mu);
+        if (!o) { out.push({ mu: t.mu, poly: q.slice() }); continue; }
+        for (let i = 0; i < q.length; i++) o.poly[i] = i < o.poly.length ? ir.add(o.poly[i], q[i]) : q[i];
+      }
+      return out;
+    };
+    const prod = (A, B) => {
+      let out = [];
+      for (const s1 of A) {
+        for (const s2 of B) {
+          const poly = new Array(s1.poly.length + s2.poly.length - 1).fill(ZERO);
+          s1.poly.forEach((c1, i) => s2.poly.forEach((c2, j) => { poly[i + j] = ir.add(poly[i + j], ir.mul(c1, c2)); }));
+          if (poly.length > 8) return null;
+          out = merge(out, [{ mu: ir.add(s1.mu, s2.mu), poly }], 1);
+        }
+      }
+      return out;
+    };
+    const ipow = (A, e) => {
+      let r = [{ mu: ZERO, poly: [ir.lit(1)] }];
+      for (let i = 0; i < e && r; i++) r = prod(r, A);
+      return r;
+    };
+    switch (ast.t) {
+      case 'id': return [{ mu: ZERO, poly: [ZERO, ir.lit(1)] }];
+      case 'neg': {
+        const A = thetaForm(ast.a, v);
+        return A && A.map((t) => ({ mu: t.mu, poly: t.poly.map((c) => ir.neg(c)) }));
+      }
+      case 'bin': {
+        if (ast.op === '+' || ast.op === '-') {
+          const A = thetaForm(ast.a, v);
+          const B = thetaForm(ast.b, v);
+          return A && B && merge(A, B, ast.op === '-' ? -1 : 1);
+        }
+        if (ast.op === '*') {
+          const A = thetaForm(ast.a, v);
+          const B = thetaForm(ast.b, v);
+          return A && B && prod(A, B);
+        }
+        if (ast.op === '/') {
+          if (depends(ast.b, v)) return null;
+          const A = thetaForm(ast.a, v);
+          const d = L(ast.b);
+          return A && A.map((t) => ({ mu: t.mu, poly: t.poly.map((c) => ir.div(c, d)) }));
+        }
+        // ^ : a non-negative integer literal exponent
+        if (depends(ast.b, v)) return null;
+        const e = ir.nodes[L(ast.b)];
+        if (e.op !== 'lit' || e.val.im !== 0 || !Number.isInteger(e.val.re) || e.val.re < 0 || e.val.re > 8) return null;
+        const A = thetaForm(ast.a, v);
+        return A && ipow(A, e.val.re);
+      }
+      case 'call': {
+        if (ast.f === 'pow' && ast.args.length === 2) return thetaForm({ t: 'bin', op: '^', a: ast.args[0], b: ast.args[1] }, v);
+        if (ast.f !== 'exp' || ast.args.length !== 1) return null;
+        const A = thetaForm(ast.args[0], v);
+        if (!A || A.length !== 1 || A[0].mu !== ZERO || A[0].poly.length > 2) return null;
+        const [c0, c1] = A[0].poly;
+        return [{ mu: c1 ?? ZERO, poly: [ir.op2('exp', c0)] }];
+      }
+      default: return null;
+    }
+  }
+  const fact = (m) => (m <= 1 ? 1 : m * fact(m - 1));
+  const binom = (k, m) => fact(k) / (fact(m) * fact(k - m));
+  function closedForm(terms, a, b) {
+    const h = ir.sub(b, a);
+    let sum = ir.lit(0);
+    for (const { mu, poly } of terms) {
+      const K = poly.length - 1;
+      if (ir.isLit(mu, 0)) {
+        // Σ q_k (b^{k+1} - a^{k+1})/(k+1)
+        for (let k = 0; k <= K; k++) {
+          const d = ir.sub(ir.ipow(b, k + 1), ir.ipow(a, k + 1));
+          sum = ir.add(sum, ir.mul(poly[k], k ? ir.div(d, ir.lit(k + 1)) : d));
+        }
+        continue;
+      }
+      const z = ir.mul(mu, h);
+      let S = ir.lit(0);
+      for (let m = 0; m <= K; m++) {
+        let e = ir.lit(0);
+        for (let k = m; k <= K; k++) e = ir.add(e, ir.mul(poly[k], ir.mul(ir.lit(binom(k, m)), ir.ipow(b, k - m))));
+        e = ir.mul(e, ir.mul(ir.lit(fact(m)), ir.ipow(ir.neg(h), m)));
+        const phi = ir.op2(m === 0 ? 'exprel' : 'phi' + (m + 1), z);
+        S = ir.add(S, ir.mul(e, phi));
+      }
+      sum = ir.add(sum, ir.mul(ir.mul(h, ir.op2('exp', ir.mul(mu, a))), S));
+    }
+    return sum;
+  }
+  function lowerIntegral(ast) {
+    if (inIntegral) throw new ExprError('nested integral(...) is not supported', ast.line, ast.col);
+    if (ast.args.length !== 4) throw new ExprError('integral(f, θ, a, b) takes 4 arguments', ast.line, ast.col);
+    const [fA, vA, aA, bA] = ast.args;
+    if (vA.t !== 'id') throw new ExprError('the 2nd argument of integral(...) is the integration variable (a name, e.g. θ)', vA.line ?? ast.line, vA.col ?? ast.col);
+    const v = vA.name;
+    if (LAMBDA.has(v) || CONSTS[v] || ARITY[v] || defAt.has(v)) {
+      throw new ExprError(`'${v}' cannot be the integration variable (it is λ, a constant, a function or a helper)`, vA.line, vA.col);
+    }
+    if (depends(aA, v) || depends(bA, v)) throw new ExprError('the limits of integral(...) must not contain its variable', ast.line, ast.col);
+    inIntegral = true;
+    try {
+      const a = lowerAst(ir, aA, ctx);
+      const b = lowerAst(ir, bA, ctx);
+      if (ir.nodes[a].ty !== 'R' || ir.nodes[b].ty !== 'R') {
+        throw new ExprError('the limits of integral(...) must be real expressions of the parameters (no λ, no i)', ast.line, ast.col);
+      }
+      const form = thetaForm(fA, v);
+      if (form && form.every((t) => t.poly.length - 1 <= MAXDEG)) return closedForm(form, a, b);
+      return quadNode(fA, v, a, b, ast);
+    } finally {
+      inIntegral = false;
+    }
+  }
+  function quadNode(fA, v, a, b, ast) {
+    const sub = new IR();
+    const memo = new Map();
+    const sctx = {
+      settings: false,
+      isName: ctx.isName,
+      ident: (x) => {
+        const n = x.name;
+        if (n === v) return sub._add('theta', 'R', []);
+        if (LAMBDA.has(n)) return sub.lam();
+        if (CONSTS[n]) return sub.lit(CONSTS[n][0], CONSTS[n][1]);
+        if (ARITY[n]) throw new ExprError(`'${n}' is a function: write ${n}(...)`, x.line, x.col);
+        if (defAt.has(n)) {
+          const k = defAt.get(n);
+          if (k >= cur) throw new ExprError(`'${n}' is used before its definition in line ${stmts[k].line}`, x.line, x.col);
+          used.set(n, (used.get(n) || 0) + 1);
+          if (!memo.has(n)) memo.set(n, lowerAst(sub, stmts[k].ast, sctx));
+          return memo.get(n);
+        }
+        if (!pnames.includes(n)) pnames.push(n);
+        return sub.par(n);
+      },
+      integral: (y) => { throw new ExprError('nested integral(...) is not supported', y.line, y.col); },
+    };
+    const root = lowerAst(sub, fA, sctx);
+    const reach = new Uint8Array(sub.nodes.length);
+    const st = [root];
+    while (st.length) { const id = st.pop(); if (reach[id]) continue; reach[id] = 1; for (const x of sub.nodes[id].args) st.push(x); }
+    const order = [];
+    for (let id = 0; id < sub.nodes.length; id++) if (reach[id]) order.push(id);
+    const q = quads.length;
+    quads.push({ sub, root, order, line: ast.line });
+    return ir._add('quad', 'D', [a, b], 'q' + q, { q });
+  }
+
   let root = null;
   stmts.forEach((s, k) => {
     cur = k;
@@ -686,7 +888,15 @@ export function compileModel(src) {
   }
   const order = [];
   for (let id = 0; id < ir.nodes.length; id++) if (reach[id]) order.push(id);
-  const params = pnames.filter((n) => order.some((id) => ir.nodes[id].op === 'par' && ir.nodes[id].name === n));
+  const liveQuads = quads.filter((Q, q) => order.some((id) => ir.nodes[id].op === 'quad' && ir.nodes[id].q === q));
+  const usesPar = (n) => order.some((id) => ir.nodes[id].op === 'par' && ir.nodes[id].name === n) ||
+    liveQuads.some((Q) => Q.order.some((id) => Q.sub.nodes[id].op === 'par' && Q.sub.nodes[id].name === n));
+  const params = pnames.filter(usesPar);
+  for (const Q of liveQuads) {
+    warnings.push(`integral(...) in line ${Q.line} is not polynomial × exp(linear in its variable): it is evaluated by ` +
+      'composite Gauss–Legendre quadrature (8 nodes per panel, ⌈|λ|·|b−a|/3⌉ panels, at most 64), which is slower and only approximate ' +
+      'for |λ|·|b−a| > 190; keep ω_max small.');
+  }
   for (const n of pnames) if (!params.includes(n)) warnings.push(`parameter '${n}' has no effect on D`);
   if (params.length > MAX_PARAMS) throw new ExprError(`${params.length} parameters: at most ${MAX_PARAMS} are supported`);
   const pidx = new Map(params.map((n, i) => [n, i]));
@@ -700,6 +910,17 @@ export function compileModel(src) {
     const n = ir.nodes[id];
     if (n.op === 'lit') { f32lit(n.val.re); f32lit(n.val.im); }
   }
+  for (const Q of liveQuads) {
+    for (const id of Q.order) {
+      const n = Q.sub.nodes[id];
+      if (n.op === 'lit') { f32lit(n.val.re); f32lit(n.val.im); }
+    }
+  }
+  const GLX = [-0.9602898564975363, -0.7966664774136267, -0.5255324099163290, -0.1834346424956498,
+    0.1834346424956498, 0.5255324099163290, 0.7966664774136267, 0.9602898564975363];
+  const GLW = [0.1012285362903763, 0.2223810344533745, 0.3137066458778873, 0.3626837833783620,
+    0.3626837833783620, 0.3137066458778873, 0.2223810344533745, 0.1012285362903763];
+  const panels = (lam, h) => Math.min(64, Math.max(1, Math.ceil(Math.hypot(lam.re, lam.im) * Math.abs(h) / 3)));
 
   const codeCache = new Map();
   function code(ix, iy, iz = -1) {
@@ -722,26 +943,86 @@ export function compileModel(src) {
       const B = n.args.map((a) => ir.nodes[a]);
       lines.push(`    let t${id} = ${emitNode(n, n.args.map(name), B.map((x) => x.ty), B)};`);
     }
-    const s = `fn charD(l: CD, p: vec2<f32>) -> CD {\n${lines.join('\n')}\n    return ${name(root)};\n}`;
+    const qfns = liveQuads.map((Q) => {
+      const qi = quads.indexOf(Q);
+      const qn = (id) => {
+        const n = Q.sub.nodes[id];
+        if (n.op === 'lit') return n.ty === 'R' ? f32lit(n.val.re) : `C(${f32lit(n.val.re)}, ${f32lit(n.val.im)})`;
+        if (n.op === 'lam') return 'l';
+        if (n.op === 'theta') return 'th';
+        if (n.op === 'par') {
+          const j = pidx.get(n.name);
+          return j === ix ? 'p.x' : j === iy ? 'p.y' : j === iz ? 'PZ' : `K[${j}]`;
+        }
+        return `q${qi}_t${id}`;
+      };
+      const body = [];
+      for (const id of Q.order) {
+        const n = Q.sub.nodes[id];
+        if (n.op === 'lit' || n.op === 'lam' || n.op === 'par' || n.op === 'theta') continue;
+        const B = n.args.map((x) => Q.sub.nodes[x]);
+        body.push(`            let q${qi}_t${id} = ${emitNode(n, n.args.map(qn), B.map((x) => x.ty), B)};`);
+      }
+      const rt = Q.sub.nodes[Q.root].ty;
+      const rv = rt === 'D' ? qn(Q.root) : rt === 'C' ? `CD(${qn(Q.root)}, C(0.0, 0.0))` : `CD(C(${qn(Q.root)}, 0.0), C(0.0, 0.0))`;
+      return `// integral(...) by composite 8-point Gauss-Legendre, ceil(|λ||b-a|/3) panels (at most 64)
+fn quad${qi}(l: CD, p: vec2<f32>, qa: f32, qb: f32) -> CD {
+    let GLX = array<f32, 8>(${GLX.join(', ')});
+    let GLW = array<f32, 8>(${GLW.join(', ')});
+    let h = qb - qa;
+    let M = clamp(i32(ceil(cabs(l.v) * abs(h) / 3.0)), 1, 64);
+    let hp = h / f32(M);
+    var acc = CD(C(0.0, 0.0), C(0.0, 0.0));
+    for (var m = 0; m < M; m++) {
+        let c0 = qa + (f32(m) + 0.5) * hp;
+        for (var j = 0; j < 8; j++) {
+            let th = c0 + 0.5 * hp * GLX[j];
+${body.join('\n')}
+            acc = dadd(acc, dscale(${rv}, GLW[j]));
+        }
+    }
+    return dscale(acc, 0.5 * hp);
+}
+`;
+    });
+    const s = `${qfns.join('\n')}fn charD(l: CD, p: vec2<f32>) -> CD {\n${lines.join('\n')}\n    return ${name(root)};\n}`;
     codeCache.set(ck, s);
     return s;
   }
 
-  function evalD(lam, pv) {
-    const r = new Array(ir.nodes.length);
-    for (const id of order) {
-      const n = ir.nodes[id];
+  function evalIR(G, ord, rt, lam, pv, th) {
+    const r = new Array(G.nodes.length);
+    for (const id of ord) {
+      const n = G.nodes[id];
       switch (n.op) {
         case 'lit': r[id] = n.val; break;
         case 'lam': r[id] = lam; break;
+        case 'theta': r[id] = cx(th, 0); break;
         case 'par': r[id] = cx(pv[pidx.get(n.name)], 0); break;
+        case 'quad': {
+          const Q = quads[n.q];
+          const a = r[n.args[0]].re, b = r[n.args[1]].re;
+          const M = panels(lam, b - a);
+          const hp = (b - a) / M;
+          let acc = cx(0, 0);
+          for (let m = 0; m < M; m++) {
+            const c0 = a + (m + 0.5) * hp;
+            for (let j = 0; j < 8; j++) {
+              const f = evalIR(Q.sub, Q.order, Q.root, lam, pv, c0 + 0.5 * hp * GLX[j]);
+              acc = cx(acc.re + GLW[j] * f.re, acc.im + GLW[j] * f.im);
+            }
+          }
+          r[id] = cx(0.5 * hp * acc.re, 0.5 * hp * acc.im);
+          break;
+        }
         default: r[id] = n.args.length === 2 ? CF[n.op](r[n.args[0]], r[n.args[1]]) : CF[n.op](r[n.args[0]]);
       }
     }
-    return r[root];
+    return r[rt];
   }
+  const evalD = (lam, pv) => evalIR(ir, order, root, lam, pv, 0);
 
-  return { params, decls, helpers: [...helpers.keys()], warnings, branchAuto, code, evalD, nodes: order.length };
+  return { params, decls, helpers: [...helpers.keys()], warnings, branchAuto, code, evalD, nodes: order.length, quadrature: liveQuads.length > 0 };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -824,7 +1105,7 @@ export function leadingOrder(evalD, pv) {
     warn = `|D(s)| overflows above s = ${hi}: n estimated on [${hi / 10}, ${hi}]`;
   }
   let n = n1;
-  if (Math.abs(n - Math.round(n)) < 1e-6) n = Math.round(n);
+  if (Math.abs(n - Math.round(n)) < 1e-6) n = Math.round(n) + 0;     // (+0: no -0)
   return { n, hi, warn };
 }
 

@@ -35,7 +35,7 @@ const ONLY = let s = arg("only", "")
     isempty(s) ? nothing : split(s, ',')
 end
 const KEYS = ["fourth", "showcase", "turning", "algebraic", "distributed", "neutral",
-              "neutral_hg", "pda", "rod", "fem", "frac", "gao"]
+              "neutral_hg", "pda", "rod", "fem", "frac", "gao", "shimmy", "ctcr"]
 # a second constant set for the original three (the slider knobs moved off their defaults)
 const ALT = Dict("fourth" => (0.03, 0.08, 1.0),                       # ζ, τ changed
                  "showcase" => (1.0, 0.5, -1.0, 1.0, 0.2, 0.1, 1.0),   # c₁, c₂, τ changed

@@ -120,6 +120,54 @@ export const EXAMPLES = [
     res: '960x540',
   },
   {
+    key: 'shimmy',
+    group: 'ret',
+    title: 'Shimmy, stretched-string tyre (Takács, Orosz & Stépán 2009)',
+    formula: 'D(λ) = ΣV²λ³ + 2V(V + Σζ)λ² + (Σ + 4ζV)λ + 2 − (L − 1 − Σ)/(L² + 1/3 + Σ(L² + 1 + Σ)) {2/λ²[(L − 1)λ + 2 − ((L + 1)λ + 2)e^{−λ}] + 4ζVL(1 + Σ)(2 + Σλ)/(L − 1 − Σ) + (L − 1 − Σ)(2ΣζVλ + Σ + 4ζV) + (L + 1 + Σ)(2ΣζVλ + Σ − 4ζV)e^{−λ}}',
+    note: 'Towed wheel with a stretched-string tyre, Eur. J. Mech. A/Solids 28 (2009), Eq. (31), dimensionless: towing speed V, caster length L, relaxation length Σ = σ/a, tyre damping ζ; the delay 1 is the time a contact point needs to cross the contact patch. The term 2/λ²[...] is the memory of the contact patch, ∫₀¹ (2(L − 1) + 4θ) e^{−λθ} dθ (integral form: no removable singularity at λ = 0); the factor L − 1 − Σ of the ζ term cancels, so nothing divides by zero at L = 1 + Σ. Retarded, n = 3. The 3D button adds ζ as the third axis (the Hopf surface of the paper’s MDBM figure).',
+    text: '# Takács, Orosz & Stépán (2009), Eq. (31): shimmy of a towed wheel, stretched-string tyre\n' +
+      'V = 0.001:0.6           # x axis: towing speed\n' +
+      'L = -0.2:7              # y axis: caster length\n' +
+      'ζ = 0:0.1 @ 0.02        # tyre damping (z axis in 3D)\n' +
+      'Σ = 0.5:3 @ 1.8         # relaxation length σ/a\n' +
+      '# contact-patch memory 2/λ²[(L-1)λ + 2 - ((L+1)λ + 2)e^{-λ}] as an integral over the patch\n' +
+      'A = integral((2*(L - 1) + 4*θ)*exp(-λ*θ), θ, 0, 1)\n' +
+      'P = Σ*V^2*λ^3 + 2*V*(V + Σ*ζ)*λ^2 + (Σ + 4*ζ*V)*λ + 2\n' +
+      '# braces of Eq. (31) times (L - 1 - Σ): the 1/(L - 1 - Σ) of the ζ term cancels\n' +
+      'Q = (L - 1 - Σ)*(A + (L - 1 - Σ)*(2*Σ*ζ*V*λ + Σ + 4*ζ*V) + (L + 1 + Σ)*(2*Σ*ζ*V*λ + Σ - 4*ζ*V)*exp(-λ)) + 4*ζ*V*L*(1 + Σ)*(2 + Σ*λ)\n' +
+      'P - Q/(L^2 + 1/3 + Σ*(L^2 + 1 + Σ))',
+    axes: ['V', 'L'],
+    axes3d: ['V', 'L', 'ζ'],
+    look3d: { alpha: 0.06, surf: 0.5 },     // 3D button: mostly the stability boundary
+    set: { wmax: '1e4' },
+    cmap: ['Σ', 'ζ'],
+    smin: -0.3,
+    res: '960x540',
+  },
+  {
+    key: 'ctcr',
+    group: 'ret',
+    title: 'Two delays, CTCR example (Sipahi & Olgac 2004)',
+    formula: 'CE(s) = s² + 7.1s + 21.1425 + (6s + 14.80)e^{−τ₁s} + (2s + 7.3)e^{−τ₂s} + 8e^{−(τ₁+τ₂)s}',
+    note: 'Sipahi & Olgac, "A novel stability study on multiple time-delay systems (MTDS) using the root clustering paradigm", ACC 2004, Eq. (18) (cluster treatment of characteristic roots). The last term is the cross-talk of the two delays (gain c₁₂ = 8). Stable at τ₁ = τ₂ = 0 (roots −9.95, −5.15). Step cap h ≤ π/(2(τ₁ + τ₂)_max) for ω < 50. The 3D button adds the cross-talk gain as the third axis.',
+    text: '# Sipahi & Olgac (2004), Eq. (18): two delays with cross-talk\n' +
+      'τ₁ = 0:3                # x axis\n' +
+      'τ₂ = 0:3                # y axis\n' +
+      'c₁₂ = 0:16 @ 8          # cross-talk gain (z axis in 3D)\n' +
+      'a₀ = 10:30 @ 21.1425\n' +
+      'b₁ = 0:30 @ 14.8\n' +
+      'b₂ = 0:15 @ 7.3\n' +
+      'λ^2 + 7.1*λ + a₀ + (6*λ + b₁)*exp(-τ₁*λ) + (2*λ + b₂)*exp(-τ₂*λ) + c₁₂*exp(-(τ₁ + τ₂)*λ)',
+    axes: ['τ₁', 'τ₂'],
+    axes3d: ['τ₁', 'τ₂', 'c₁₂'],
+    // the delays add up to 6: the phase turns fast at low ω; without the cap the default step
+    // control misses a root pair at ~0.1 % of the points (checked against the ODE back-end)
+    set: { wmax: '1e4', hmax: 'pi/(2*(τ₁ + τ₂))', wband: '50' },
+    cmap: ['c₁₂', 'a₀', 'b₁', 'b₂'],
+    smin: -1.0,
+    res: '480x270',
+  },
+  {
     key: 'algebraic',
     group: 'ret',
     title: 'A.2 Delayed oscillator',
@@ -141,14 +189,14 @@ export const EXAMPLES = [
     group: 'ret',
     title: 'A.3 Distributed delay',
     formula: 'D(λ) = λ² + aλ + k + b·e^{−τ₀λ}(1 − e^{−τλ})/λ     (paper: k = τ₀ = 0, τ = 1)',
-    note: 'Uniform kernel ∫ x(t − τ₀ − ϑ) dϑ over [0, τ] in closed form, written with exprel(x) = (eˣ − 1)/x: the removable singularity at λ = 0 is evaluated by its Taylor series for |x| < 1/2.',
-    text: '# (1 - e^{-τλ})/λ = τ·exprel(-τλ),  exprel(x) = (e^x - 1)/x\n' +
+    note: 'Uniform kernel ∫ x(t − θ) dθ over [τ₀, τ₀ + τ], typed as integral(...): the page integrates polynomial × exponential kernels in closed form, τ e^{−τ₀λ} exprel(−τλ) with exprel(x) = (eˣ − 1)/x, whose removable singularity at λ = 0 is evaluated by its Taylor series.',
+    text: '# distributed delay: the uniform kernel over [τ₀, τ₀ + τ]\n' +
       'a = -0.5:2      # x axis\n' +
       'k = -1:2 @ 0\n' +
       'b = -1:5        # y axis\n' +
       'τ = 0.2:3 @ 1\n' +
       'τ₀ = 0:1 @ 0\n' +
-      'λ^2 + a*λ + k + b*τ*exp(-τ₀*λ)*exprel(-τ*λ)',
+      'λ^2 + a*λ + k + b*integral(exp(-λ*θ), θ, τ₀, τ₀ + τ)',
     axes: ['a', 'b'],
     set: { wmax: '1e4' },
     cmap: ['τ', 'k', 'τ₀'],

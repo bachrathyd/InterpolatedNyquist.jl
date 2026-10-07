@@ -233,6 +233,46 @@ fn dexprel(x: CD) -> CD {
     let e = dexp(x);
     return ddiv(daddr(e, -1.0), x);
 }
+// φ_k(w) = Σ_{j≥0} w^j/(j+k)!, k = 2..4 (integral(...) of polynomial × exp kernels; φ_1 = exprel):
+// 24-term Horner Taylor series for |w| < 2 + k, else φ_i = (φ_{i-1} - 1/(i-1)!)/w from φ_0 = e^w
+fn dphik(w: CD, k: i32) -> CD {
+    if (cabs(w.v) < 2.0 + f32(k)) {
+        var c = 1.0;
+        for (var i = 1; i <= 23 + k; i++) { c = c / f32(i); }      // 1/(23+k)!
+        var r = CD(C(c, 0.0), C(0.0, 0.0));
+        for (var j = 22; j >= 0; j--) {
+            c = c * f32(j + 1 + k);
+            r = daddr(dmul(w, r), c);
+        }
+        return r;
+    }
+    var r = dexp(w);
+    var f = 1.0;
+    for (var i = 1; i <= k; i++) {
+        r = ddiv(daddr(r, -f), w);
+        f = f / f32(i);
+    }
+    return r;
+}
+fn rphik(x: f32, k: i32) -> f32 {
+    if (abs(x) < 2.0 + f32(k)) {
+        var c = 1.0;
+        for (var i = 1; i <= 23 + k; i++) { c = c / f32(i); }
+        var r = c;
+        for (var j = 22; j >= 0; j--) {
+            c = c * f32(j + 1 + k);
+            r = x * r + c;
+        }
+        return r;
+    }
+    var r = exp(x);
+    var f = 1.0;
+    for (var i = 1; i <= k; i++) {
+        r = (r - f) / x;
+        f = f / f32(i);
+    }
+    return r;
+}
 fn rexprel(x: f32) -> f32 {
     if (abs(x) < 0.5) {
         var r = x / 40320.0 + 1.0 / 5040.0;
