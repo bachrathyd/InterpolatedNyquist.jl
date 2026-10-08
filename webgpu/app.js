@@ -1,7 +1,9 @@
 // UI of the WebGPU stability-chart demo: the equation box (text -> expr.js -> generated WGSL)
 // with parameter-range lines kept in sync with the parameter table (sliders, ranges, X / Y / Z
-// axis choice), march settings, automatic resolution (about 20 frames per second), a 5 s
-// watchdog, a render scheduler (the newest settings win, a running chart is finished first),
+// axis choice), march settings, automatic resolution (2D: progressive refinement up to one point
+// per screen pixel, the first level sized for a frames-per-second target while dragging; 3D: about
+// 20 frames per second), a time limit, a render scheduler (the newest settings win, a running chart
+// is finished first),
 // 2D axes / box zoom / hover read-out, the experimental 3D view, shareable links, and the
 // ?validate=1 / ?bench=1 / ?bench=compare modes.
 
@@ -18,6 +20,8 @@ const OWN_KEY = 'nyquistgpu.own.v1';
 const RES_CHOICES = ['auto', '320x180', '480x270', '960x540', '1920x1080', '3840x2160'];
 const TARGET_MS = 50;            // auto resolution: one frame in about 50 ms (20 fps)
 const DEADLINE_MS = 5000;        // watchdog in auto mode: no further row band after 5 s
+const STRIDES = [1, 2, 4, 8, 16, 32, 64];      // 2D auto: start resolution = screen grid / stride
+const MAX_PTS = 2.5e6;           // cap of the 2D auto (screen) grid
 // (a fixed resolution uses the user's time limit, state.limit seconds, 1 .. 600)
 const SET_INPUTS = ['n', 'w0', 'hmax', 'wband', 'branch'];      // text fields of Advanced
 const BG = [0x11 / 255, 0x13 / 255, 0x18 / 255];
@@ -34,7 +38,10 @@ const state = {
   boundary: true,
   flags: false,
   live: true,
-  limit: 5,                // time limit [s] of a chart at a fixed resolution
+  limit: 10,               // time limit [s] of a chart (fixed resolution; 2D auto: all levels)
+  fps: 15,                 // 2D auto: frames per second while dragging (sets the start stride)
+  stride: 8,               // 2D auto: start resolution = screen grid / stride
+  master: 'fps',           // which of fps / start resolution the user set last
   alpha: 0.25,             // 3D: interior opacity (0: only the boundary, 1: solid)
   surf: 0.22,              // 3D: opacity of the boundary surface
   smooth: true,            // 3D: boundary as a marching-tetrahedra mesh (else ray-marched)
@@ -601,6 +608,7 @@ function buildParamTable() {
 
 function paramChanged(final) {
   saveOwn();
+  if (!final) noteInput();
   if (state.live || final) request();
 }
 
@@ -765,7 +773,7 @@ function b64urlDecode(s) {
 function linkFor(slot) {
   const o = serialize(slot);
   o.x = state.exact ? 1 : 0;
-  if (state.limit !== 5) o.w = state.limit;
+  if (state.limit !== 10) o.w = state.limit;
   return location.origin + location.pathname + '?ex=' + slot.key + (state.exact ? '' : '&exact=0') + '#m=' + b64urlEncode(JSON.stringify(o));
 }
 
@@ -875,11 +883,20 @@ function bindChartControls() {
     request();
   });
   $('resetAxes').addEventListener('click', resetAxes);
+  STRIDES.forEach((st) => $('startRes').add(new Option(`1/${st}`, st)));
+  $('startRes').value = state.stride;
+  $('fps').value = state.fps;
+  $('startRes').addEventListener('change', () => { state.master = 'res'; state.stride = +$('startRes').value; updateRateUI(); });
+  $('fps').addEventListener('change', () => {
+    const v = parseFloat($('fps').value);
+    if (Number.isFinite(v) && v > 0) { state.fps = v; state.master = 'fps'; } else $('fps').value = state.fps;
+    updateRateUI();
+  });
   $('limit').value = state.limit;
   $('limit').addEventListener('change', () => {
     const v = parseFloat($('limit').value);
     if (Number.isFinite(v) && v >= 1 && v <= 600) state.limit = v; else $('limit').value = state.limit;
-    if (state.limit > 5) countOnce('time-limit-raised');
+    if (state.limit > 10) countOnce('time-limit-raised');
   });
   $('live').addEventListener('change', () => { state.live = $('live').checked; });
   $('bnd').addEventListener('change', () => { state.boundary = $('bnd').checked; redraw(); });
@@ -963,7 +980,7 @@ function displayFactor(nx) {
 }
 
 function viewOpts(nx) {
-  return { f: displayFactor(nx), boundary: state.boundary, flags: state.flags, smin: cur().smin, zcap: ZCAP };
+  return { f: displayFactor(nx), boundary: state.boundary, flags: state.flags, smin: cur().smin, zcap: ZCAP, ds: shownDs };
 }
 
 let ctx = null;
@@ -1016,7 +1033,13 @@ async function pump() {
       $('wgslOut').textContent = job.code.trim();
       try {
         if (job.auto) Object.assign(job, await autoSize(job));
-        await renderOnce(job, slot);
+        if (job.auto && !is3D(job) && !auto.fromSteps) {
+          Object.assign(job, screenGrid());
+          await renderProgressive(job, slot);
+        } else {
+          shownDs = 1;
+          await renderOnce(job, slot);
+        }
       } catch (e) {
         if (!e.charD) throw e;
         slot.runErr = e.message;
@@ -1029,6 +1052,103 @@ async function pump() {
     console.error(e);
   } finally {
     busy = false;
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// 2D auto: progressive refinement. The final grid is one point per screen pixel of the chart; it
+// is computed on nested lattices (stride s0, s0/2, …, 1), each level only its new points in one
+// compute call (march.wgsl `lev`) and drawn at once (display.wgsl samples the nearest computed
+// node), so the picture sharpens step by step for barely more work than one full chart. While a
+// slider is dragged (or the view zoomed / panned) only the first level runs; its stride follows
+// the frames-per-second target from the timing model t = lat + cost · N (or is set directly).
+// ---------------------------------------------------------------------------------------------
+let shownDs = 1;                 // stride of the lattice the colouring pass samples
+let lastInput = -Infinity;
+let idleTimer = null;
+const interacting = () => performance.now() - lastInput < 200;
+function noteInput() {
+  lastInput = performance.now();
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => request(), 220);     // the full chart once the input stops
+}
+
+function screenGrid() {
+  const css = $('chartclip').getBoundingClientRect().width || 960;
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const nx = Math.max(32, Math.round(css * dpr));
+  const ny = Math.max(18, Math.round(nx / (auto.aspect || 16 / 9)));
+  const f = Math.sqrt(Math.min(1, MAX_PTS / (nx * ny)));
+  return { nx: Math.round(nx * f), ny: Math.round(ny * f), nz: 1 };
+}
+const levelPts = (g, s) => Math.ceil(g.nx / s) * Math.ceil(g.ny / s);
+const frameMs = (g, s) => auto.lat + levelPts(g, s) * (auto.cost || 0);
+function strideForFps(g, fps) {
+  let s = 1;
+  while (s < STRIDES[STRIDES.length - 1] && frameMs(g, s) > 1000 / fps) s *= 2;
+  return s;
+}
+
+/** sync start resolution <-> fps from the timing model; the options show the expected fps */
+function updateRateUI() {
+  const g = screenGrid(), known = !!auto.cost;
+  if (known && state.master === 'fps') state.stride = strideForFps(g, state.fps);
+  [...$('startRes').options].forEach((op) => {
+    const st = +op.value;
+    op.text = `${Math.ceil(g.nx / st)} × ${Math.ceil(g.ny / st)}` + (known ? `  (≈ ${Math.min(99, 1000 / frameMs(g, st)).toFixed(0)} fps)` : '');
+  });
+  $('startRes').value = state.stride;
+  if (known && state.master === 'res') { state.fps = Math.max(1, Math.round(1000 / frameMs(g, state.stride))); $('fps').value = state.fps; }
+  $('autoInfo').textContent = `final: ${g.nx} × ${g.ny} = ${(g.nx * g.ny / 1e6).toFixed(2)} Mpts (one per screen pixel)` +
+    (known ? `, ≈ ${(frameMs(g, 1) / 1000).toFixed(1)} s` : '');
+}
+
+async function renderProgressive(job, slot) {
+  updateRateUI();
+  const drag = interacting();
+  const s0 = state.stride;
+  const t0 = performance.now(), deadline = 1000 * state.limit;
+  let gpu = 0, n = 0, ts = true, done = false, timedOut = false, levels = 0;
+  for (let s = s0; s >= 1; s /= 2) {
+    const first = s === s0;
+    if (!first && want) break;                       // newer settings are waiting: stale refinement
+    const r = await engine.compute(job, {
+      stride: s, skip: !first, targetMs: 60, firstBand: first ? Infinity : 4096,
+      deadlineMs: Math.max(1, deadline - (performance.now() - t0)),
+      isCancelled: first ? null : () => want,
+      onBand: (row0, frac) => setProgress(first ? 0 : frac),
+    });
+    gpu += r.gpuMs || 0; n += r.npts; ts = ts && !!r.tsUsed;
+    if (r.cancelled) { timedOut = r.timedOut; break; }
+    if (r.npts >= 4096) {                            // refit the per-point cost on large levels
+      const meas = Math.max(r.wallMs - auto.lat, 0.25 * r.wallMs) / r.npts;
+      auto.cost = auto.cost ? Math.exp(0.5 * Math.log(auto.cost) + 0.5 * Math.log(meas)) : meas;
+    }
+    levels++;
+    shownDs = s;
+    lastJob = job;
+    engine.draw(ctx, viewOpts(job.nx));
+    updatePreview();
+    drawAxes();
+    if (s === 1) done = true;
+    if (drag) break;
+  }
+  setProgress(0);
+  if (levels) {
+    showTiming({ gpuMs: gpu, wallMs: performance.now() - t0, npts: n, tsUsed: ts }, job);
+    $('sPts').innerHTML = `${Math.ceil(job.nx / shownDs)}×${Math.ceil(job.ny / shownDs)} <small>· ${(n / 1e6).toFixed(2)}M new${done ? ' · screen' : ` · 1/${shownDs}`}</small>`;
+    $('marchInfo').textContent = marchInfo(job);
+  }
+  updateRateUI();
+  if (timedOut) {
+    countOnce('watchdog-stop');
+    slot.runErr = `Stopped after ${state.limit} s (time limit): the chart shows the 1/${shownDs} level. Raise the time limit, or reduce ω_max.`;
+    return;
+  }
+  if (done) {
+    const rb = await engine.readback();
+    last = { ...rb, xr: job.xr, yr: job.yr, xl: job.xl, yl: job.yl };
+    showStats(last);
   }
 }
 
@@ -1288,6 +1408,7 @@ function setView(xr, yr, commitNow = false) {
   syncRangeInputs();
   updatePreview();
   drawAxes();
+  noteInput();
   request();
   clearTimeout(commitTimer);
   if (commitNow) commitView(); else commitTimer = setTimeout(commitView, 600);

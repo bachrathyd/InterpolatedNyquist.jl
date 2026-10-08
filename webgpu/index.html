@@ -202,16 +202,21 @@
       <h2>Chart</h2>
       <label class="row"><span><b>Resolution</b></span>
         <select id="res">
-          <option value="auto" selected>Auto (20 fps)</option>
+          <option value="auto" selected>Auto: progressive to screen pixels (3D: 20 fps)</option>
           <option value="320x180">320 × 180 (0.06 Mpts; 3D: 39³)</option>
           <option value="480x270">480 × 270 (0.13 Mpts; 3D: 51³)</option>
           <option value="960x540">960 × 540 (0.52 Mpts; 3D: 80³)</option>
           <option value="1920x1080">1920 × 1080 (2.07 Mpts; 3D: 128³)</option>
           <option value="3840x2160">3840 × 2160 (8.29 Mpts; 3D: 202³)</option>
         </select></label>
-      <label class="row" title="A chart at a fixed resolution is stopped after this time (1-600 s); Auto keeps 5 s"><span><b>Time limit [s]</b> <span class="muted">(fixed resolutions)</span></span><input type="number" id="limit" min="1" max="600" step="1" value="5"></label>
+      <div class="grid2">
+        <label class="row" title="2D Auto: the first, coarse level (also the only one while a slider is dragged)"><span><b>Start resolution</b></span><select id="startRes"></select></label>
+        <label class="row" title="2D Auto: frames per second while dragging; sets the start resolution from the measured speed"><span><b>Frames / s</b> <span class="muted">(dragging)</span></span><input type="number" id="fps" min="1" max="60" step="1" value="15"></label>
+      </div>
+      <div class="muted" id="autoInfo" style="margin:-4px 0 8px"></div>
+      <label class="row" title="A chart is stopped after this time (1-600 s): 2D Auto keeps its last complete level"><span><b>Time limit [s]</b></span><input type="number" id="limit" min="1" max="600" step="1" value="10"></label>
       <div class="buttons"><button id="resetAxes">Reset axes</button></div>
-      <div class="formula" style="margin-top:8px">Auto: the grid is sized from a timed probe and the measured frame times so that a chart takes about 50 ms; a computation is stopped after 5 s (fixed resolutions: the time limit above, e.g. 60 s for a 4K image). The axes are the parameters marked X and Y over their [min, max]; 2D: wheel zooms at the cursor, middle-drag pans, left-drag zooms to a box, double-click resets; touch: pinch and two-finger drag. A third axis (Z) gives the experimental 3D view: drag to rotate, wheel to zoom.</div>
+      <div class="formula" style="margin-top:8px">Auto (2D): the chart is refined progressively up to one point per screen pixel (every 8th, 4th, 2nd pixel, then all; only the new points each time, redrawn after every level). While a slider is dragged only the start resolution is computed; start resolution and frames per second set each other from the measured speed (default 15 fps). The time limit stops a chart and keeps its last complete level (fixed resolutions: e.g. 60 s for a 4K image). 3D Auto: about 20 frames per second, stopped after 5 s. The axes are the parameters marked X and Y over their [min, max]; 2D: wheel zooms at the cursor, middle-drag pans, left-drag zooms to a box, double-click resets; touch: pinch and two-finger drag. A third axis (Z) gives the experimental 3D view: drag to rotate, wheel to zoom.</div>
     </div>
     <div class="panel">
       <h2>Display and march</h2>

@@ -168,7 +168,7 @@ export class Engine {
     return true;
   }
 
-  writeParams(job, row0, rows) {
+  writeParams(job, row0, rows, lev = 0) {
     const m = { ...MARCH_DEFAULTS, ...job.march };
     const b = new ArrayBuffer(PARAM_BYTES);
     const f = new Float32Array(b);
@@ -185,7 +185,7 @@ export class Engine {
     for (let i = 0; i < MAX_CONSTS; i++) f[20 + i] = i < job.c.length ? job.c[i] : 0;
     const zr = job.zr || [0, 0];
     f[36] = zr[0]; f[37] = nz > 1 ? (zr[1] - zr[0]) / (nz - 1) : 0;
-    u[38] = ny; u[39] = 0;
+    u[38] = ny; u[39] = lev;
     this.device.queue.writeBuffer(this.paramBuf, 0, b);
   }
 
@@ -193,7 +193,9 @@ export class Engine {
    * Compute one chart.  job = { code (WGSL fn charD), branch0, exact, c (K[0..15]), npow, nx, ny,
    * xr, yr (the axis parameters p.x, p.y), nz, zr (3D: the third axis PZ; the grid is stored
    * as nx x (ny nz) rows), march (MARCH_DEFAULTS overrides) }
-   * opts = { targetMs, onBand(rowlo, frac), isCancelled(), deadlineMs }
+   * opts = { targetMs, onBand(rowlo, frac), isCancelled(), deadlineMs, stride, skip }
+   * stride s > 1 (2D): only the nodes of the stride-s lattice (one progressive level); skip: not
+   * those of the stride-2s lattice (computed by the previous level)
    * deadlineMs: no further band is submitted after this wall time (a submitted band cannot be
    * stopped; the first bands are small, then sized to targetMs) -> { timedOut: true, ... }
    * -> { gpuMs, wallMs, bands, npts, tsUsed, cancelled, timedOut }
@@ -202,6 +204,9 @@ export class Engine {
     const dev = this.device;
     const nx = job.nx;
     const ny = job.ny * (job.nz || 1);              // rows of the stored grid
+    const S = opts.stride || 1, prog = !!opts.stride;
+    const nxs = Math.ceil(nx / S), nys = Math.ceil(ny / S);       // lattice of this level
+    const lev = (S - 1) | (opts.skip ? 1 << 16 : 0);
     const { pipeline, bgCache } = await this.pipeline(job.code, !!job.exact, !!job.branch0);   // (first: a failed compile keeps the chart)
     const fresh = this.ensureBuffers(nx, ny);
     this.grid3d = (job.nz || 1) > 1;           // a 3D grid is not drawn by the 2D colouring pass
@@ -213,12 +218,12 @@ export class Engine {
       });
       bgCache.set(this.resBuf, bg);
     }
-    this.rowlo = fresh ? ny : 0;          // fresh buffer: rows below the progress are blank
+    this.rowlo = fresh && !prog ? ny : 0;          // fresh buffer: rows below the progress are blank
     const target = opts.targetMs ?? 60;
-    const minRows = Math.max(1, Math.ceil(ny / (MAX_BANDS - 8)));
+    const minRows = Math.max(1, Math.ceil(nys / (MAX_BANDS - 8)));
     // the first band is small (~4k points): an expensive equation is noticed before much is queued
-    let rowsBand = Math.max(minRows, Math.min(ny, Math.max(1, Math.round(4096 / nx))));
-    let row = ny;
+    let rowsBand = Math.max(minRows, Math.min(nys, Math.max(1, Math.round((opts.firstBand || 4096) / nxs))));
+    let row = nys;
     let nb = 0;
     const inflight = [];
     let busyMs = 0;
@@ -235,9 +240,9 @@ export class Engine {
       this.bandLog.push({ rows: b.rows, dt, wait: tEnd - b.tSub });
       // band sizing: aim at `target` ms per submission (well below any GPU watchdog)
       const want = b.rows * target / Math.max(dt, 0.5);
-      rowsBand = Math.max(minRows, Math.min(ny, Math.round(Math.min(want, 4 * b.rows, rowsBand * 4) / 8) * 8 || minRows));
-      if (fresh) this.rowlo = b.row0;
-      opts.onBand?.(b.row0, 1 - b.row0 / ny);
+      rowsBand = Math.max(minRows, Math.min(nys, Math.round(Math.min(want, 4 * b.rows, rowsBand * 4) / 8) * 8 || minRows));
+      if (fresh && !prog) this.rowlo = b.row0;
+      opts.onBand?.(b.row0, 1 - b.row0 / nys);
     };
     let timedOut = false;
     while (row > 0) {
@@ -245,7 +250,7 @@ export class Engine {
       if (opts.deadlineMs && performance.now() - t0 > opts.deadlineMs) { cancelled = true; timedOut = true; break; }
       const rows = Math.min(rowsBand, row);
       const row0 = row - rows;
-      this.writeParams(job, row0, rows);
+      this.writeParams(job, row0, rows, lev);
       const enc = dev.createCommandEncoder();
       const desc = {};
       if (this.hasTS && nb < MAX_BANDS) {
@@ -254,7 +259,7 @@ export class Engine {
       const pass = enc.beginComputePass(desc);
       pass.setPipeline(pipeline);
       pass.setBindGroup(0, bg);
-      pass.dispatchWorkgroups(Math.ceil(nx / 8), Math.ceil(rows / 8));
+      pass.dispatchWorkgroups(Math.ceil(nxs / 8), Math.ceil(rows / 8));
       pass.end();
       const tSub = performance.now();
       dev.queue.submit([enc.finish()]);
@@ -265,7 +270,8 @@ export class Engine {
     }
     while (inflight.length) await settle();
     const wallMs = performance.now() - t0;
-    if (cancelled) return { cancelled: true, timedOut, wallMs, bands: nb, npts: nx * ny, rowsDone: ny - row };
+    const npts = prog ? nxs * nys - (opts.skip ? Math.ceil(nx / (2 * S)) * Math.ceil(ny / (2 * S)) : 0) : nx * ny;
+    if (cancelled) return { cancelled: true, timedOut, wallMs, bands: nb, npts, rowsDone: nys - row };
     this.rowlo = 0;
     let gpuMs = busyMs;
     let tsUsed = false;
@@ -286,7 +292,7 @@ export class Engine {
       }
       if (ok) { gpuMs = Number(ns) / 1e6; tsUsed = true; }
     }
-    return { gpuMs, wallMs, bands: nb, npts: nx * ny, tsUsed, cancelled: false, timedOut: false };
+    return { gpuMs, wallMs, bands: nb, npts, tsUsed, cancelled: false, timedOut: false };
   }
 
   /** Colour the current result buffer into a canvas context (f x f box filter). */
@@ -306,7 +312,7 @@ export class Engine {
     const fl = new Float32Array(b);
     u[0] = this.nx; u[1] = this.ny; u[2] = f; u[3] = dw;
     u[4] = dh; u[5] = view.boundary ? 1 : 0; u[6] = view.flags ? 1 : 0; u[7] = this.rowlo;
-    fl[8] = view.smin; fl[9] = view.zcap;
+    fl[8] = view.smin; fl[9] = view.zcap; u[10] = view.ds || 1;
     this.device.queue.writeBuffer(this.viewBuf, 0, b);
     const enc = this.device.createCommandEncoder();
     const pass = enc.beginRenderPass({

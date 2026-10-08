@@ -38,7 +38,8 @@ struct Params {
     qtrust: f32, growmax: f32, maxsteps: u32, sigma: f32,
     c: array<vec4<f32>, 4>,     // the model constants K[0..15]
     z0: f32, dz: f32,           // 3D grids: the third axis parameter PZ = z0 + iz dz
-    nys: u32, pad0: u32,        // rows per z slice (ny); the grid has ny * nz rows
+    nys: u32, lev: u32,         // rows per z slice (ny); the grid has ny * nz rows
+                                // lev: progressive level, (stride − 1) | skip << 16 (0: every point)
 }
 
 struct Res {
@@ -721,9 +722,13 @@ fn march(p: vec2<f32>) -> Res {
 
 @compute @workgroup_size(8, 8)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let ix = gid.x;
-    let row = P.row0 + gid.y;                 // row of the (ny * nz)-row grid
+    // progressive levels: the threads cover the stride-S lattice (row0, rows in lattice rows);
+    // skip: the nodes of the stride-2S lattice are done already (the previous level)
+    let S = (P.lev & 0xffffu) + 1u;
+    let ix = gid.x * S;
+    let row = (P.row0 + gid.y) * S;           // row of the (ny * nz)-row grid
     if ((ix >= P.nx) || (row >= P.ny) || (gid.y >= P.rows)) { return; }
+    if (((P.lev >> 16u) != 0u) && (ix % (2u * S) == 0u) && (row % (2u * S) == 0u)) { return; }
     let iz = row / P.nys;
     let iy = row - iz * P.nys;
     PZ = P.z0 + f32(iz) * P.dz;
