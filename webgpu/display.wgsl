@@ -15,7 +15,7 @@ struct Res {
 struct View {
     nx: u32, ny: u32, f: u32, dw: u32,
     dh: u32, bnd: u32, showflags: u32, rowlo: u32,   // rows iy < rowlo: not computed yet
-    smin: f32, zcap: f32, pad1: f32, pad2: f32,
+    smin: f32, zcap: f32, ds: u32, pad2: f32,       // ds: stride of the computed lattice (progressive)
 }
 
 @group(0) @binding(0) var<uniform> V: View;
@@ -68,6 +68,13 @@ fn colour(r: Res, Z: i32) -> vec3<f32> {
     return reds((min(f32(Z), V.zcap) - 1.0) / max(V.zcap - 1.0, 1.0));
 }
 
+// nearest computed node of the stride-ds lattice (every node while ds <= 1)
+fn snap(k: u32, n: u32) -> u32 {
+    if (V.ds <= 1u) { return k; }
+    let last = ((n - 1u) / V.ds) * V.ds;
+    return min(((k + V.ds / 2u) / V.ds) * V.ds, last);
+}
+
 @fragment
 fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     let u = u32(pos.x);
@@ -83,8 +90,8 @@ fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
             let i = u * f + bi;
             let jr = v * f + bj;                       // row counted from the top
             if ((i < V.nx) && (jr < V.ny)) {
-                let iy = V.ny - 1u - jr;
-                let r = R[i + iy * V.nx];
+                let iy = snap(V.ny - 1u - jr, V.ny);
+                let r = R[snap(i, V.nx) + iy * V.nx];
                 let Z = count_of(r, iy);
                 st = st || (Z == 0);
                 un = un || (Z > 0);
