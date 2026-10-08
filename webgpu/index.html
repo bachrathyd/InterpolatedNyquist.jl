@@ -27,6 +27,10 @@
   header { padding: 14px 20px 10px; border-bottom: 1px solid var(--line); background: var(--panel); }
   header h1 { margin: 0; font-size: 18px; font-weight: 650; }
   header .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  .xlink { float: right; margin-left: 12px; padding: 6px 12px; border: 1px solid var(--accent); border-radius: 8px;
+    color: var(--accent); text-decoration: none; font-size: 13px; }
+  .xlink:hover { background: var(--accent); color: var(--accent-ink); }
+  @media (max-width: 860px) { .xlink { float: none; display: inline-block; margin: 0 0 8px; } }
   #helpBtn { float: right; margin-left: 12px; background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
   #helpBg { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.55); z-index: 50; display: flex; align-items: flex-start; justify-content: center; padding: 4vh 16px; }
   #helpBg[hidden] { display: none; }
@@ -146,6 +150,7 @@
 <body>
 <header>
   <button id="helpBtn" title="How to use this page (also #help)">? Help</button>
+  <a class="xlink" href="https://bachrathyd.github.io/SOSD.jl/webgpu/">For time-periodic systems see <b>SOSD WebGPU</b> →</a>
   <h1>NyquistGPU in the browser: stability charts on your GPU</h1>
   <div class="sub">Float32 WebGPU port of the <code>:unwrap</code> argument-principle march of InterpolatedNyquist.jl / NyquistGPU. One GPU thread per chart point. <span id="device">Starting WebGPU...</span></div>
 </header>
