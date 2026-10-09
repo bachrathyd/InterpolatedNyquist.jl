@@ -9,6 +9,7 @@
 
 import { EXAMPLES, GROUPS, SET_DEFAULTS } from './examples.js';
 import { Engine, WebGPUUnavailable, countOf } from './engine.js';
+import { RemoteEngine } from './engine-remote.js';
 import { compileModel, rangeDecls, evalSetting, leadingOrder, realCoefficients, ExprError } from './expr.js';
 import { Volume3D, volumeBytes, defaultCamera, project, boundaryMesh, runMesh, meshSTL } from './view3d.js';
 import { initStats, countEvent, countOnce, countEquation, gpuClass } from './stats.js';   // (off unless configured)
@@ -283,7 +284,8 @@ function makeJob(slot, opts = {}) {
     if (iz >= 0) nx = ny = nz = Math.min(256, Math.max(16, Math.round(Math.cbrt(nx * ny))));
   }
   return {
-    key: slot.key, code: m.code(ix, iy, iz), branch0, exact: opts.exact ?? state.exact, c: vals, npow,
+    key: slot.key, code: m.code(ix, iy, iz), julia: iz < 0 && m.julia ? m.julia(ix, iy) : null,
+    branch0, exact: opts.exact ?? state.exact, c: vals, npow,
     nx, ny, nz, xr, yr, zr, xl: names[ix], yl: names[iy], zl: iz >= 0 ? names[iz] : null, hlines: hl, smin: slot.smin,
     march: { wmax, tol, hmax, wband: Number.isFinite(hmax) ? wband : 0, w0 }, info, warns,
     auto: !opts.size && !res, counts: [cnt(ix), cnt(iy), cnt(iz)],
@@ -1113,7 +1115,7 @@ async function renderProgressive(job, slot) {
     const first = s === s0;
     if (!first && want) break;                       // newer settings are waiting: stale refinement
     const r = await engine.compute(job, {
-      stride: s, skip: !first, targetMs: 60, firstBand: first ? Infinity : 4096,
+      stride: s, skip: !first, targetMs: 60, firstBand: first ? Infinity : 4096, final: s === 1,
       deadlineMs: Math.max(1, deadline - (performance.now() - t0)),
       isCancelled: first ? null : () => want,
       onBand: (row0, frac) => setProgress(first ? 0 : frac),
@@ -1965,7 +1967,16 @@ async function main() {
   window.__app = { state, slots, auto, getSlot, makeJob, compileSlot, linkFor, applyText, writeRange, vol: () => vol3d };
   window.addEventListener('resize', () => redraw());
   try {
-    engine = await Engine.create(logMsg);
+    // served by the Colab notebook (gpu/webui/server.jl): the 2-D marches run there
+    const server = await RemoteEngine.detect();
+    engine = server ? await RemoteEngine.create(logMsg, server) : await Engine.create(logMsg);
+    if (server) {
+      state.limit = 60; $('limit').value = 60;
+      document.title = 'NyquistGPU on ' + server.device;
+      document.querySelector('header .sub').innerHTML = `The march runs on <b>${server.device}</b> (NyquistGPU, CUDA): ` +
+        'Float32 for the coarse levels while dragging, Float64 for the final level; colours by the WebGPU of this browser. ' +
+        '3-D views and integral(...) by quadrature are computed locally. <span id="device"></span>';
+    }
   } catch (e) {
     const why = e instanceof WebGPUUnavailable ? e.message : 'WebGPU initialisation failed: ' + e.message;
     showError(`<b>WebGPU is not available.</b> ${why}<br>Use a current Chrome or Edge (version 113 or newer) on Windows, macOS or ChromeOS; ` +
