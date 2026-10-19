@@ -7,7 +7,7 @@ const RES_BYTES = 16;            // struct Res { z: f32, s: f32, steps: u32, fla
 const PARAM_BYTES = 160;         // struct Params of march.wgsl
 const MAX_CONSTS = 16;           // K[0..15]
 const MAX_PIPELINES = 40;        // compiled pipelines kept (oldest dropped)
-const VIEW_BYTES = 48;           // struct View of display.wgsl
+const VIEW_BYTES = 64;           // struct View of display.wgsl
 const MAX_BANDS = 512;           // timestamp slots: 2 per band
 const BIG = 3.0e38;
 
@@ -45,14 +45,15 @@ export class Engine {
       if (!r.ok) throw new Error(`cannot load ${u} (${r.status})`);
       return r.text();
     };
-    let marchSrc, dispSrc;
+    let marchSrc, dispSrc, smarchSrc;
     try {
-      [marchSrc, dispSrc] = await Promise.all([fetchText('march.wgsl'), fetchText('display.wgsl')]);
+      [marchSrc, dispSrc, smarchSrc] = await Promise.all([fetchText('march.wgsl'), fetchText('display.wgsl'), fetchText('smarch.wgsl')]);
     } catch (e) {
       throw new Error('Cannot load the WGSL shaders (' + e.message + '). Serve the folder over http, ' +
         'e.g. "python -m http.server" in webgpu/, instead of opening index.html as a file.');
     }
     const eng = new Engine(device, info, hasTS, marchSrc, dispSrc, log);
+    eng.smarchSrc = smarchSrc;
     return eng;
   }
 
@@ -97,12 +98,14 @@ export class Engine {
 
   /**
    * Compute pipeline of a characteristic function (WGSL source of `fn charD`); exact: the
-   * 'exact root' variant (EXACT = true in march.wgsl); branch0: BRANCH0 = true.
+   * 'exact root' variant (EXACT = true in march.wgsl); branch0: BRANCH0 = true; stoch: the
+   * stochastic state form (sde.js: the code also defines smodel / smstatic; smarch.wgsl is
+   * spliced in and its entry point main_sm is used).
    * A compile error throws an Error with .wgslErrors = [{ line, col, message }] (line numbers
    * within charD) and .charD = the source.
    */
-  async pipeline(charD, exact = false, branch0 = false) {
-    const key = (exact ? 'X' : '-') + (branch0 ? 'B' : '-') + charD;
+  async pipeline(charD, exact = false, branch0 = false, stoch = false) {
+    const key = (exact ? 'X' : '-') + (branch0 ? 'B' : '-') + (stoch ? 'S' : '-') + charD;
     if (this.pipelines.has(key)) {
       const e = this.pipelines.get(key);
       this.pipelines.delete(key);             // most recently used last
@@ -114,6 +117,7 @@ export class Engine {
     if (at < 0) throw new Error('march.wgsl: charD marker not found');
     const line0 = this.marchSrc.slice(0, at).split('\n').length;    // charD starts on this line
     let code = this.marchSrc.replace(marker, charD);
+    if (stoch) code = code.replace('//#SMARCH#', this.smarchSrc);
     const sw = (name) => {
       const flag = `const ${name}: bool = false;`;
       if (!code.includes(flag)) throw new Error(`march.wgsl: ${name} switch not found`);
@@ -140,7 +144,7 @@ export class Engine {
     }
     let p;
     try {
-      p = await this.device.createComputePipelineAsync({ layout: 'auto', compute: { module, entryPoint: 'main' }, label: 'march' });
+      p = await this.device.createComputePipelineAsync({ layout: 'auto', compute: { module, entryPoint: stoch ? 'main_sm' : 'main' }, label: stoch ? 'march:stochastic' : 'march' });
     } finally {
       const ve = await this.device.popErrorScope();
       if (ve) { const err = new Error('WebGPU pipeline error: ' + ve.message); err.charD = charD; throw err; }
@@ -207,7 +211,7 @@ export class Engine {
     const S = opts.stride || 1, prog = !!opts.stride;
     const nxs = Math.ceil(nx / S), nys = Math.ceil(ny / S);       // lattice of this level
     const lev = (S - 1) | (opts.skip ? 1 << 16 : 0);
-    const { pipeline, bgCache } = await this.pipeline(job.code, !!job.exact, !!job.branch0);   // (first: a failed compile keeps the chart)
+    const { pipeline, bgCache } = await this.pipeline(job.code, !!job.exact && !job.stoch, !!job.branch0, !!job.stoch);   // (first: a failed compile keeps the chart)
     const fresh = this.ensureBuffers(nx, ny);
     this.grid3d = (job.nz || 1) > 1;           // a 3D grid is not drawn by the 2D colouring pass
     let bg = bgCache.get(this.resBuf);
@@ -313,6 +317,7 @@ export class Engine {
     u[0] = this.nx; u[1] = this.ny; u[2] = f; u[3] = dw;
     u[4] = dh; u[5] = view.boundary ? 1 : 0; u[6] = view.flags ? 1 : 0; u[7] = this.rowlo;
     fl[8] = view.smin; fl[9] = view.zcap; u[10] = view.ds || 1;
+    u[12] = view.stoch ? 1 : 0; fl[13] = view.vlo ?? -6; fl[14] = view.vhi ?? 0;
     this.device.queue.writeBuffer(this.viewBuf, 0, b);
     const enc = this.device.createCommandEncoder();
     const pass = enc.beginRenderPass({

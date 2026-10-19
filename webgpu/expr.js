@@ -88,8 +88,11 @@ function tokenize(src) {
     m = ID_RE.exec(src);
     if (m) {
       if (m[0].length > 40) throw new ExprError('identifier too long (40 characters at most)', line, col);
-      toks.push({ t: 'id', v: m[0], line, col });
       i += m[0].length;
+      // primes belong to the name: x' x'' (state derivatives of the stochastic state form, sde.js)
+      let v = m[0];
+      while (i < n && (src[i] === "'" || src[i] === '′')) { v += "'"; i++; }
+      toks.push({ t: 'id', v, line, col });
       continue;
     }
     const cp = String.fromCodePoint(src.codePointAt(i));
@@ -1022,7 +1025,57 @@ ${body.join('\n')}
   }
   const evalD = (lam, pv) => evalIR(ir, order, root, lam, pv, 0);
 
-  return { params, decls, helpers: [...helpers.keys()], warnings, branchAuto, code, evalD, nodes: order.length, quadrature: liveQuads.length > 0 };
+  // Julia source of D(λ, p, c) for the Colab server (NyquistGPU, gpu/webui/server.jl): axis
+  // parameters -> p[1], p[2]; parameter j -> c[j + 1]; every literal -> a slot of c after the
+  // parameters (so nothing promotes the kernel's precision). -> { src, lits } or null (integral
+  // by quadrature: not on the server, the page computes it with WebGPU).
+  const juliaCache = new Map();
+  function julia(ix, iy) {
+    if (liveQuads.length) return null;
+    const ck = ix + ',' + iy;
+    if (juliaCache.has(ck)) return juliaCache.get(ck);
+    const lits = [];
+    const litSlot = new Map();
+    const slot = (v) => { if (!litSlot.has(v)) { litSlot.set(v, params.length + lits.length + 1); lits.push(v); } return litSlot.get(v); };
+    const name = (id) => {
+      const n = ir.nodes[id];
+      if (n.op === 'lit') return n.ty === 'R' ? `c[${slot(n.val.re)}]` : `complex(c[${slot(n.val.re)}], c[${slot(n.val.im)}])`;
+      if (n.op === 'lam') return 'λ';
+      if (n.op === 'par') {
+        const j = pidx.get(n.name);
+        return j === ix ? 'p[1]' : j === iy ? 'p[2]' : `c[${j + 1}]`;
+      }
+      return `t${id}`;
+    };
+    const lines = [];
+    for (const id of order) {
+      const n = ir.nodes[id];
+      if (n.op === 'lit' || n.op === 'lam' || n.op === 'par') continue;
+      const A = n.args.map(name), ta = n.args.length ? ir.nodes[n.args[0]].ty : 'R';
+      const cpx = (x) => (ta === 'R' ? `complex(${x})` : x);
+      let e;
+      switch (n.op) {
+        case 'add': e = `(${A[0]} + ${A[1]})`; break;
+        case 'sub': e = `(${A[0]} - ${A[1]})`; break;
+        case 'mul': e = `(${A[0]} * ${A[1]})`; break;
+        case 'div': e = `(${A[0]} / ${A[1]})`; break;
+        case 'neg': e = `(-${A[0]})`; break;
+        case 'inv': e = `inv(${A[0]})`; break;
+        case 'log': case 'sqrt': e = `${n.op}(${cpx(A[0])})`; break;
+        case 'exp': case 'sin': case 'cos': case 'tan': case 'sinh': case 'cosh': case 'tanh': e = `${n.op}(${A[0]})`; break;
+        case 'exprel': e = `exprelT(${cpx(A[0])})`; break;
+        case 'phi2': case 'phi3': case 'phi4': e = `phik(${cpx(A[0])}, ${n.op[3]})`; break;
+        default: return null;
+      }
+      lines.push(`    t${id} = ${e}`);
+    }
+    const src = 'function D(λ, p, c)\n' + lines.join('\n') + `\n    return ${name(root)}\nend\n`;
+    const out = { src, lits };
+    juliaCache.set(ck, out);
+    return out;
+  }
+
+  return { params, decls, helpers: [...helpers.keys()], warnings, branchAuto, code, julia, evalD, nodes: order.length, quadrature: liveQuads.length > 0 };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1120,3 +1173,6 @@ export function realCoefficients(evalD, pv) {
   }
   return true;
 }
+
+// internals shared with the stochastic state form (sde.js)
+export { tokenize, splitStatements, parseStatement, IR, lowerAst, emitNode, f32lit, buildDecls, CONSTS, LAMBDA, ARITY, NON_ANALYTIC, cx, CF };

@@ -740,3 +740,5 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let p = vec2<f32>(P.x0 + f32(ix) * P.dx, P.y0 + f32(iy) * P.dy);
     R[row * P.nx + ix] = march(p);
 }
+
+//#SMARCH#

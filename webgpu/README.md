@@ -12,6 +12,7 @@ texts too. No build step, no external CDN, no account, no server-side computatio
 | `app.js` | UI: equation box, parameter table (sliders, ranges, X / Y axes), march settings, resolution / box zoom / hover, render scheduler, share links, own equation in `localStorage`, `?validate=1`, `?bench=1`, `?bench=compare` |
 | `expr.js` | the equation language: tokenizer (whitelist), parser, typed expression DAG with common-subexpression sharing, WGSL generation, Float64 host evaluator, order estimate, setting expressions |
 | `engine.js` | WebGPU host code: device, pipelines (cached by the generated code; default and exact-root variant), row-band dispatches, timestamp timing, colouring pass, read-back |
+| `sde.js`, `smarch.wgsl` | the stochastic state form: compiler (affine forms -> WGSL of M(λ), its pivoted dual solve, noise loop and mean) and the two-pass second-moment march (see "Stochastic systems") |
 | `examples.js` | the examples as equation texts with parameter defaults / ranges, axes and march settings; the built-in FEM bar (hand-written WGSL, host effective order) |
 | `stats.js` | optional anonymous usage counts (GoatCounter); off unless configured |
 | `handwritten.js` | the hand-written WGSL of the first version, only for `?bench=compare` |
@@ -99,6 +100,61 @@ c = 0                                     # a fixed constant (a helper): no slid
 * **Copy link** puts the equation, parameter values and ranges, axes, settings, resolution and
   the mode into the URL hash (`#m=` base64url of a small JSON) and restores it on load;
   `?ex=<key>` links still work (`&exact=0`: fast mode; `&exact=1`: exact, the default).
+
+## Stochastic systems: the state form (second moment, mean-square stability)
+
+A text with a state equation `x' = ...` (or `x'' = ...`) is a **linear stochastic delay system**
+(Itô, white noise), compiled by `sde.js` and charted by `smarch.wgsl` (theory, Julia prototype and
+checks: `notes/stochastic_second_moment.md`, `notes/stochastic_sdde.jl`). Examples: *Stochastic
+turning* (`?ex=sturning`, the GSTM of G. Fodor's dissertation: cutting-force noise, additive and
+multiplicative) and *Delayed PD control with noisy feedback gain* (`?ex=spd`).
+
+```
+Ω = 0.15:1.6            # parameter ranges and helpers as above
+K = 0.01:0.6
+σ = 0:1.5 @ 0.5
+τ = 2*pi/Ω
+x'' = -2*ζ*x' - x + K*(1 + x(t-τ) - x) + K*σ*(1 + x(t-τ) - x)*ξ
+```
+
+* `x'' = f` defines the states x and x' (x' is usable on right-hand sides); several lines give
+  an N-dimensional system (N ≤ 6); `x(t-τ)`, `x'(t-τ)` are delayed states (≤ 4 distinct delays,
+  any real expression of the parameters);
+* `ξ`, `ξ₁` … `ξ₄` (or `xi`, `xi1` …) are independent white noises; a noise may multiply a
+  constant (additive) or a state / delayed state (multiplicative), never another noise; all
+  terms must be linear in the states (a nonlinear model: linearize it, or use the Julia version,
+  which linearizes `f(u, h, p, t)`, `g(u, h, p, t)` automatically with ForwardDiff);
+* all noise enters one equation (one force channel); the chart shows the variance of the first
+  state. (Several channels: `notes/stochastic_sdde.jl`.)
+
+The right-hand sides are lowered *exactly* to affine forms over {1, x_j, x_j(t−τ_d), ξ_k,
+ξ_k x_j, ξ_k x_j(t−τ_d)} with real coefficient expressions, which give A, B_d, c (drift), γ_k,
+α_k, β_kd (noise). Per chart point the GPU then evaluates, in complex dual numbers,
+`M(λ) = λI − A − Σ_d B_d e^{−λτ_d}` and solves it by pivoted elimination: `D = det M` (the
+count, as in the deterministic mode), the output transfer `Y = (M⁻¹e_r)_0` and the noise loop
+`G_k = Σ_j (α_kj + Σ_d β_kjd e^{−λτ_d})(M⁻¹e_r)_j`. Two passes of the march:
+
+1. the deterministic march (phase test only): the count Z (first moment) and coarse integrals;
+2. only where Z = 0: the march again with a second acceptance test on the integrals (the
+   plain-trapezoid error h²/12 |f′_a − f′_b| relative to the coarse value; tolerance
+   **rtol_I** in Advanced, default 2e-3); Hermite-corrected trapezoid, power-law tail.
+
+`r₀ = (1/2π)∫Σ|G_k|²dω` decides **mean-square stability** (Z = 0 and r₀ < 1, a single
+integral on the imaginary axis: the second-moment dynamics is a renewal equation with a positive
+kernel, so its rightmost root is real); the stationary variance is
+`Var = Γ (1/2π)∫|Y|²dω / (1 − r₀)`, Γ = Σ_k γ̃_k² the effective additive intensity at the mean
+`m = −(A + ΣB_d)⁻¹c`. Colours: log₁₀ Var (auto range: 2 % / 98 % quantiles), orange where the mean
+is stable but the second moment is not, red where the mean is unstable; white: the mean-square
+boundary. The hover line gives Var, r₀ and the evaluations.
+
+**Checks.** `node webgpu/validate/sde_check.mjs`: D(λ) of the state form vs the closed form
+(≤ 2e-15), mean and Γ, and the same transfer functions integrated in Float64 vs Julia (6 digits).
+`index.html?validate=sto`: 9 points (turning: 4 generic and 3 approaching the lobe at Ω = 0.6 up to
+0.999 K_crit, one mean-square unstable; PD: one stable, one mean-square unstable) against Julia
+(QuadGK / the SDDE prototype; the PD variance also against Monte Carlo): relative error ≤ 1e-3 at
+the default rtol_I = 2e-3; ≤ 2.6e-4 at 1e-4 except 1.4e-3 at 0.999 K_crit (Float32 on a sharp
+resonance). r₀ in the hover is stored with 15 bits (±3e-5). Intel UHD 630: stochastic turning
+525 × 295 in 280 ms (≈ 195 evaluations per point), PD 80 ms (56 per point).
 
 ## Resolution, watchdog, modes
 

@@ -16,6 +16,7 @@ struct View {
     nx: u32, ny: u32, f: u32, dw: u32,
     dh: u32, bnd: u32, showflags: u32, rowlo: u32,   // rows iy < rowlo: not computed yet
     smin: f32, zcap: f32, ds: u32, pad2: f32,       // ds: stride of the computed lattice (progressive)
+    stoch: u32, vlo: f32, vhi: f32, pad3: f32,      // stochastic mode (smarch.wgsl): log10 Var colour range
 }
 
 @group(0) @binding(0) var<uniform> V: View;
@@ -57,9 +58,21 @@ fn count_of(r: Res, iy: u32) -> i32 {
     return select(Z, -1, Z < 0);
 }
 
+// stochastic mode: Z = 0 and mean-square stable: viridis of log10 Var over [vlo, vhi] (bright: large
+// variance, near the boundary); mean-square unstable (Z = 0, r0 >= 1): orange, darker for larger r0
+fn colour_sm(r: Res) -> vec3<f32> {
+    if ((r.flags & 4096u) != 0u) { return viridis((r.s - V.vlo) / max(V.vhi - V.vlo, 1e-6)); }
+    if ((r.flags & 2048u) != 0u) {
+        let t = clamp(log(max(r.s, 1.0)) / log(10.0), 0.0, 1.0);
+        return mix(vec3<f32>(255.0, 170.0, 60.0), vec3<f32>(170.0, 80.0, 0.0), t);
+    }
+    return vec3<f32>(128.0, 128.0, 128.0);
+}
+
 fn colour(r: Res, Z: i32) -> vec3<f32> {
     if (Z == -2) { return vec3<f32>(28.0, 30.0, 36.0); }
     if (Z < 0) { return vec3<f32>(128.0, 128.0, 128.0); }
+    if ((Z == 0) && (V.stoch != 0u)) { return colour_sm(r); }
     if (Z == 0) {
         var t = 0.0;
         if ((r.flags & 256u) != 0u) { t = r.s / V.smin * -1.0 + 1.0; }
@@ -85,6 +98,8 @@ fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     var st = false;
     var un = false;
     var fl = false;
+    var ms = false;     // stochastic: a mean-square unstable point (Z = 0, r0 >= 1) in the block
+    var du = false;     // ... and a point of a deterministically unstable one
     for (var bj = 0u; bj <= f; bj++) {
         for (var bi = 0u; bi <= f; bi++) {
             let i = u * f + bi;
@@ -93,8 +108,11 @@ fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
                 let iy = snap(V.ny - 1u - jr, V.ny);
                 let r = R[snap(i, V.nx) + iy * V.nx];
                 let Z = count_of(r, iy);
-                st = st || (Z == 0);
-                un = un || (Z > 0);
+                let msu = (V.stoch != 0u) && (Z == 0) && ((r.flags & 2048u) != 0u);
+                st = st || ((Z == 0) && !msu);
+                un = un || (Z > 0) || msu;
+                ms = ms || msu;
+                du = du || (Z > 0);
                 if ((bi < f) && (bj < f)) {
                     acc += colour(r, Z);
                     cnt += 1.0;
@@ -106,6 +124,8 @@ fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     var c = acc / max(cnt, 1.0);
     if ((V.bnd != 0u) && st && un) {
         c = vec3<f32>(255.0);
+    } else if ((V.bnd != 0u) && ms && du) {
+        c = vec3<f32>(255.0, 235.0, 200.0);          // first-moment boundary inside the MS-unstable region
     } else if ((V.showflags != 0u) && fl) {
         c = vec3<f32>(0.5 * c.x + 127.5, 0.5 * c.y, 0.5 * c.z + 127.5);
     }
