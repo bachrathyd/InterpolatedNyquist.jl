@@ -88,8 +88,11 @@ function tokenize(src) {
     m = ID_RE.exec(src);
     if (m) {
       if (m[0].length > 40) throw new ExprError('identifier too long (40 characters at most)', line, col);
-      toks.push({ t: 'id', v: m[0], line, col });
       i += m[0].length;
+      // primes belong to the name: x' x'' (state derivatives of the stochastic state form, sde.js)
+      let v = m[0];
+      while (i < n && (src[i] === "'" || src[i] === '′')) { v += "'"; i++; }
+      toks.push({ t: 'id', v, line, col });
       continue;
     }
     const cp = String.fromCodePoint(src.codePointAt(i));
@@ -1170,3 +1173,6 @@ export function realCoefficients(evalD, pv) {
   }
   return true;
 }
+
+// internals shared with the stochastic state form (sde.js)
+export { tokenize, splitStatements, parseStatement, IR, lowerAst, emitNode, f32lit, buildDecls, CONSTS, LAMBDA, ARITY, NON_ANALYTIC, cx, CF };

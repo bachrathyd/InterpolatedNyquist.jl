@@ -84,6 +84,7 @@
   #axes { position: absolute; inset: 0; pointer-events: none; }
   #progress { position: absolute; left: 58px; right: 12px; top: 8px; height: 3px; background: transparent; }
   #progress div { height: 100%; width: 0; background: var(--accent); transition: width .08s linear; }
+  .legend[hidden] { display: none; }
   .legend { display: flex; flex-wrap: wrap; gap: 14px 22px; align-items: center; margin: 10px 2px 0; font-size: 12.5px; color: var(--muted); }
   .legend .bar { width: 160px; height: 10px; border-radius: 2px;
     background: linear-gradient(90deg, #440154, #472c7a, #3b518b, #2c718e, #21908d, #27ad81, #5cc863, #aadc32, #fde725); }
@@ -164,7 +165,7 @@
         <div class="formula" id="formula"></div>
         <div class="note" id="note"></div>
       </details>
-      <div class="eqbar"><label for="eq"><b>D(λ) =</b> <span class="muted" id="eqMod"></span></label>
+      <div class="eqbar"><label for="eq"><b id="eqLab">D(λ) =</b> <span class="muted" id="eqMod"></span></label>
         <span class="buttons tight"><button id="insLam" title="Insert λ at the cursor">λ</button><button id="view3d" hidden title="Switch this example between its 2D chart and the 3D view">3D</button><button id="resetEx" title="Restore this example's equation, parameters and settings">Reset</button></span></div>
       <textarea id="eq" rows="4" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" aria-describedby="eqHelp"></textarea>
       <details class="fold"><summary>Syntax help</summary>
@@ -184,6 +185,7 @@
         <div class="grid2">
           <label class="row"><span><b>order n override</b></span><input type="text" id="set_n" placeholder="automatic" title="leading order n of D (Z = n/2 - Δarg D/π); empty: computed automatically from ln|D(s)| on the real axis"></label>
           <label class="row"><span><b>ω₀ (start)</b></span><input type="text" id="set_w0" placeholder="1e-9"></label>
+          <label class="row"><span><b>rtol_I (stochastic)</b></span><input type="text" id="set_rtol" placeholder="2e-3" title="stochastic state form: relative tolerance of the frequency integrals of the second moment (2nd pass of the march)"></label>
           <label class="row"><span><b>step cap h<sub>max</sub></b></span><input type="text" id="set_hmax" placeholder="none"></label>
           <label class="row"><span><b>… for ω below</b></span><input type="text" id="set_wband" placeholder="whole line"></label>
         </div>
@@ -255,7 +257,14 @@
       <div id="chartclip"><canvas id="chart" width="960" height="540"></canvas></div>
       <canvas id="axes"></canvas>
     </div>
-    <div class="legend">
+    <div class="legend" id="legendSto" hidden>
+      <span class="lg"><span class="bar"></span> <span>mean-square stable: log₁₀ Var, <span id="vrangeLab">auto</span></span></span>
+      <span class="lg"><span class="sw" style="background:#ffaa3c"></span><span class="sw" style="background:#aa5000"></span> mean-square unstable (r₀ ≥ 1, mean stable)</span>
+      <span class="lg"><span class="sw" style="background:#fcbba1"></span><span class="sw" style="background:#cb181d"></span> mean unstable (Z ≥ 1)</span>
+      <span class="lg"><span class="sw" style="background:#fff;border:1px solid var(--line)"></span> mean-square boundary</span>
+      <span class="lg"><span class="sw" style="background:#ffebc8"></span> first-moment boundary</span>
+    </div>
+    <div class="legend" id="legendDet">
       <span class="lg"><span class="bar"></span> <span>stable (Z = 0): σ of the rightmost root, <span id="sminLab">-0.6</span> … 0</span></span>
       <span class="lg"><span class="sw" style="background:#fcbba1"></span><span class="sw" style="background:#fb6a4a"></span><span class="sw" style="background:#cb181d"></span><span class="sw" style="background:#67000d"></span> unstable, Z = 1 … 6+</span>
       <span class="lg"><span class="sw" style="background:#fff;border:1px solid var(--line)"></span> boundary</span>

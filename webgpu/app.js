@@ -11,6 +11,7 @@ import { EXAMPLES, GROUPS, SET_DEFAULTS } from './examples.js';
 import { Engine, WebGPUUnavailable, countOf } from './engine.js';
 import { RemoteEngine } from './engine-remote.js';
 import { compileModel, rangeDecls, evalSetting, leadingOrder, realCoefficients, ExprError } from './expr.js';
+import { isStateForm, compileSDE } from './sde.js';
 import { Volume3D, volumeBytes, defaultCamera, project, boundaryMesh, runMesh, meshSTL } from './view3d.js';
 import { initStats, countEvent, countOnce, countEquation, gpuClass } from './stats.js';   // (off unless configured)
 
@@ -24,7 +25,7 @@ const DEADLINE_MS = 5000;        // watchdog in auto mode: no further row band a
 const STRIDES = [1, 2, 4, 8, 16, 32, 64];      // 2D auto: start resolution = screen grid / stride
 const MAX_PTS = 2.5e6;           // cap of the 2D auto (screen) grid
 // (a fixed resolution uses the user's time limit, state.limit seconds, 1 .. 600)
-const SET_INPUTS = ['n', 'w0', 'hmax', 'wband', 'branch'];      // text fields of Advanced
+const SET_INPUTS = ['n', 'w0', 'hmax', 'wband', 'branch', 'rtol'];      // text fields of Advanced
 const BG = [0x11 / 255, 0x13 / 255, 0x18 / 255];
 const exByKey = new Map(EXAMPLES.map((e) => [e.key, e]));
 const dict = () => Object.create(null);          // name-keyed maps (parameter names are user text)
@@ -115,7 +116,7 @@ function compileSlot(slot) {
   const ex = exByKey.get(slot.key);
   let m;
   try {
-    m = ex.builtin ? builtinModel(ex, slot.text) : compileModel(slot.text);
+    m = ex.builtin ? builtinModel(ex, slot.text) : isStateForm(slot.text) ? compileSDE(slot.text) : compileModel(slot.text);
   } catch (e) {
     if (!(e instanceof ExprError)) console.error(e);
     slot.err = e;
@@ -215,6 +216,7 @@ function makeJob(slot, opts = {}) {
   const iy = names.indexOf(slot.axes[1]);
   const iz = slot.axes[2] ? names.indexOf(slot.axes[2]) : -1;
   if (ix < 0 || iy < 0 || ix === iy) throw new UserError('Select two different parameters as the chart axes (X and Y).');
+  if (m.stochastic && iz >= 0) throw new UserError('The 3D view is not available for the stochastic state form (click Z again for 2D).');
   const P = names.map((n) => slot.params[n]);
   const vals = P.map((p) => p.value);
   if (!vals.every(Number.isFinite)) throw new UserError('a parameter value is not a number');
@@ -238,6 +240,7 @@ function makeJob(slot, opts = {}) {
   const hmax = S('hmax', Infinity, pos, 'h_max');
   const wband = S('wband', Infinity, (v) => v >= 0, 'ω band');
   const w0 = S('w0', 1e-9, (v) => v > 0 && v < wmax, 'ω₀');
+  const rtolI = m.stochastic ? S('rtol', 2e-3, (v) => v > 0 && v < 1, 'rtol_I') : null;
   const warns = [...m.warnings];
   let npow, info;
   const nset = S('n', null, Number.isFinite, 'order n');
@@ -273,6 +276,11 @@ function makeJob(slot, opts = {}) {
       warns.push('D(λ̄) ≠ conj D(λ): complex coefficients (e.g. i, or log / sqrt / non-integer powers of a negative parameter). The count over ω ≥ 0 assumes a real-coefficient D.');
     }
   }
+  if (m.stochastic) {
+    const sm = m.stochastic;
+    info += ` · stochastic: ${sm.N} states (${sm.states.join(', ')}), ${sm.noises.length} noise${sm.noises.length === 1 ? '' : 's'}` +
+      `${sm.multiplicative ? ' (multiplicative)' : ' (additive only)'} in the equation of ${sm.noiseState}; Var(${sm.output}), rtol_I = ${fmt(rtolI)}`;
+  }
   const branch0 = slot.set.branch === 'on' || (slot.set.branch !== 'off' && m.branchAuto);
   const hl = ex.hlines && ex.hlines.param === names[iy] && iz < 0 ? ex.hlines.at : null;
   const cnt = (i) => (i >= 0 && m.decls.get(names[i]) ? m.decls.get(names[i]).count : null);
@@ -287,7 +295,8 @@ function makeJob(slot, opts = {}) {
     key: slot.key, code: m.code(ix, iy, iz), julia: iz < 0 && m.julia ? m.julia(ix, iy) : null,
     branch0, exact: opts.exact ?? state.exact, c: vals, npow,
     nx, ny, nz, xr, yr, zr, xl: names[ix], yl: names[iy], zl: iz >= 0 ? names[iz] : null, hlines: hl, smin: slot.smin,
-    march: { wmax, tol, hmax, wband: Number.isFinite(hmax) ? wband : 0, w0 }, info, warns,
+    march: { wmax, tol, hmax, wband: Number.isFinite(hmax) ? wband : 0, w0, ...(m.stochastic ? { qtrust: rtolI } : {}) }, info, warns,
+    stoch: !!m.stochastic,
     auto: !opts.size && !res, counts: [cnt(ix), cnt(iy), cnt(iz)],
   };
 }
@@ -296,7 +305,7 @@ function marchInfo(job) {
   const m = job.march;
   const cap = Number.isFinite(m.hmax) ? `, h ≤ ${fmt(m.hmax)}${Number.isFinite(m.wband) ? ` for ω < ${fmt(m.wband)}` : ' on the whole line'}` : '';
   const g = is3D(job) ? `${job.nx}×${job.ny}×${job.nz}` : `${job.nx}×${job.ny}`;
-  return `${g}${job.auto ? ' (auto)' : ''} · ${job.info}, ω_max = ${fmt(m.wmax)}, tol = ${fmt(m.tol)}${cap}${job.branch0 ? ', branch point at 0' : ''} · ${job.exact ? 'exact roots' : 'fast (first-order σ)'}`;
+  return `${g}${job.auto ? ' (auto)' : ''} · ${job.info}, ω_max = ${fmt(m.wmax)}, tol = ${fmt(m.tol)}${cap}${job.branch0 ? ', branch point at 0' : ''} · ${job.stoch ? 'second moment (2-pass march)' : job.exact ? 'exact roots' : 'fast (first-order σ)'}`;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -506,6 +515,7 @@ function renderStatus() {
     }
   } else if (slot.model) {
     const m = slot.model;
+    $('eqLab').textContent = m.stochastic ? 'state equations (stochastic) :' : 'D(λ) =';
     const parts = [`${m.params.length} parameter${m.params.length === 1 ? '' : 's'}`];
     if (m.helpers.length) parts.push(`helper${m.helpers.length > 1 ? 's' : ''} ${m.helpers.join(', ')}`);
     if (m.nodes) parts.push(`${m.nodes} operations after sharing common subexpressions`);
@@ -982,7 +992,28 @@ function displayFactor(nx) {
 }
 
 function viewOpts(nx) {
-  return { f: displayFactor(nx), boundary: state.boundary, flags: state.flags, smin: cur().smin, zcap: ZCAP, ds: shownDs };
+  const st = !!(lastJob && lastJob.stoch);
+  const vr = cur().vrange || [-6, 0];
+  return { f: displayFactor(nx), boundary: state.boundary, flags: state.flags, smin: cur().smin, zcap: ZCAP, ds: shownDs, stoch: st, vlo: vr[0], vhi: vr[1] };
+}
+
+// stochastic mode: colour range of log10 Var = the 2 % / 98 % quantiles of the mean-square stable
+// points of the last read-back chart (kept per example while the chart is refined or dragged)
+function updateVRange(slot, rb) {
+  const v = [];
+  const n = rb.nx * rb.ny;
+  const step = Math.max(1, Math.floor(n / 200000));
+  for (let i = 0; i < n; i += step) if ((rb.flags[i] & 4096) && !(rb.flags[i] & 128) && Number.isFinite(rb.s[i])) v.push(rb.s[i]);
+  if (v.length < 8) return;
+  v.sort((a, b) => a - b);
+  let lo = v[Math.floor(0.02 * (v.length - 1))], hi = v[Math.ceil(0.98 * (v.length - 1))];
+  if (!(hi > lo + 1e-3)) { lo -= 0.5; hi += 0.5; }
+  slot.vrange = [lo, hi];
+  $('vrangeLab').textContent = `10^${lo.toFixed(2)} … 10^${hi.toFixed(2)}`;
+}
+function showLegend(stoch) {
+  $('legendDet').hidden = stoch;
+  $('legendSto').hidden = !stoch;
 }
 
 let ctx = null;
@@ -1031,6 +1062,8 @@ async function pump() {
         continue;
       }
       slot.jobWarns = job.warns;
+      showLegend(job.stoch);
+      if (job.stoch && slot.vrange) $('vrangeLab').textContent = `10^${slot.vrange[0].toFixed(2)} … 10^${slot.vrange[1].toFixed(2)}`;
       $('orderInfo').textContent = job.info;
       $('wgslOut').textContent = job.code.trim();
       try {
@@ -1129,6 +1162,7 @@ async function renderProgressive(job, slot) {
     levels++;
     shownDs = s;
     lastJob = job;
+    if (job.stoch && first && !slot.vrange) updateVRange(slot, await engine.readback());
     engine.draw(ctx, viewOpts(job.nx));
     updatePreview();
     drawAxes();
@@ -1150,6 +1184,7 @@ async function renderProgressive(job, slot) {
   if (done) {
     const rb = await engine.readback();
     last = { ...rb, xr: job.xr, yr: job.yr, xl: job.xl, yl: job.yl };
+    if (job.stoch) { updateVRange(slot, rb); engine.draw(ctx, viewOpts(job.nx)); drawAxes(); }
     showStats(last);
   }
 }
@@ -1192,6 +1227,7 @@ async function renderOnce(job, slot) {
   $('marchInfo').textContent = marchInfo(job);
   const rb = await engine.readback();
   last = { ...rb, xr: job.xr, yr: job.yr, xl: job.xl, yl: job.yl };
+  if (job.stoch) updateVRange(slot, rb);
   if (d3) {
     countOnce('3d-view');
     countOnce('3d-view/' + job.key);
@@ -1207,7 +1243,7 @@ async function renderOnce(job, slot) {
 }
 
 function showTiming(r, job) {
-  $('sGpu').innerHTML = `${r.gpuMs.toFixed(r.gpuMs < 100 ? 1 : 0)} <small>ms${r.tsUsed ? '' : ' (wall)'}${job.exact ? ' · exact' : ' · fast'}</small>`;
+  $('sGpu').innerHTML = `${r.gpuMs.toFixed(r.gpuMs < 100 ? 1 : 0)} <small>ms${r.tsUsed ? '' : ' (wall)'}${job.stoch ? ' · stochastic' : job.exact ? ' · exact' : ' · fast'}</small>`;
   $('sMpts').innerHTML = `${(r.npts / r.gpuMs / 1e3).toFixed(2)} <small>Mpts/s</small>`;
   $('sWall').innerHTML = `${r.wallMs.toFixed(0)} <small>ms</small>`;
   const g = is3D(job) ? `${job.nx}³` : `${job.nx}×${job.ny}`;
@@ -1218,7 +1254,7 @@ function showStats(L) {
   const n = L.nx * L.ny;
   let ev = 0, st = 0, fl = 0;
   for (let i = 0; i < n; i++) {
-    ev += 1 + L.steps[i];
+    ev += 1 + (lastJob && lastJob.stoch ? L.steps[i] & 0x1ffff : L.steps[i]);
     if (countOf(L, i) === 0) st++;
     if (L.flags[i] & 15) fl++;
   }
@@ -1553,6 +1589,17 @@ function hover(p) {
   const x = xr[0] + ix * (xr[1] - xr[0]) / (nx - 1);
   const y = yr[0] + iy * (yr[1] - yr[0]) / (ny - 1);
   const Z = countOf(last, i);
+  if (lastJob && lastJob.stoch) {
+    const fg = last.flags[i];
+    const ev = last.steps[i] & 0x1ffff;
+    let t;
+    if (Z !== 0) t = Z < 0 ? 'march failed' : `first moment unstable (Z = ${Z})`;
+    else if (fg & 4096) t = `Var(${cur().model?.stochastic?.output ?? 'x'}) = ${fmt(Math.pow(10, last.s[i]))} · r₀ = ${fmt((last.steps[i] >>> 17) / 32767)} (mean-square stable)`;
+    else if (fg & 2048) t = `mean-square UNSTABLE: r₀ = ${fmt(last.s[i])} ≥ 1 (first moment stable, Z = 0)`;
+    else t = 'Z = 0, second-moment march failed';
+    $('hover').textContent = `${last.xl} = ${fmt(x)}, ${last.yl} = ${fmt(y)}:  ${t} · ${ev} evaluations`;
+    return;
+  }
   const sig = (last.flags[i] & 256) ? fmt(last.s[i]) + ((last.flags[i] & 512) ? ' (refined)' : (last.flags[i] & 1024) ? ' (from ω₀)' : '') : '–';
   const f = last.flags[i] & 15;
   const fl = f ? ` · flags ${[1, 2, 4, 8].filter((b) => f & b).map((b) => ({ 1: 'failed', 2: 'sub-resolution', 4: 'residual', 8: 'Z<0' })[b]).join(', ')}` : '';
@@ -1747,6 +1794,58 @@ function refJob(e, ex, nx, ny, exact) {
     if (!near(job.march.wband, wb)) bad.push(`ω_band ${job.march.wband} vs ${wb}`);
   }
   return { job, bad };
+}
+
+// ?validate=sto: the stochastic examples at single points against the Julia references
+// (notes/second_moment_turning.jl: QuadGK; notes/stochastic_sdde_checks.jl: unwrap march, rtol 1e-4)
+const STO_REF = [
+  { key: 'sturning', p: { Ω: 0.6, K: 0.2, σ: 0.7, ζ: 0.1 }, Var: 0.371578, r0: 0.367976, src: 'QuadGK' },
+  { key: 'sturning', p: { Ω: 1.0, K: 0.2, σ: 1.0, ζ: 0.1 }, Var: 0.103849, r0: 0.077075, src: 'QuadGK' },
+  { key: 'sturning', p: { Ω: 0.5, K: 0.3, σ: 0.5, ζ: 0.1 }, Var: 0.0734857, r0: 0.111, src: 'QuadGK (r0 4 digits)' },
+  { key: 'sturning', p: { Ω: 0.6, K: 0.9 * 0.224735, σ: 0.3, ζ: 0.1 }, Var: 0.0521726, r0: 0.07504, src: 'QuadGK, 0.9 K_crit' },
+  { key: 'sturning', p: { Ω: 0.6, K: 0.99 * 0.224735, σ: 0.1, ζ: 0.1 }, Var: 0.0673913, r0: 0.08874, src: 'QuadGK, 0.99 K_crit' },
+  { key: 'sturning', p: { Ω: 0.6, K: 0.999 * 0.224735, σ: 0.03, ζ: 0.1 }, Var: 0.0608543, r0: 0.08025, src: 'QuadGK, 0.999 K_crit' },
+  { key: 'sturning', p: { Ω: 0.6, K: 0.2, σ: 1.5, ζ: 0.1 }, Var: NaN, r0: 1.689686, src: 'QuadGK (MS unstable)' },
+  { key: 'spd', p: { P: 0.5, D: 0.4, τ: 0.5, ζ: 0.05, σₘ: 0.6, σₐ: 0.1 }, Var: 0.026798, r0: 0.3352, src: 'Julia SDDE (MC 0.02656)' },
+  { key: 'spd', p: { P: 0.8, D: 0.5, τ: 0.6, ζ: 0.05, σₘ: 0.9, σₐ: 0.1 }, Var: NaN, r0: 96.6515, src: 'Julia SDDE (MS unstable; MC diverges)' },
+];
+async function runStoValidation() {
+  const rep = $('report');
+  rep.innerHTML = '<div class="panel"><h2>Stochastic mode against the Julia references</h2><div id="vstat">computing ...</div></div>';
+  const rows = [];
+  for (const rtol of ['', '1e-4']) {
+    for (const c of STO_REF) {
+      const slot = getSlot(c.key);
+      const keep = { params: JSON.parse(JSON.stringify(slot.params)), rtol: slot.set.rtol };
+      for (const [n, v] of Object.entries(c.p)) slot.params[n].value = v;
+      slot.set.rtol = rtol;
+      const job = makeJob(slot, { size: { nx: 1, ny: 1, nz: 1 } });
+      job.xr = [c.p[job.xl], c.p[job.xl]];
+      job.yr = [c.p[job.yl], c.p[job.yl]];
+      await engine.compute(job);
+      const rb = await engine.readback();
+      slot.params = keep.params; slot.set.rtol = keep.rtol;
+      const f = rb.flags[0];
+      let Var = NaN, r0 = NaN;
+      if (f & 4096) { Var = Math.pow(10, rb.s[0]); r0 = (rb.steps[0] >>> 17) / 32767; } else if (f & 2048) r0 = rb.s[0];
+      const ev = rb.steps[0] & 0x1ffff;
+      const eV = Number.isFinite(c.Var) ? Math.abs(Var / c.Var - 1) : (Number.isFinite(Var) ? Infinity : 0);
+      const eR = Math.abs(r0 / c.r0 - 1);
+      rows.push({ c, rtol: rtol || '2e-3', Z: countOf(rb, 0), Var, r0, eV, eR, ev });
+    }
+  }
+  const fmtE = (e) => (Number.isFinite(e) ? e.toExponential(1) : String(e));
+  let html = '<table class="vt"><tr><th>example</th><th>point</th><th>rtol_I</th><th>Z</th><th>Var GPU</th><th>Var ref</th><th>rel. err</th>' +
+    '<th>r₀ GPU</th><th>r₀ ref</th><th>rel. err</th><th>evals</th><th>reference</th></tr>';
+  for (const r of rows) {
+    html += `<tr><td>${r.c.key}</td><td>${Object.entries(r.c.p).map(([k, v]) => `${k}=${+v.toPrecision(5)}`).join(' ')}</td><td>${r.rtol}</td><td>${r.Z}</td>` +
+      `<td>${Number.isFinite(r.Var) ? r.Var.toPrecision(6) : 'MS-unstable'}</td><td>${Number.isFinite(r.c.Var) ? r.c.Var : 'MS-unstable'}</td><td>${fmtE(r.eV)}</td>` +
+      `<td>${r.r0.toPrecision(6)}</td><td>${r.c.r0}</td><td>${fmtE(r.eR)}</td><td>${r.ev}</td><td>${r.c.src}</td></tr>`;
+  }
+  html += '</table>';
+  $('vstat').innerHTML = html;
+  window.__stoValidation = rows.map((r) => ({ key: r.c.key, p: r.c.p, rtol: r.rtol, Z: r.Z, Var: r.Var, r0: r.r0, eV: r.eV, eR: r.eR, ev: r.ev }));
+  logMsg('stochastic validation: ' + JSON.stringify(window.__stoValidation));
 }
 
 async function runValidation() {
@@ -1993,7 +2092,8 @@ async function main() {
   window.__engine = engine;
   busy = true;
   try {
-    if (params.has('validate')) { countOnce('validate-run'); await runValidation(); }
+    if (params.get('validate') === 'sto') await runStoValidation();
+    else if (params.has('validate')) { countOnce('validate-run'); await runValidation(); }
     const b = params.get('bench');
     if (params.has('bench')) countOnce('bench-run');
     if (b === 'compare' || b === 'compare-hd') await runCompare();

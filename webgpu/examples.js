@@ -96,6 +96,7 @@ export const GROUPS = [
   { id: 'neu', label: 'Neutral' },
   { id: 'bar', label: 'Elastic bar with delayed boundary feedback' },
   { id: 'frac', label: 'Fractional order' },
+  { id: 'sto', label: 'Stochastic (second moment, state form)' },
 ];
 
 const NEUTRAL_NOTE = 'Neutral: the phase ripple never decays, so a small ω_max (tail error < arcsin|a|/π < 1/2) and the step cap h ≤ π/(2τ) along the whole line; the default ω_max = 1e5 fails here.';
@@ -411,6 +412,55 @@ fn charD(l: CD, p: vec2<f32>) -> CD {
     smin: -0.4,
     res: '480x270',
   },
+  {
+    key: 'sturning',
+    group: 'sto',
+    title: 'Stochastic turning (cutting-force noise, additive + multiplicative)',
+    formula: "x'' + 2ζx' + x = K(1 + x(t−τ) − x)(1 + σξ),   τ = 2π/Ω     (Itô, white noise ξ)",
+    note: 'The general stochastic turning model (GSTM) of G. Fodor\'s PhD dissertation (BME, Sec. 4.1): the cutting-force ' +
+      'coefficient K(1 + σξ) carries both an additive noise (Kσξ) and a multiplicative one (Kσ(x(t−τ) − x)ξ). ' +
+      'Colours: log₁₀ of the stationary variance of x around its mean x = K (bright: large, near the boundary — ' +
+      'stochastic resonance); orange: the mean is stable but the variance grows without bound (r₀ ≥ 1); red: the mean is ' +
+      'unstable. σ = 0.01 (realistic) gives the additive-only (SSTM) picture; raise σ to see the mean-square stable domain ' +
+      'shrink. Each point: the unwrap march for the count, then a second pass for the frequency integrals ' +
+      'r₀ = (1/2π)∫|G|²dω and Var = Γ(1/2π)∫|Y|²dω/(1 − r₀).',
+    text: '# stochastic turning: states x, x\' (x\'\' defines both), delayed state x(t-τ), white noise ξ\n' +
+      'Ω = 0.15:1.6          # x axis: spindle speed Ω/ω_n\n' +
+      'K = 0.01:0.6          # y axis: cutting-force coefficient\n' +
+      'σ = 0:1.5 @ 0.5       # noise intensity of the cutting force\n' +
+      'ζ = 0.02:0.3 @ 0.1    # damping ratio\n' +
+      'τ = 2*pi/Ω\n' +
+      "x'' = -2*ζ*x' - x + K*(1 + x(t-τ) - x) + K*σ*(1 + x(t-τ) - x)*ξ",
+    axes: ['Ω', 'K'],
+    set: { wmax: '1e4', hmax: '0.05', wband: '5' },
+    cmap: null,
+    smin: -0.1,
+    res: '960x540',
+  },
+  {
+    key: 'spd',
+    group: 'sto',
+    title: 'Delayed PD control with noisy feedback gain and force noise',
+    formula: "x'' + 2ζx' + x = −(P x(t−τ) + D x'(t−τ))(1 + σₘξ₁) + σₐξ₂     (Itô, independent white noises)",
+    note: 'Delayed PD control of an oscillator: the feedback force is corrupted by a relative (multiplicative) noise σₘ, ' +
+      'and an independent external force noise σₐ acts additively. With σₘ = 0 the mean-square stable domain is the ' +
+      'deterministic one and the colours show the stationary variance; with σₘ > 0 the multiplicative loop gain ' +
+      'r₀ = (1/2π)∫|G|²dω (G: the noisy feedback signal per unit force) carves an orange mean-square unstable band ' +
+      'out of the stable domain, mostly at large D (the derivative feedback amplifies the noise at high frequencies).',
+    text: '# delayed PD control, multiplicative (σₘ: feedback) and additive (σₐ: force) noise\n' +
+      'P = -0.6:2.6          # x axis: proportional gain\n' +
+      'D = -0.6:1.6          # y axis: derivative gain\n' +
+      'τ = 0.1:2 @ 0.5       # feedback delay\n' +
+      'ζ = 0:0.3 @ 0.05      # damping ratio\n' +
+      'σₘ = 0:1.5 @ 0.6      # relative noise of the feedback gain\n' +
+      'σₐ = 0.01:1 @ 0.1     # force noise\n' +
+      "x'' = -2*ζ*x' - x - (P*x(t-τ) + D*x'(t-τ))*(1 + σₘ*ξ₁) + σₐ*ξ₂",
+    axes: ['P', 'D'],
+    set: { wmax: '1e4', hmax: 'pi/(2*τ)', wband: '20' },
+    cmap: null,
+    smin: -0.4,
+    res: '960x540',
+  },
 ];
 
 // 'Own example': starts as the fourth-order equation (A.1), editable, kept in localStorage
@@ -429,4 +479,4 @@ fn charD(l: CD, p: vec2<f32>) -> CD {
 }
 
 /** default march settings (strings: expressions of the parameters) */
-export const SET_DEFAULTS = { n: '', wmax: '1e5', tol: '0.3', hmax: '', wband: '', w0: '1e-9', branch: 'auto' };
+export const SET_DEFAULTS = { n: '', wmax: '1e5', tol: '0.3', hmax: '', wband: '', w0: '1e-9', branch: 'auto', rtol: '' };

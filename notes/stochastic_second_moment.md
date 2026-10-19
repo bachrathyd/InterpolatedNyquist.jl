@@ -389,7 +389,71 @@ prototype (a `Tuple` of runtime length, type-unstable). The band cap buys accura
 **Default: plain 2-pass** (`subtract = false`; the option stays).
 
 **Open points / next steps**
-* Port to the GPU kernel: per lane the extra state is 2 accumulators and the tolerance test; MDBM on $\log r_0=0$ for the MS boundary.
+* MDBM on $\log r_0=0$ for a sharp MS boundary (the web chart shows it as a colour edge at pixel resolution).
 * Independent check of the DDE case against SSD (dissertation Fig. 4.2, σ = 1).
 * The error estimate is the plain-trapezoid error, but the Hermite rule is used, so it is conservative in places and
   optimistic in others (the 2-pass $r_0$ error reaches ~5× `rtol_I`). A per-length error budget is untested.
+
+---
+
+# Part III — How to define the system: model input (Julia) and the WebGPU app
+
+A scalar $D(\lambda)$ alone is not enough for the second moment. The noise transfer functions are needed as well,
+and those are entries of $\boldsymbol\Delta(\lambda)^{-1}$ (adjugates). Two input routes avoid deriving them by hand.
+
+## 11. Julia: `StochasticDDE` (`notes/stochastic_sdde.jl`)
+
+The model can be given in the StochasticDelayDiffEq form, out of place:
+
+```julia
+f(u, h, p, t) = SVector(u[2], -2ζ*u[2] - u[1] + K*(1 + h(p, t - τ)[1] - u[1]))   # drift
+g(u, h, p, t) = SMatrix{2,1}(0.0, K*σ*(1 + h(p, t - τ)[1] - u[1]))              # N×m noise matrix (or N-vector: diagonal noise)
+sys = StochasticDDE(f, g, p, Val(2))           # equilibrium by Newton; noise basis E by SVD
+r   = stochastic_moments(sys; rtol_I = 1e-4)   # (Z, r0, stable_MS, mean, P (N×N), q, L, evals)
+λms = ms_exponent_sdde(sys)
+```
+
+The model can also be given directly as matrices: `f, g = LinearSDDE(A, c, γ; B = [(B₁, τ₁)], α = [α₁], β = [[(β₁₁, τ₁)]])`.
+
+The route reuses the trick of `get_D_from_model`: at one λ the model is evaluated with ForwardDiff duals around $u_{eq}$
+and the mock history $u_{eq}+a\,e^{\lambda t}$. Then $\boldsymbol\Delta(\lambda)=\lambda\mathbf M-\partial f/\partial a$ and
+$\boldsymbol\Gamma_k(\lambda)=\partial g_k/\partial a=\boldsymbol\alpha_k+\sum_i\boldsymbol\beta_{ki}e^{-\lambda\tau_i}$ come out together. No delay has to be
+declared: multiple and distributed delays work as in the deterministic extraction. The march runs in nested
+duals (outer: $d/d\omega$, inner: the Jacobian). Nonlinear $f, g$ are linearised at the equilibrium.
+The general case (any $N$, $p$ noise directions, $m$ Wiener processes) assembles $\mathbb L$ ($p^2\times p^2$) and $\mathbf P$
+from the real parts of $\operatorname{vec}(\mathbf H)\operatorname{vec}(\mathbf H)^*$ and $\sum_k\operatorname{vec}(\mathbf G_k)\operatorname{vec}(\mathbf G_k)^*$ along the march.
+
+Checks (`notes/stochastic_sdde_checks.jl`):
+
+| Model | Result | Reference |
+|---|---|---|
+| GSTM written as f/g | r₀ 0.367924, Var 0.371544 | 0.367976 / 0.371578 |
+| 2-DOF, 2 noise directions, one W | P to 2.7·10⁻⁶ | Lyapunov |
+| GSTM as matrices | identical to the f/g form | — |
+| Delayed PD, $x''+2\zeta x'+x=-(Px_\tau+Dx'_\tau)(1+\sigma_m\xi_1)+\sigma_a\xi_2$ | Var 0.02680 | Monte Carlo 0.02656 |
+| Second PD point | r₀ = 96.7 (MS unstable) | Monte Carlo diverges |
+
+## 12. WebGPU: the state form (`webgpu/sde.js`, `webgpu/smarch.wgsl`)
+
+The page's equation box accepts the system as linear state equations, the same idea as `f, g` in text:
+
+```
+x'' = -2*ζ*x' - x + K*(1 + x(t-τ) - x) + K*σ*(1 + x(t-τ) - x)*ξ
+```
+
+* **Parsing.** No differentiation is needed: the right-hand sides are affine in the states, so they are lowered *exactly* to
+  coefficient expressions of the parameters. Each AST node becomes an affine form over
+  {1, x_j, x_j(t−τ_d), ξ_k, ξ_k x_j, ξ_k x_j(t−τ_d)}, and products are allowed only between a noise-free and a state-free factor.
+* **Code generation.** The compiler emits WGSL for $\mathbf M(\lambda)$ in complex duals, a pivoted elimination that gives $\det\mathbf M$ and $\mathbf M^{-1}\mathbf e_r$ in
+  one sweep, the noise loop $G_k$, and the real mean solve for $\tilde\gamma_k$.
+* **GPU march.** Two passes run per pixel, with the same step control as the deterministic page.
+* **Scope.** In the browser: one noise channel ($p=1$), $N\le6$, at most 4 delays and 4 noises.
+
+Validation (`?validate=sto`, Float32, 9 points vs the Julia references):
+* Relative error ≤ 10⁻³ at the default `rtol_I` = 2·10⁻³.
+* At 10⁻⁴: ≤ 2.6·10⁻⁴, except 1.4·10⁻³ at 0.999 $K_c$.
+* Both MS-unstable cases are detected with the right $r_0$ (1.6891 vs 1.6897; 96.62 vs 96.65).
+* The deterministic page validation still passes (0 differing counts).
+
+Speed (Intel UHD 630): stochastic turning at 525×295 takes 280 ms (≈195 evaluations per point), and the PD example takes 80 ms.
+A 1080p-class GPU should be roughly an order of magnitude faster.
