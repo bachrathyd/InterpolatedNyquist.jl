@@ -1,201 +1,6 @@
 \section{Performance analysis}\label{sec:performance}
 
-\subsection{Convergence and efficiency of the integrators}\label{sec:performance-convergence}
-
-\begin{figure}[tb]
-  \centering
-  \maybefig{fig_convergence}{\linewidth}
-  \caption{Integration back-ends at an unstable point of the
-  showcase system, where the exact count $\Zint=2$ is known (verified
-  independently by a high-resolution semi-discretization eigenvalue count),
-  so the plotted count error $|\Zraw-\Zint|$ is an \emph{absolute} error
-  measure requiring no reference. (a)~Accuracy versus requested tolerance;
-  the dotted line marks the practical rule
-  $\mathrm{error}\approx100\,\mathrm{tol}$. (b)~Cost versus
-  tolerance. (c)~Efficiency front. Error is on the vertical axis in both (a)
-  and (c). A curve ends where a single parameter point exceeded a cost cap of
-  one second, which is itself informative.}\label{fig:convergence}
-\end{figure}
-
-\begin{table}[tb]
-  \centering
-  \caption{Count error $|\Zraw-\Zint|$ (left block) and single-point CPU time
-  (right block) of the back-ends at selected tolerances; system and point as
-  in Fig.~\ref{fig:convergence}.}\label{tab:convergence}
-  \resizebox{\linewidth}{!}{\maybeinput{tables/tab_convergence.tex}}
-\end{table}
-
-Figure~\ref{fig:convergence} and Table~\ref{tab:convergence} quantify the
-choice of back-end, and three points deserve emphasis. First, from the
-default tolerance downwards the adaptive back-ends track the requested
-tolerance -- with the error settling roughly two orders of magnitude above
-it, the rule of thumb~\eqref{eq:rule} of Section~\ref{sec:showcase-tolerance}
--- until they meet a common floor of $\approx8\cdot10^{-7}$ set by the tail
-truncated at $\wmax=10^{6}$ and the estimated leading order, not by any
-integrator; at loose tolerances the lower-order pairs do not yet track it
-(Table~\ref{tab:convergence}). Second, the order of the pair matters far more
-than its family.
-Across the loose half of the ladder the classical fifth-order
-pair~\cite{tsitouras2011runge} under-resolves the $\omega^{-1}$ ripple of
-this velocity-feedback system, leaving count errors of $0.2$--$0.34$ --
-within a hair of the rounding threshold -- and even at the package default
-$10^{-5}$ it leaves $9\cdot10^{-2}$ where the ninth-order
-default~\cite{verner2010numerically} leaves $6\cdot10^{-5}$: three orders
-of magnitude, for a factor of $2.4$ in time. The linearly implicit
-Rosenbrock
-pair~\cite{rosenbrock1963some,shampine1997matlab,hairer1996solving} is
-dominated from the default tolerance downwards, as
-expected once one recognizes that the problem has no stiffness for it to
-exploit (Section~\ref{sec:phaseode}); at tight tolerances it needs seconds
-for a single parameter point where the ninth-order pair needs a quarter of
-one, which is why the sweep in Fig.~\ref{fig:convergence} stops each method
-once a point exceeds the cost cap. Third, at the default setting every
-back-end still rounds to the correct count, so the choice of integrator
-does not change the chart -- what differs, by orders of magnitude, is the
-\emph{margin} to the rounding threshold, and the default is chosen for that
-margin rather than for raw speed.
-
-\begin{table}[tb]
-  \centering
-  \caption{Approaching a Hopf boundary of the showcase system at distance
-  $\Delta P$ in the gain. The peak half-width equals the distance of the
-  crossing root from the axis, proportional to $\Delta P$
-  ($6.6\cdot10^{-4}\,\Delta P/10^{-2}$); the tracked estimate $\sest$
-  reproduces it down to $\Delta P=10^{-6}$, while in the last two rows it is
-  limited by the step of the march (Section~\ref{sec:tracking}) and only its
-  sign -- a root right of the axis -- remains correct. The marching
-  solver silently loses one root once the peak falls below its step
-  resolution, while the integer residual stays small
-  ($\Zraw$ shifts by exactly one).}\label{tab:boundarystress}
-  \maybeinput{tables/tab_boundary_stress.tex}
-\end{table}
-
-The one situation in which the back-ends genuinely differ is the immediate
-vicinity of a stability boundary (Table~\ref{tab:boundarystress}). As the
-crossing root approaches the integration line, the integrand peak narrows
-in proportion to $\Delta P$ (measured half-width $6.6\cdot10^{-8}$ at
-$\Delta P=10^{-6}$). By $\Delta P=10^{-8}$ the marching solver steps clean
-over the peak, loses exactly $\pm\pi$, reports one root too few -- and
-returns a success flag and a perfectly healthy integer residual.
-Gauss--Kronrod survives the same test, though not by cleverness: the
-persistent delay ripple forces it to subdivide finely across the whole
-range anyway, and at the tight tolerance of this stress test ($10^{-8}$)
-that refinement still resolves the $\Delta P=10^{-10}$ peak. At the package
-default the margin is thinner: there the same experiment
-(\code{data/peak\_repair.csv}) shows the quadrature losing the count
-silently at $\Delta P=10^{-10}$, while the repaired march of
-Section~\ref{sec:showcase-tolerance} -- steered onto the peak by the
-$|\Dfun|^{2}$ minimum rather than searching for it -- still counts
-correctly there.
-
-The practical consequences are mild. Landing within $\sim10^{-8}$ of the
-boundary has a probability of order $10^{-8}/\Delta p$ per pixel for a grid
-spacing $\Delta p$, so a chart grid hits it, if ever, in a single pixel, and
-the damage is a count off by one, not a wild outlier. The
-MDBM trace is insensitive to it: its objective tends to zero at the
-boundary regardless of the sign, so a miscount displaces the interpolated
-boundary point by no more than the skipped strip's width, $\sim10^{-8}$ in
-the gain -- far below plotting resolution. And the stable/unstable
-classification is affected only where the skip flips the count to or from
-zero -- exactly the situation in which the tracked root (still positive,
-$\sest=+4.3\cdot10^{-7}$ at $\Delta P=10^{-8}$, correctly placing a root
-right of the axis) disagrees with $\Zint=0$ and the sign
-test~\eqref{eq:crosscheck} fires; the parity test~\eqref{eq:parity} fires as
-well, since $\Zint=3$ lies between the true values $4$ and $2$. Since the
-root test needs the tracked root, which quadrature cannot provide, the ODE
-march remains the default integration back-end.
-
-\subsection{Chart-level cost, memory and cold start}\label{sec:performance-cost}
-
-\begin{table}[tb]
-  \centering
-  \caption{Warm chart-level costs (median of repeated runs,
-  \NumThreads{}~threads): full brute-force sweeps for three systems of
-  increasing evaluation cost, with allocated memory. The last column counts
-  the points at which the back-end's $\Zint$ deviates from a
-  tight-tolerance reference of the same chart: the adaptive back-ends are
-  required to match everywhere before their time is recorded, while the
-  fixed-step back-end -- whose resolution is set by hand -- reports its
-  misses.}\label{tab:gridtimings}
-  \resizebox{\linewidth}{!}{\maybeinput{tables/tab_grid_timings.tex}}
-\end{table}
-
-\begin{table}[tb]
-  \centering
-  \caption{The two operating points of the method on the same
-  $100\times100$ chart: the \emph{accurate} preset (the default tolerance)
-  and a \emph{fast} preset for first exploration. The last column counts
-  the points whose $\Zint$ differs from a tight reference, i.e.\ the price
-  of the fast preset, which buys roughly a factor of two in
-  time.}\label{tab:presets}
-  \maybeinput{tables/tab_presets.tex}
-\end{table}
-
-Two operating points matter in practice, and Table~\ref{tab:presets}
-separates them. With the \emph{accurate} preset -- the standard chart
-window $\wmax=10^{4}$ and the default $\mathrm{tol}=10^{-5}$ -- a complete
-$100\times100$ chart of a scalar characteristic function costs a fraction
-of a second, and every one of the ten thousand counts matches a tight
-reference. A \emph{fast} preset ($\mathrm{tol}=10^{-3}$) buys roughly a
-factor of two at the price of a few dozen boundary-adjacent miscounts --
-acceptable for a first look, and flagged by the diagnostics of
-Section~\ref{sec:showcase-tolerance}. Beyond the presets, two user choices
-dominate the cost on the showcase DDAE, spanning three orders of magnitude
-together: $\wmax$ (the velocity feedback's $\omega^{-1}$ ripple makes
-$\wmax=10^{6}$ cost some fifty times $\wmax=10^{4}$, while buying nothing
--- the truncated tail is five orders below the rounding threshold) and the
-form of $\Dfun$ (the automatic extraction costs a factor of $\ExtractRatio$
-per evaluation over the hand-derived expression,
-Table~\ref{tab:extraction}). Choosing badly on both turns the $1.98$\,s
-chart of Table~\ref{tab:presets} into one of more than half an hour; this is what the
-asymmetric guidance of Section~\ref{sec:phaseode} means in practice.
-
-Table~\ref{tab:gridtimings} reports the cost of a \emph{complete}
-$100\times100$ chart -- ten thousand parameter points -- on a
-\CPUmodel{} (\NumThreads{} threads, \RAMgb\,GB RAM, Julia~\JuliaVersion,
-package revision \PkgCommit), with the per-point cost listed alongside so
-that other resolutions can be scaled directly. For scalar characteristic
-functions a full chart takes tens to hundreds of milliseconds, and the
-entire hybrid workflow (colored sweep plus MDBM boundary) finishes well
-inside one second -- genuinely interactive. The last column is worth a
-glance: the fixed-step back-end is the fastest entry for the delayed systems
-and gets thousands of the ten thousand counts wrong, for the reason given in
-Section~\ref{sec:alternatives}. The showcase DDAE is listed with its
-hand-derived characteristic function, as are all figures in this paper; what
-the automatic extraction of Section~\ref{sec:extraction} would cost instead
-is measured separately in Table~\ref{tab:extraction}. Memory stays modest throughout
-because the phase ODE carries a single scalar state and the sweep stores
-only the five result fields; no large matrices are formed at any point.
-Cold start is a one-time cost dominated by package loading: in a fresh Julia
-process, loading takes $5$--$8$\,s and the first thousand-point sweep
-$0.07$--$0.2$\,s thanks to the precompilation workload shipped with the
-package, after which every further chart runs at the warm speeds of
-Table~\ref{tab:gridtimings}.
-
-\begin{table}[tb]
-  \centering
-  \caption{What the MDBM boundary trace buys: from an initial mesh with the
-  listed refinement levels, the traced boundary has the equivalent resolution
-  of a uniform grid of the given size, at the listed number of function
-  evaluations. The saving factor is the ratio of the two point
-  counts.}\label{tab:mdbm}
-  \resizebox{\linewidth}{!}{\maybeinput{tables/tab_mdbm.tex}}
-\end{table}
-
-Table~\ref{tab:mdbm} makes the boundary-tracing argument of
-Section~\ref{sec:mdbm} concrete. Four refinement levels from a
-$20\times20$ mesh yield a boundary resolved as finely as a
-$320\times320$ uniform grid would resolve it, while evaluating only the
-cells that actually bracket the boundary -- a saving of $34$ to $53$ times in
-function evaluations, which is precisely why the high-resolution boundary is
-affordable on top of a deliberately coarse colored background. The saving
-matters most where an evaluation of $\Dfun$ is expensive -- large
-determinants, automatic extraction -- since for a cheap scalar $\Dfun$ a
-brute-force grid of that density is itself affordable
-(Section~\ref{sec:parallel}); and the traced boundary is a curve, which a
-grid of any density only approximates.
-
-\subsection{The discrete march: two orders of magnitude on the CPU}\label{sec:performance-unwrap}
+\subsection{The discrete march against the integration back-ends}\label{sec:performance-unwrap}
 
 \begin{table}[tb]
   \centering
@@ -256,20 +61,95 @@ remains the default. The ODE march is kept for what it does better: the
 convergence-controlled integer residual of Section~\ref{sec:integerness} as
 an independent check, characteristic functions with poles whose
 denominators cannot be cleared (the normalization pole of order $198$ of the
-vehicle ring in Appendix~\ref{app:gallery}), and densely packed lightly
+vehicle ring in \ref{app:gallery}), and densely packed lightly
 damped modes (the $50\times50$ determinant, A.10). With these exceptions the
 charts of the showcase and of nine gallery panels are now computed with the
 discrete march, $6$ to $150$ times faster than with the phase ODE on the same
-machine (\code{data/gallery\_timings.csv}). All the timings of
-Sections~\ref{sec:performance-convergence}--\ref{sec:performance-cost} were
-measured with the integration back-ends, on an earlier machine; their
-\emph{ratios} remain valid, but the absolute chart times of
-Table~\ref{tab:gridtimings} are one to two orders of magnitude above what the
-discrete march delivers.
+machine (\code{data/gallery\_timings.csv}). The detailed measurements of the
+integration back-ends -- convergence, chart-level cost and the comparison of
+eight solvers -- are collected in \ref{app:backends}; they were taken on an
+earlier machine, so their \emph{ratios} remain valid, but their absolute chart
+times are one to two orders of magnitude above what the discrete march
+delivers.
 
 How the per-point cost of the discrete march divides among CPU and GPU threads,
 and what that means for the chart time on any hardware, is the subject of
 Section~\ref{sec:parallel}.
+
+\begin{table}[tb]
+  \centering
+  \caption{Approaching a Hopf boundary of the showcase system at distance
+  $\Delta P$ in the gain. The peak half-width equals the distance of the
+  crossing root from the axis, proportional to $\Delta P$
+  ($6.6\cdot10^{-4}\,\Delta P/10^{-2}$); the tracked estimate $\sest$
+  reproduces it down to $\Delta P=10^{-6}$, while in the last two rows it is
+  limited by the step of the march (Section~\ref{sec:tracking}) and only its
+  sign -- a root right of the axis -- remains correct. The marching
+  solver silently loses one root once the peak falls below its step
+  resolution, while the integer residual stays small
+  ($\Zraw$ shifts by exactly one).}\label{tab:boundarystress}
+  \maybeinput{tables/tab_boundary_stress.tex}
+\end{table}
+
+\paragraph{Near the stability boundary.} The one situation in which the integration back-ends genuinely differ is the immediate
+vicinity of a stability boundary (Table~\ref{tab:boundarystress}). As the
+crossing root approaches the integration line, the integrand peak narrows
+in proportion to $\Delta P$ (measured half-width $6.6\cdot10^{-8}$ at
+$\Delta P=10^{-6}$). By $\Delta P=10^{-8}$ the marching solver steps clean
+over the peak, loses exactly $\pm\pi$, reports one root too few -- and
+returns a success flag and a perfectly healthy integer residual.
+Gauss--Kronrod survives the same test, though not by cleverness: the
+persistent delay ripple forces it to subdivide finely across the whole
+range anyway, and at the tight tolerance of this stress test ($10^{-8}$)
+that refinement still resolves the $\Delta P=10^{-10}$ peak. At the package
+default the margin is thinner: there the same experiment
+(\code{data/peak\_repair.csv}) shows the quadrature losing the count
+silently at $\Delta P=10^{-10}$, while the repaired march of
+Section~\ref{sec:showcase-tolerance} -- steered onto the peak by the
+$|\Dfun|^{2}$ minimum rather than searching for it -- still counts
+correctly there.
+
+The practical consequences are mild. Landing within $\sim10^{-8}$ of the
+boundary has a probability of order $10^{-8}/\Delta p$ per pixel for a grid
+spacing $\Delta p$, so a chart grid hits it, if ever, in a single pixel, and
+the damage is a count off by one, not a wild outlier. The
+MDBM trace is insensitive to it: its objective tends to zero at the
+boundary regardless of the sign, so a miscount displaces the interpolated
+boundary point by no more than the skipped strip's width, $\sim10^{-8}$ in
+the gain -- far below plotting resolution. And the stable/unstable
+classification is affected only where the skip flips the count to or from
+zero -- exactly the situation in which the tracked root (still positive,
+$\sest=+4.3\cdot10^{-7}$ at $\Delta P=10^{-8}$, correctly placing a root
+right of the axis) disagrees with $\Zint=0$ and the sign
+test~\eqref{eq:crosscheck} fires; the parity test~\eqref{eq:parity} fires as
+well, since $\Zint=3$ lies between the true values $4$ and $2$. Since the
+root test needs the tracked root, which quadrature cannot provide, the ODE
+march remains the default integration back-end.
+
+\subsection{Boundary tracing}\label{sec:performance-mdbm}
+
+\begin{table}[tb]
+  \centering
+  \caption{What the MDBM boundary trace buys: from an initial mesh with the
+  listed refinement levels, the traced boundary has the equivalent resolution
+  of a uniform grid of the given size, at the listed number of function
+  evaluations. The saving factor is the ratio of the two point
+  counts.}\label{tab:mdbm}
+  \resizebox{\linewidth}{!}{\maybeinput{tables/tab_mdbm.tex}}
+\end{table}
+
+Table~\ref{tab:mdbm} makes the boundary-tracing argument of
+Section~\ref{sec:mdbm} concrete. Four refinement levels from a
+$20\times20$ mesh yield a boundary resolved as finely as a
+$320\times320$ uniform grid would resolve it, while evaluating only the
+cells that actually bracket the boundary -- a saving of $34$ to $53$ times in
+function evaluations, which is precisely why the high-resolution boundary is
+affordable on top of a deliberately coarse colored background. The saving
+matters most where an evaluation of $\Dfun$ is expensive -- large
+determinants, automatic extraction -- since for a cheap scalar $\Dfun$ a
+brute-force grid of that density is itself affordable
+(Section~\ref{sec:parallel}); and the traced boundary is a curve, which a
+grid of any density only approximates.
 
 \subsection{Comparison with semi-discretization}\label{sec:performance-sd}
 
@@ -322,58 +202,3 @@ returns exactly what an \emph{autonomous} stability chart needs -- the root
 count, the boundary, and the dominant root on demand -- at interactive
 speed.
 
-\subsection{A broader solver comparison}\label{sec:performance-zoo}
-
-\begin{figure}[tb]
-  \centering
-  \maybefig{fig_solver_zoo}{0.7\linewidth}
-  \caption{Error--cost Pareto fronts of eight integration back-ends on a
-  $40\times40$ sweep of the fourth-order benchmark oscillator
-  (Appendix~\ref{app:gallery}): fixed-step trapezoid (step-count sweep),
-  adaptive Gauss--Kronrod, and six ODE solvers (tolerance
-  sweeps).}\label{fig:zoo}
-\end{figure}
-
-\begin{table}[tb]
-  \centering
-  \caption{Evaluations of $\Dfun$ needed for one parameter point at
-  tol~$=10^{-5}$, with the count of each entry verified against a
-  tight-tolerance reference before being recorded. What governs the cost is
-  how fast the delay-induced ripple of $\theta'$ decays, i.e.\ how far the
-  delayed terms sit below the leading power: $\omega^{-1}$ for the
-  velocity-feedback showcase, $\omega^{-3}$ for the fourth-order
-  position-feedback benchmark.}\label{tab:evals}
-  \maybeinput{tables/tab_evals.tex}
-\end{table}
-
-Table~\ref{tab:evals} isolates what actually drives the cost. The decisive
-quantity is not the back-end but the decay rate of the phase ripple, set by
-how far the delayed terms sit below the leading power of $\Dfun$. Where the
-ripple decays fast (delayed \emph{position} feedback,
-$\theta'\sim\omega^{-3}$), quadrature recognizes the negligible tail panel
-by panel and finishes about $2.5$ times cheaper than the march; where it
-decays slowly (delayed \emph{velocity} feedback, $\theta'\sim\omega^{-1}$),
-the ranking reverses and the march is some three times cheaper. Neither
-back-end dominates, and the lesson for a user is to spend attention on
-$\wmax$ and on the structure of the feedback, not on the choice of
-integrator. One implementation detail underpins the quadrature numbers: the
-Gauss--Kronrod back-end is seeded with logarithmically spaced interior
-breakpoints, one per two frequency decades. Without them the first
-$G_7$--$K_{15}$ panel spans the entire window, its lowest node lands above
-the whole resonance region for $\wmax=10^{6}$, and the routine returns
-$\Zraw=n/2$ having never seen a single root -- with an integer residual of
-\emph{exactly} zero, since nothing about the quadrature failed. The
-breakpoints cost a few dozen extra evaluations and remove the failure mode
-entirely.
-
-Figure~\ref{fig:zoo} extends the comparison to a wider selection of ODE
-solvers on the fourth-order benchmark system. The fixed-step trapezoid is
-\emph{dominated everywhere}: even at $3\cdot10^{4}$ steps -- more than an
-order of magnitude slower than the adaptive default -- its worst error over
-the chart remains several roots, because a uniform grid cannot resolve a
-peak that narrows without bound as a root approaches the line. All adaptive
-methods follow their tolerance; higher-order pairs dominate at tight
-tolerances, and the linearly implicit pair is dominated. The spread between
-the \emph{adaptive}
-methods is far smaller than the gap that separates all of them from a fixed
-grid, which is the practical message of this section.

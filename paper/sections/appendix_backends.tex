@@ -1,0 +1,344 @@
+\section{Integration back-ends, tolerance and number formats}\label{app:backends}
+
+This appendix collects the detailed measurements behind the statements of
+Sections~\ref{sec:method}--\ref{sec:parallel} on the integration back-ends
+(the phase ODE, adaptive quadrature and a fixed-step trapezoid), on the
+solver tolerance, and on narrow number formats. The integration back-ends
+were measured on an earlier machine than the discrete march
+(Section~\ref{sec:performance-unwrap}); their ratios carry over, their
+absolute chart times do not.
+
+\subsection{Convergence and efficiency of the integrators}\label{sec:performance-convergence}
+
+\begin{figure}[tb]
+  \centering
+  \maybefig{fig_convergence}{\linewidth}
+  \caption{Integration back-ends at an unstable point of the
+  showcase system, where the exact count $\Zint=2$ is known (verified
+  independently by a high-resolution semi-discretization eigenvalue count),
+  so the plotted count error $|\Zraw-\Zint|$ is an \emph{absolute} error
+  measure requiring no reference. (a)~Accuracy versus requested tolerance;
+  the dotted line marks the practical rule
+  $\mathrm{error}\approx100\,\mathrm{tol}$. (b)~Cost versus
+  tolerance. (c)~Efficiency front. Error is on the vertical axis in both (a)
+  and (c). A curve ends where a single parameter point exceeded a cost cap of
+  one second, which is itself informative.}\label{fig:convergence}
+\end{figure}
+
+\begin{table}[tb]
+  \centering
+  \caption{Count error $|\Zraw-\Zint|$ (left block) and single-point CPU time
+  (right block) of the back-ends at selected tolerances; system and point as
+  in Fig.~\ref{fig:convergence}.}\label{tab:convergence}
+  \resizebox{\linewidth}{!}{\maybeinput{tables/tab_convergence.tex}}
+\end{table}
+
+Figure~\ref{fig:convergence} and Table~\ref{tab:convergence} quantify the
+choice of back-end, and three points deserve emphasis. First, from the
+default tolerance downwards the adaptive back-ends track the requested
+tolerance -- with the error settling roughly two orders of magnitude above
+it, the rule of thumb~\eqref{eq:rule} of Section~\ref{sec:showcase-tolerance}
+-- until they meet a common floor of $\approx8\cdot10^{-7}$ set by the tail
+truncated at $\wmax=10^{6}$ and the estimated leading order, not by any
+integrator; at loose tolerances the lower-order pairs do not yet track it
+(Table~\ref{tab:convergence}). Second, the order of the pair matters far more
+than its family.
+Across the loose half of the ladder the classical fifth-order
+pair~\cite{tsitouras2011runge} under-resolves the $\omega^{-1}$ ripple of
+this velocity-feedback system, leaving count errors of $0.2$--$0.34$ --
+within a hair of the rounding threshold -- and even at the package default
+$10^{-5}$ it leaves $9\cdot10^{-2}$ where the ninth-order
+default~\cite{verner2010numerically} leaves $6\cdot10^{-5}$: three orders
+of magnitude, for a factor of $2.4$ in time. The linearly implicit
+Rosenbrock
+pair~\cite{rosenbrock1963some,shampine1997matlab,hairer1996solving} is
+dominated from the default tolerance downwards, as
+expected once one recognizes that the problem has no stiffness for it to
+exploit (Section~\ref{sec:phaseode}); at tight tolerances it needs seconds
+for a single parameter point where the ninth-order pair needs a quarter of
+one, which is why the sweep in Fig.~\ref{fig:convergence} stops each method
+once a point exceeds the cost cap. Third, at the default setting every
+back-end still rounds to the correct count, so the choice of integrator
+does not change the chart -- what differs, by orders of magnitude, is the
+\emph{margin} to the rounding threshold, and the default is chosen for that
+margin rather than for raw speed.
+
+
+\subsection{Tolerance study on the showcase system}\label{app:tolerance}
+
+
+\begin{figure}[tb]
+  \centering
+  \maybefig{fig_tolerance_charts}{\linewidth}
+  \caption{The showcase chart computed with solver tolerances
+  $10^{-2}$, $10^{-4}$ and $10^{-6}$ (left to right); the
+  wall-clock time of each full sweep is given in the panel titles. The charts
+  are visually near-identical even at $10^{-2}$, where the count is already
+  uncertain: the tolerance buys certainty rather than appearance, cf.\
+  Fig.~\ref{fig:errorfield} and Table~\ref{tab:tolerance}. The study uses
+  the standard chart window $\wmax=10^{4}$ and the reduced
+  form~\eqref{eq:showcasered} of the characteristic
+  function.}\label{fig:tolerance}
+\end{figure}
+
+\begin{figure}[tb]
+  \centering
+  \maybefig{fig_error_field}{\linewidth}
+  \caption{Self-validating error: fields and histograms of the integer
+  residual $\varepsilon=|\Zraw-\operatorname{round}(\Zraw)|$,
+  cf.~\eqref{eq:eps}, for the three tolerances of
+  Fig.~\ref{fig:tolerance}. Dashed red line: the requested tolerance; dotted
+  black line: the practical rule $\varepsilon\approx100\,\mathrm{tol}$. The
+  residual scales with the tolerance uniformly over the parameter plane,
+  amplified by the accepted-step count of the frequency march, until the
+  tail truncated at $\wmax=10^{4}$ (of order $2\cdot10^{-5}$) becomes the
+  dominant error.}\label{fig:errorfield}
+\end{figure}
+
+\begin{table}[tb]
+  \centering
+  \caption{Tolerance study on the showcase system
+  (grid as in Fig.~\ref{fig:tolerance}): sweep time, integer residual
+  statistics, the number of grid points where the rounded count would be
+  ambiguous ($\varepsilon\ge1/4$), the number whose $\Zint$ actually deviates
+  from the $10^{-6}$-tolerance reference, and the subset of those that flip
+  the stable/unstable classification. The ``uncertain'' and ``wrong'' columns
+  measure genuinely different things: a skipped peak shifts $\Zraw$ by
+  exactly one and leaves it just as close to an integer, so a point can be
+  wrong while looking certain -- which is precisely why the
+  cross-check~\eqref{eq:crosscheck} is needed.}\label{tab:tolerance}
+  \maybeinput{tables/tab_tolerance.tex}
+\end{table}
+
+Figure~\ref{fig:tolerance} shows the identical chart computed with
+tolerances $10^{-2}$, $10^{-4}$ and $10^{-6}$, together with the
+measured sweep times, and Fig.~\ref{fig:errorfield} shows the corresponding
+integer-residual fields~\eqref{eq:eps}; the ladder deliberately starts
+beyond the safe range. Three observations matter for practice. First, the
+tolerance buys \emph{certainty}, not appearance. The panels are visually
+near-identical, yet the loosest one is genuinely broken: measured against
+the $10^{-6}$ reference, $10^{-2}$ miscounts $349$ of the $8000$ points and
+flips the stable/unstable classification on $89$
+(Table~\ref{tab:tolerance}). That failure is anything but silent -- the
+residual field of Fig.~\ref{fig:errorfield} lights up across the whole
+chart, with $210$ points beyond the rounding threshold -- and one decade
+into the safe range the problem is essentially gone: at $10^{-4}$ a single
+count of the $8000$ deviates, by one and without flipping the
+classification, and at $10^{-6}$ none. Second, while the integrator
+dominates the error budget, the largest integer residual of the chart tracks
+the requested tolerance with a roughly constant factor,
+$\max\varepsilon\approx100\,\mathrm{tol}$, Eq.~\eqref{eq:rule}, to within a factor of four (Table~\ref{tab:tolerance}; the mean residual is
+one to two orders of magnitude smaller); the factor is inherited from the
+accepted-step count of the march. At the standard window $\wmax=10^{4}$ the
+truncated tail of this velocity-feedback system, $\approx2\cdot10^{-5}$,
+takes over once the tolerance drops below $\sim10^{-6}$ -- the mean
+residual of the tightest panel settles exactly there -- and, because every
+error source surfaces in the same number, the diagnostic itself tells the
+user that the next decade of certainty must come from $\wmax$, not from the
+tolerance. The accuracy of $\Zint$ can therefore be \emph{prescribed}
+rather than discovered: a user who wants the count certain to $10^{-3}$
+asks for $10^{-5}$, which is exactly the package default. Third, the
+CPU-time premium of tightening by four decades is a factor of three
+(Table~\ref{tab:tolerance}), because the extra effort is spent only near
+the integrand peaks.
+
+For chart work a miscount is a milder error than a displaced boundary, and
+the two degrade differently: the count is a rounded quantity and fails
+discontinuously, whereas the tracked $\sest$ inherits the tolerance
+smoothly. The traced boundary is built from $\sest$ alone through the
+objective~\eqref{eq:objective}, and it stays a small fraction of one grid
+pixel away from the reference trace at every tolerance studied
+(\code{data/boundary\_shift.csv}). The practical recipe follows: a
+moderately loose tolerance ($10^{-3}$--$10^{-4}$) is an appropriate tool
+for an initial search -- the residual field will announce if it was too
+loose -- after which the interesting region is recomputed at the default
+setting to certify the counts, with the cross-check~\eqref{eq:crosscheck}
+guarding the one error mode near the boundary that the residual cannot
+reveal.
+
+A flagged pixel need not be recomputed with a different back-end: the march
+can repair itself (\code{peak\_repair=true}). The skipped peak is easy to
+\emph{locate} even when it is far too narrow to \emph{integrate}: its center
+is a minimum of $|\Dfun(\sigma+\ii\omega)|^2$, which dips toward that
+minimum over an $O(1)$ frequency range no matter how narrow the peak is. A
+root-finding callback stops the integrator at every such minimum,
+recomputes the phase increment of the crossing step by quadrature whose
+subdivision is forced into the located peak, and restarts the march at the
+minimum. Measured across the Hopf point of this chart
+(\code{data/peak\_repair.csv}): the plain march loses one count from
+$\Delta P = \RepairPlainFailDP$ inward, the Gauss--Kronrod back-end -- which
+must \emph{discover} the peak -- loses it silently at
+$\Delta P = \RepairDeepDP$, whereas the repaired march, which \emph{knows}
+where the peak is, still counts correctly there. The repair matters only in
+the immediate vicinity of the boundary, and arming it for a whole sweep
+costs $\approx\RepairCostFactor\times$ the plain march, which is why it is
+off by default; the economical pattern is to sweep plainly, flag
+with~\eqref{eq:crosscheck}, and re-evaluate only the flagged pixels with
+the repair on.
+
+
+\subsection{Chart-level cost, memory and cold start}\label{sec:performance-cost}
+
+\begin{table}[tb]
+  \centering
+  \caption{Warm chart-level costs (median of repeated runs,
+  \NumThreads{}~threads): full brute-force sweeps for three systems of
+  increasing evaluation cost, with allocated memory. The last column counts
+  the points at which the back-end's $\Zint$ deviates from a
+  tight-tolerance reference of the same chart: the adaptive back-ends are
+  required to match everywhere before their time is recorded, while the
+  fixed-step back-end -- whose resolution is set by hand -- reports its
+  misses.}\label{tab:gridtimings}
+  \resizebox{\linewidth}{!}{\maybeinput{tables/tab_grid_timings.tex}}
+\end{table}
+
+\begin{table}[tb]
+  \centering
+  \caption{The two operating points of the method on the same
+  $100\times100$ chart: the \emph{accurate} preset (the default tolerance)
+  and a \emph{fast} preset for first exploration. The last column counts
+  the points whose $\Zint$ differs from a tight reference, i.e.\ the price
+  of the fast preset, which buys roughly a factor of two in
+  time.}\label{tab:presets}
+  \maybeinput{tables/tab_presets.tex}
+\end{table}
+
+Two operating points matter in practice, and Table~\ref{tab:presets}
+separates them. With the \emph{accurate} preset -- the standard chart
+window $\wmax=10^{4}$ and the default $\mathrm{tol}=10^{-5}$ -- a complete
+$100\times100$ chart of a scalar characteristic function costs a fraction
+of a second, and every one of the ten thousand counts matches a tight
+reference. A \emph{fast} preset ($\mathrm{tol}=10^{-3}$) buys roughly a
+factor of two at the price of a few dozen boundary-adjacent miscounts --
+acceptable for a first look, and flagged by the diagnostics of
+Section~\ref{sec:showcase-tolerance}. Beyond the presets, two user choices
+dominate the cost on the showcase DDAE, spanning three orders of magnitude
+together: $\wmax$ (the velocity feedback's $\omega^{-1}$ ripple makes
+$\wmax=10^{6}$ cost some fifty times $\wmax=10^{4}$, while buying nothing
+-- the truncated tail is five orders below the rounding threshold) and the
+form of $\Dfun$ (the automatic extraction costs a factor of $\ExtractRatio$
+per evaluation over the hand-derived expression,
+Table~\ref{tab:extraction}). Choosing badly on both turns the $1.98$\,s
+chart of Table~\ref{tab:presets} into one of more than half an hour; this is what the
+asymmetric guidance of Section~\ref{sec:phaseode} means in practice.
+
+Table~\ref{tab:gridtimings} reports the cost of a \emph{complete}
+$100\times100$ chart -- ten thousand parameter points -- on a
+\CPUmodel{} (\NumThreads{} threads, \RAMgb\,GB RAM, Julia~\JuliaVersion,
+package revision \PkgCommit), with the per-point cost listed alongside so
+that other resolutions can be scaled directly. For scalar characteristic
+functions a full chart takes tens to hundreds of milliseconds, and the
+entire hybrid workflow (colored sweep plus MDBM boundary) finishes well
+inside one second -- genuinely interactive. The last column is worth a
+glance: the fixed-step back-end is the fastest entry for the delayed systems
+and gets thousands of the ten thousand counts wrong, for the reason given in
+Section~\ref{sec:alternatives}. The showcase DDAE is listed with its
+hand-derived characteristic function, as are all figures in this paper; what
+the automatic extraction of Section~\ref{sec:extraction} would cost instead
+is measured separately in Table~\ref{tab:extraction}. Memory stays modest throughout
+because the phase ODE carries a single scalar state and the sweep stores
+only the five result fields; no large matrices are formed at any point.
+Cold start is a one-time cost dominated by package loading: in a fresh Julia
+process, loading takes $5$--$8$\,s and the first thousand-point sweep
+$0.07$--$0.2$\,s thanks to the precompilation workload shipped with the
+package, after which every further chart runs at the warm speeds of
+Table~\ref{tab:gridtimings}.
+
+\subsection{A broader solver comparison}\label{sec:performance-zoo}
+
+\begin{figure}[tb]
+  \centering
+  \maybefig{fig_solver_zoo}{0.7\linewidth}
+  \caption{Error--cost Pareto fronts of eight integration back-ends on a
+  $40\times40$ sweep of the fourth-order benchmark oscillator
+  (\ref{app:gallery}): fixed-step trapezoid (step-count sweep),
+  adaptive Gauss--Kronrod, and six ODE solvers (tolerance
+  sweeps).}\label{fig:zoo}
+\end{figure}
+
+\begin{table}[tb]
+  \centering
+  \caption{Evaluations of $\Dfun$ needed for one parameter point at
+  tol~$=10^{-5}$, with the count of each entry verified against a
+  tight-tolerance reference before being recorded. What governs the cost is
+  how fast the delay-induced ripple of $\theta'$ decays, i.e.\ how far the
+  delayed terms sit below the leading power: $\omega^{-1}$ for the
+  velocity-feedback showcase, $\omega^{-3}$ for the fourth-order
+  position-feedback benchmark.}\label{tab:evals}
+  \maybeinput{tables/tab_evals.tex}
+\end{table}
+
+Table~\ref{tab:evals} isolates what actually drives the cost. The decisive
+quantity is not the back-end but the decay rate of the phase ripple, set by
+how far the delayed terms sit below the leading power of $\Dfun$. Where the
+ripple decays fast (delayed \emph{position} feedback,
+$\theta'\sim\omega^{-3}$), quadrature recognizes the negligible tail panel
+by panel and finishes about $2.5$ times cheaper than the march; where it
+decays slowly (delayed \emph{velocity} feedback, $\theta'\sim\omega^{-1}$),
+the ranking reverses and the march is some three times cheaper. Neither
+back-end dominates, and the lesson for a user is to spend attention on
+$\wmax$ and on the structure of the feedback, not on the choice of
+integrator. One implementation detail underpins the quadrature numbers: the
+Gauss--Kronrod back-end is seeded with logarithmically spaced interior
+breakpoints, one per two frequency decades. Without them the first
+$G_7$--$K_{15}$ panel spans the entire window, its lowest node lands above
+the whole resonance region for $\wmax=10^{6}$, and the routine returns
+$\Zraw=n/2$ having never seen a single root -- with an integer residual of
+\emph{exactly} zero, since nothing about the quadrature failed. The
+breakpoints cost a few dozen extra evaluations and remove the failure mode
+entirely.
+
+Figure~\ref{fig:zoo} extends the comparison to a wider selection of ODE
+solvers on the fourth-order benchmark system. The fixed-step trapezoid is
+\emph{dominated everywhere}: even at $3\cdot10^{4}$ steps -- more than an
+order of magnitude slower than the adaptive default -- its worst error over
+the chart remains several roots, because a uniform grid cannot resolve a
+peak that narrows without bound as a root approaches the line. All adaptive
+methods follow their tolerance; higher-order pairs dominate at tight
+tolerances, and the linearly implicit pair is dominated. The spread between
+the \emph{adaptive}
+methods is far smaller than the gap that separates all of them from a fixed
+grid, which is the practical message of this section.
+\subsection{Narrow number formats}\label{app:precision}
+
+\begin{table}[tb]
+  \centering
+  \caption{The discrete march with $\Dfun$ evaluated in narrow number formats
+  ($400\times400$ chart of the fourth-order benchmark, $\wmax=15$, best of four
+  frequency scalings $\lam=\Omega\mu$ per format; the march itself runs in
+  Float32). \emph{Flagged} points carry a sub-resolution or residual flag and
+  are re-checked in a wider format; \emph{failed} points did not reach $\wmax$.
+  $^\ast$Emulated: every operation is rounded to the format.}\label{tab:precision}
+  \maybeinput{tables/tab_precision.tex}
+\end{table}
+
+Since the march needs only the
+\emph{phase} of $\Dfun$ to a fraction of a radian, the characteristic function
+can even be evaluated in half precision (Table~\ref{tab:precision}). Float16
+is accurate wherever no root is close to the line: after rescaling the
+frequency into its range it yields, on the full-HD chart of
+Table~\ref{tab:gpu}, $\GpuFsixteenWrong\,\%$ wrong counts that are \emph{all}
+flagged, and $\GpuFsixteenFlagged\,\%$ flagged points in total; re-checking the
+flagged points in Float32 -- in place on the device: gather, march, scatter --
+restores the exact chart. It does not, however, make the chart faster: at 8K
+the Float16 evaluation takes $1.01$--$1.12$ times the Float32 time on all four
+cards (the factor of three of the T4 at full HD is an artifact of its clock
+control). Scalar half-precision instructions issue at the single-precision
+rate -- a gain would require packing pairs of values into vector registers --
+the elementary functions are evaluated by promotion to Float32, and the
+conversions have a reduced throughput of their own. (An earlier version of the
+kernel, which passed the dual numbers through local memory, did run three
+times faster in Float16, \code{gpu/results/interactive\_G4.csv}; the gain came
+from the smaller memory traffic and disappeared once that traffic was
+removed.) Float32 is therefore the production format on every card measured,
+and the value of the narrow formats lies in what they reveal about the method:
+how little precision the phase needs. BFloat16, with only seven mantissa bits,
+flags $14\,\%$ of the chart, and the 8-bit and 4-bit formats are useless for
+this purpose: with one to three mantissa bits even the \emph{parameters} of a
+chart are quantized to a handful of distinct values per octave, so that
+$95$--$100\,\%$ of the points are flagged and up to one in ten counts is
+wrong; Float4 gets every count wrong. Load balancing, finally, does not pay:
+the dynamic work queue of Fig.~\ref{fig:parallel}, in which threads that finish
+early fetch new points, is $1.3$--$1.9$ times \emph{slower} than one thread per
+point on every card, because the cost per point varies only moderately and the
+hardware scheduler absorbs the difference at a lower overhead than the queue.

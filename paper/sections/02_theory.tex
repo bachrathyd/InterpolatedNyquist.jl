@@ -52,24 +52,6 @@ in general not an integer. The counting formula below needs
 $n$, and Section~\ref{sec:phaseode} shows that it can be estimated
 numerically without any structural knowledge.
 
-\paragraph{Fractional orders and the branch cut.} Fractional powers are the
-one class in which the choice of integration line is a question of validity
-rather than of cost. The principal branch of $\lam^{\mu}$ is analytic on the
-complex plane cut along the negative real axis, and $\Dfun$ inherits that cut
-(measured across it, $\Dfun$ jumps by $\FracJump$ for the fractional
-controller of Appendix~\ref{app:gallery}, while across the imaginary axis the
-jump is identically zero). Since the cut lies entirely outside the closed
-right half-plane, the choice $\sigma=0$ is admissible -- which is what makes
-the whole class available to the method. The branch \emph{point} at $\lam=0$
-lies on the contour, but the resulting integrand singularity
-$\sim\omega^{\mu-1}$ is integrable for $\mu>0$ and contributes nothing
-provided $\Dfun(0)\neq0$; when $\Dfun(0)=0$ the origin is itself a root on
-the contour and the package reports the invalid marker of
-Section~\ref{sec:integerness} rather than inventing a number. A
-\emph{shifted} line ($\sigma<0$), however, encloses the segment $[\sigma,0]$
-of the cut, the argument principle does not apply, and
-Appendix~\ref{app:gallery} demonstrates what that costs.
-
 \subsection{Counting unstable roots on a half-line}\label{sec:counting}
 
 Let the integration line $\lam=\sigma+\ii\omega$ be free of characteristic
@@ -131,15 +113,18 @@ rounding still recovers the exact count. As $\beta_\sigma\to1$ (essential
 instability approaching) the bound saturates and the integer residual of
 Section~\ref{sec:integerness} grows accordingly -- the diagnostic degrades
 exactly where the answer itself becomes fragile (see the acceleration-feedback
-case study A.6 in Appendix~\ref{app:gallery}). A shifted line with
+case study A.6 in \ref{app:gallery}). A shifted line with
 $\beta_\sigma\ge1$ lies left of the essential spectrum, and no count is
 defined there. \emph{(iii)~Analyticity right of the line.} Fractional
 powers $\lam^{\alpha}$ are taken on the principal branch, whose cut lies on
 the negative real axis; for $\sigma\ge0$ the region right of the line is then
-free of branch points, and~\eqref{eq:count} applies verbatim. A shifted line
-with $\sigma<0$, however, encloses part of the cut, so the argument principle
-does not apply there; the fractional case studies of
-Appendix~\ref{app:gallery} show how the violation announces itself.
+free of branch points, and~\eqref{eq:count} applies verbatim; the branch
+point at $\lam=0$ lies on the line, but its integrand singularity
+$\sim\omega^{\mu-1}$ is integrable for $\mu>0$ provided $\Dfun(0)\neq0$
+(otherwise the origin is a root on the line and no count is defined). A
+shifted line with $\sigma<0$, however, encloses part of the cut, so the
+argument principle does not apply there; the fractional case studies of
+\ref{app:gallery} show how the violation announces itself.
 
 \subsection{Why the naive evaluation is impractical}\label{sec:naive}
 

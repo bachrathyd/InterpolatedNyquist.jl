@@ -125,118 +125,22 @@ truncation is exposed by the integer-residual diagnostic, never hidden.
 
 \subsection{Tolerance as a universal accuracy dial}\label{sec:showcase-tolerance}
 
-\begin{figure}[tb]
-  \centering
-  \maybefig{fig_tolerance_charts}{\linewidth}
-  \caption{The showcase chart computed with solver tolerances
-  $10^{-2}$, $10^{-4}$ and $10^{-6}$ (left to right); the
-  wall-clock time of each full sweep is given in the panel titles. The charts
-  are visually near-identical even at $10^{-2}$, where the count is already
-  uncertain: the tolerance buys certainty rather than appearance, cf.\
-  Fig.~\ref{fig:errorfield} and Table~\ref{tab:tolerance}. The study uses
-  the standard chart window $\wmax=10^{4}$ and the reduced
-  form~\eqref{eq:showcasered} of the characteristic
-  function.}\label{fig:tolerance}
-\end{figure}
-
-\begin{figure}[tb]
-  \centering
-  \maybefig{fig_error_field}{\linewidth}
-  \caption{Self-validating error: fields and histograms of the integer
-  residual $\varepsilon=|\Zraw-\operatorname{round}(\Zraw)|$,
-  cf.~\eqref{eq:eps}, for the three tolerances of
-  Fig.~\ref{fig:tolerance}. Dashed red line: the requested tolerance; dotted
-  black line: the practical rule $\varepsilon\approx100\,\mathrm{tol}$. The
-  residual scales with the tolerance uniformly over the parameter plane,
-  amplified by the accepted-step count of the frequency march, until the
-  tail truncated at $\wmax=10^{4}$ (of order $2\cdot10^{-5}$) becomes the
-  dominant error.}\label{fig:errorfield}
-\end{figure}
-
-\begin{table}[tb]
-  \centering
-  \caption{Tolerance study on the showcase system
-  (grid as in Fig.~\ref{fig:tolerance}): sweep time, integer residual
-  statistics, the number of grid points where the rounded count would be
-  ambiguous ($\varepsilon\ge1/4$), the number whose $\Zint$ actually deviates
-  from the $10^{-6}$-tolerance reference, and the subset of those that flip
-  the stable/unstable classification. The ``uncertain'' and ``wrong'' columns
-  measure genuinely different things: a skipped peak shifts $\Zraw$ by
-  exactly one and leaves it just as close to an integer, so a point can be
-  wrong while looking certain -- which is precisely why the
-  cross-check~\eqref{eq:crosscheck} is needed.}\label{tab:tolerance}
-  \maybeinput{tables/tab_tolerance.tex}
-\end{table}
-
-Figure~\ref{fig:tolerance} shows the identical chart computed with
-tolerances $10^{-2}$, $10^{-4}$ and $10^{-6}$, together with the
-measured sweep times, and Fig.~\ref{fig:errorfield} shows the corresponding
-integer-residual fields~\eqref{eq:eps}; the ladder deliberately starts
-beyond the safe range. Three observations matter for practice. First, the
-tolerance buys \emph{certainty}, not appearance. The panels are visually
-near-identical, yet the loosest one is genuinely broken: measured against
-the $10^{-6}$ reference, $10^{-2}$ miscounts $349$ of the $8000$ points and
-flips the stable/unstable classification on $89$
-(Table~\ref{tab:tolerance}). That failure is anything but silent -- the
-residual field of Fig.~\ref{fig:errorfield} lights up across the whole
-chart, with $210$ points beyond the rounding threshold -- and one decade
-into the safe range the problem is essentially gone: at $10^{-4}$ a single
-count of the $8000$ deviates, by one and without flipping the
-classification, and at $10^{-6}$ none. Second, while the integrator
-dominates the error budget, the largest integer residual of the chart tracks
-the requested tolerance with a roughly constant factor,
+Computing the same chart with the phase ODE at tolerances $10^{-2}$, $10^{-4}$
+and $10^{-6}$ (\ref{app:tolerance}) shows that the tolerance buys
+\emph{certainty}, not appearance: the three charts look alike, yet $10^{-2}$
+miscounts $349$ of the $8000$ points against the $10^{-6}$ reference and flips
+the classification on $89$ -- a failure the residual field announces over the
+whole chart -- while $10^{-4}$ leaves a single count off by one and $10^{-6}$
+none, for a factor of three in time. While the integrator dominates the error,
+the largest residual of a chart tracks the tolerance,
 \begin{equation}\label{eq:rule}
-  \max\varepsilon \;\approx\; 100 \cdot \mathrm{tol}
+  \max\varepsilon \;\approx\; 100 \cdot \mathrm{tol},
 \end{equation}
-to within a factor of four (Table~\ref{tab:tolerance}; the mean residual is
-one to two orders of magnitude smaller); the factor is inherited from the
-accepted-step count of the march. At the standard window $\wmax=10^{4}$ the
-truncated tail of this velocity-feedback system, $\approx2\cdot10^{-5}$,
-takes over once the tolerance drops below $\sim10^{-6}$ -- the mean
-residual of the tightest panel settles exactly there -- and, because every
-error source surfaces in the same number, the diagnostic itself tells the
-user that the next decade of certainty must come from $\wmax$, not from the
-tolerance. The accuracy of $\Zint$ can therefore be \emph{prescribed}
-rather than discovered: a user who wants the count certain to $10^{-3}$
-asks for $10^{-5}$, which is exactly the package default. Third, the
-CPU-time premium of tightening by four decades is a factor of three
-(Table~\ref{tab:tolerance}), because the extra effort is spent only near
-the integrand peaks.
-
-For chart work a miscount is a milder error than a displaced boundary, and
-the two degrade differently: the count is a rounded quantity and fails
-discontinuously, whereas the tracked $\sest$ inherits the tolerance
-smoothly. The traced boundary is built from $\sest$ alone through the
-objective~\eqref{eq:objective}, and it stays a small fraction of one grid
-pixel away from the reference trace at every tolerance studied
-(\code{data/boundary\_shift.csv}). The practical recipe follows: a
-moderately loose tolerance ($10^{-3}$--$10^{-4}$) is an appropriate tool
-for an initial search -- the residual field will announce if it was too
-loose -- after which the interesting region is recomputed at the default
-setting to certify the counts, with the cross-check~\eqref{eq:crosscheck}
-guarding the one error mode near the boundary that the residual cannot
-reveal.
-
-A flagged pixel need not be recomputed with a different back-end: the march
-can repair itself (\code{peak\_repair=true}). The skipped peak is easy to
-\emph{locate} even when it is far too narrow to \emph{integrate}: its center
-is a minimum of $|\Dfun(\sigma+\ii\omega)|^2$, which dips toward that
-minimum over an $O(1)$ frequency range no matter how narrow the peak is. A
-root-finding callback stops the integrator at every such minimum,
-recomputes the phase increment of the crossing step by quadrature whose
-subdivision is forced into the located peak, and restarts the march at the
-minimum. Measured across the Hopf point of this chart
-(\code{data/peak\_repair.csv}): the plain march loses one count from
-$\Delta P = \RepairPlainFailDP$ inward, the Gauss--Kronrod back-end -- which
-must \emph{discover} the peak -- loses it silently at
-$\Delta P = \RepairDeepDP$, whereas the repaired march, which \emph{knows}
-where the peak is, still counts correctly there. The repair matters only in
-the immediate vicinity of the boundary, and arming it for a whole sweep
-costs $\approx\RepairCostFactor\times$ the plain march, which is why it is
-off by default; the economical pattern is to sweep plainly, flag
-with~\eqref{eq:crosscheck}, and re-evaluate only the flagged pixels with
-the repair on.
-
+within a factor of four, the factor being inherited from the accepted-step
+count; below $\sim10^{-6}$ the truncated tail at $\wmax=10^{4}$ takes over, and
+the residual itself tells the user that the next decade must come from $\wmax$.
+The traced boundary, built from $\sest$ rather than from the rounded count,
+stays a small fraction of a pixel from the reference at every tolerance.
 
 \subsection{Rightmost roots and their refinement}\label{sec:showcase-roots}
 
@@ -246,7 +150,7 @@ the repair on.
   \caption{The optional root refinement, judged by method-independent metrics
   on two systems -- a smooth quasi-polynomial (the showcase, top) and a
   rational frequency-response function with poles (the turning-lobe example of
-  Appendix~\ref{app:gallery}, middle). Error \emph{fields}: per-pixel
+  \ref{app:gallery}, middle). Error \emph{fields}: per-pixel
   $\log_{10}|\Real\lam_{\mathrm{dom}}-\sigma_{\mathrm{SD}}|$, the deviation of
   the dominant root's real part from an independent semi-discretization
   reference, for the raw estimate and the four polishes. Error \emph{bars}

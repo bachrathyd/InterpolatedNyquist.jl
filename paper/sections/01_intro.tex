@@ -76,20 +76,15 @@ the imaginary axis. The multi-dimensional bisection method
 (MDBM)~\cite{bachrathy2012bisection,bachrathy2025mdbm} traces these
 one-dimensional solution manifolds very efficiently. The D-curves, however,
 are \emph{not} the stability boundaries: they merely mark root crossings,
-and the number of unstable roots on either side remains unknown -- and
-automating that decision in general is not trivial (triangulation into
-closed cells, filtering of spurious slivers). For classical models the
-decision is settled by root-crossing directions from a single test point per
-cell~\cite{stepan1989retarded,olgac2002exact}, and for turning the stability
-boundary is the explicit lower envelope of the
-lobes~\cite{tlusty1963stability,stepan2001modelling}. The turning
-stability-lobe diagram nevertheless illustrates an inefficiency: towards low
-spindle speeds the lobe structure becomes infinitely dense, and an ever
-smaller fraction of the D-curve length bounds the stable region
-(cf.\ Appendix~\ref{app:gallery})~\cite{insperger2003stability,bachrathy2013improved};
-for models with several parameters and delays, where no explicit envelope
-exists, the method spends most of its effort on curves that never bound the
-stable region.
+and the number of unstable roots on either side must be decided separately --
+by root-crossing directions from a test point per
+cell~\cite{stepan1989retarded,olgac2002exact}, or, for turning, as the lower
+envelope of the lobes~\cite{tlusty1963stability,stepan2001modelling}. Towards
+low spindle speeds the lobes become infinitely dense and an ever smaller
+fraction of the D-curve length bounds the stable
+region~\cite{insperger2003stability,bachrathy2013improved}; for models with
+several parameters and delays most of the effort goes to curves that never
+bound it.
 
 The second strategy counts the unstable roots directly by the argument
 principle, i.e., by the winding number of $\Dfun(\ii\omega)$ -- the
@@ -105,7 +100,14 @@ argument-increment criteria for neutral systems~\cite{zitek2008argument,vyhlidal
 and, closest to the present work, Xu and Wang~\cite{xu2014exact} and Xu,
 St\'ep\'an and Wang~\cite{xu2016delay} evaluated the argument-principle
 ``testing integral'' numerically, observing that a rough quadrature suffices
-because the result must be an integer. The appeal of root counting is that
+because the result must be an integer; Xu and Wang also gave a scheme for the
+rightmost roots built on that integral~\cite{xu2014exact}.
+% TODO (author): check this sentence against xu2014exact (full text not accessed here).
+Outside the delay literature, winding numbers of analytic functions are
+computed routinely in the spectral stability analysis of travelling waves,
+where the Evans function is evaluated on an adaptively refined contour that
+keeps the relative change between consecutive points below a
+tolerance~\cite{barker2018computing,barker2015stablab}. The appeal of root counting is that
 the answer $\Zint(\vect p)$ is exactly the quantity a stability chart needs.
 Its curse is twofold. First, $\Zint(\vect p)$ is a piecewise-constant integer
 field: it jumps abruptly across the stability boundaries, so it cannot be
@@ -143,7 +145,10 @@ directly onto GPUs, where single precision suffices. Measured on two CPUs and
 four GPUs, its chart time is proportional to $1/n$ in the number of threads
 over several decades up to the saturation of the device, and a model with the
 single-thread cost and the effective parallelism of the device estimates it
-for other hardware.
+for other hardware. On a high-end GPU a full-HD chart is recomputed while a
+parameter slider moves; the same kernel runs in any web browser (WebGPU) and on
+rented cloud GPUs, where brute-force scans of four- to six-dimensional
+parameter spaces become a matter of minutes to hours.
 (iii)~The location of the
 characteristic root closest to the integration line -- normally the rightmost
 root -- is estimated \emph{during the same sweep} at negligible extra cost; the
@@ -183,10 +188,19 @@ by-product that enables interpolation and boundary tracing, and a far wider
 class of demonstrated applications; compared with contour-moment methods such
 as ZEAL~\cite{kravanja2000zeal}, it needs no bounded search region and is
 tailored to the half-line stability sweep. Adaptive phase unwrapping itself
-is classical~\cite{tribolet1977new,ying1988reliable}; what the discrete march
-adds is its combination with exact slopes of an arbitrary user function, the
-in-stream root estimate, the decision of sub-resolution transitions by the
-side of that root, and a fixed-state formulation that runs as a GPU kernel.
+is classical: the acceptance test of the discrete march -- the observed phase
+increment must agree with the trapezoidal integral of the exact phase slope --
+is Tribolet's consistency check~\cite{tribolet1977new}, and keeping the
+increments resolved by adaptive sampling is the device of Ying and
+Katz~\cite{ying1988reliable} and of the Evans-function
+codes~\cite{barker2018computing,barker2015stablab}. What the discrete march
+adds is a step-size controller that also \emph{grows} the step (rather than
+only subdividing a fixed grid) on the semi-infinite frequency axis of a
+transcendental function, exact slopes of an arbitrary user function by
+automatic differentiation, the in-stream root estimate -- obtained from the
+minima of $|\Dfun|$ on the samples already taken, without further evaluations
+of $\Dfun$ -- the decision of sub-resolution transitions by the side of that
+root, and a fixed-state formulation that runs as a GPU kernel.
 
 The paper is organized as follows. Section~\ref{sec:theory} summarizes the
 system classes and the argument-principle counting formula.
@@ -200,7 +214,9 @@ through the complete workflow on a constrained two-degree-of-freedom system
 with delayed control, Section~\ref{sec:performance} quantifies accuracy, CPU
 time and memory, including a comparison with the semi-discretization method,
 Section~\ref{sec:parallel} measures how the cost divides among CPU and GPU
-threads and what that means for real-time charts and for number formats,
-and Section~\ref{sec:conclusion} concludes. Appendix~\ref{app:gallery} collects twelve
-further case studies from all supported system classes, and
-Appendix~\ref{app:unwrap} lists the discrete march in algorithmic form.
+threads and what that means for real-time charts, browsers and cloud GPUs,
+and Section~\ref{sec:conclusion} concludes. \ref{app:gallery} collects twelve
+further case studies from all supported system classes,
+\ref{app:unwrap} lists the discrete march in algorithmic form, and
+\ref{app:backends} collects the detailed measurements of the integration
+back-ends, of the tolerance and of narrow number formats.
