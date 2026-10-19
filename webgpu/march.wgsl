@@ -40,6 +40,8 @@ struct Params {
     z0: f32, dz: f32,           // 3D grids: the third axis parameter PZ = z0 + iz dz
     nys: u32, lev: u32,         // rows per z slice (ny); the grid has ny * nz rows
                                 // lev: progressive level, (stride − 1) | skip << 16 (0: every point)
+    rtolI: f32, sfloor: f32,    // stochastic mode (smarch.wgsl): integral tolerance, decay-rate floor
+    pa: f32, pb: f32,
 }
 
 struct Res {

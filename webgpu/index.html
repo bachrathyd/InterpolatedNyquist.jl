@@ -224,6 +224,8 @@
       <h2>Display and march</h2>
       <label class="row" title="Exact: the 8 deepest |D| minima are polished by damped Newton steps in the complex plane, σ = the largest real part (1.5-2x the cost of fast). Fast: the first-order estimate of the 4 deepest minima."><span><b>σ of stable points</b></span>
         <select id="mode"><option value="exact">exact root (refined, Newton-polished)</option><option value="fast">fast (first-order σ)</option></select></label>
+      <label class="row" id="scolRow" hidden title="Stochastic state form: colour the mean-square stable points by the stationary variance, by the decay rate of the second moment (bisection on shifted lines: about 10x the cost), or by σ of the rightmost root of the mean (deterministic march, noise ignored)"><span><b>Colour by (stochastic)</b></span>
+        <select id="scol"><option value="var">variance (log₁₀ Var)</option><option value="decay">second-moment decay rate λ_MS</option><option value="sigma">first moment: σ of the rightmost root</option></select></label>
       <label class="check"><input type="checkbox" id="live" checked> Recompute while dragging sliders</label>
       <label class="check"><input type="checkbox" id="bnd" checked> White stability boundaries</label>
       <label class="check"><input type="checkbox" id="flags"> Tint flagged points (magenta)</label>
@@ -258,7 +260,7 @@
       <canvas id="axes"></canvas>
     </div>
     <div class="legend" id="legendSto" hidden>
-      <span class="lg"><span class="bar"></span> <span>mean-square stable: log₁₀ Var, <span id="vrangeLab">auto</span></span></span>
+      <span class="lg"><span class="bar"></span> <span id="legSto1">mean-square stable: log₁₀ Var, <span id="vrangeLab">auto</span></span></span>
       <span class="lg"><span class="sw" style="background:#ffaa3c"></span><span class="sw" style="background:#aa5000"></span> mean-square unstable (r₀ ≥ 1, mean stable)</span>
       <span class="lg"><span class="sw" style="background:#fcbba1"></span><span class="sw" style="background:#cb181d"></span> mean unstable (Z ≥ 1)</span>
       <span class="lg"><span class="sw" style="background:#fff;border:1px solid var(--line)"></span> mean-square boundary</span>

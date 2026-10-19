@@ -48,6 +48,7 @@ const state = {
   surf: 0.22,              // 3D: opacity of the boundary surface
   smooth: true,            // 3D: boundary as a marching-tetrahedra mesh (else ray-marched)
   cam: defaultCamera(),
+  scol: ['var', 'sigma', 'decay'].includes(params.get('col')) ? params.get('col') : 'var',   // stochastic: colour by
 };
 const slots = new Map();
 let engine = null;
@@ -295,8 +296,9 @@ function makeJob(slot, opts = {}) {
     key: slot.key, code: m.code(ix, iy, iz), julia: iz < 0 && m.julia ? m.julia(ix, iy) : null,
     branch0, exact: opts.exact ?? state.exact, c: vals, npow,
     nx, ny, nz, xr, yr, zr, xl: names[ix], yl: names[iy], zl: iz >= 0 ? names[iz] : null, hlines: hl, smin: slot.smin,
-    march: { wmax, tol, hmax, wband: Number.isFinite(hmax) ? wband : 0, w0, ...(m.stochastic ? { qtrust: rtolI } : {}) }, info, warns,
-    stoch: !!m.stochastic,
+    march: { wmax, tol, hmax, wband: Number.isFinite(hmax) ? wband : 0, w0, ...(m.stochastic ? { rtolI, sfloor: slot.smin } : {}) }, info, warns,
+    smodel: !!m.stochastic, stoch: !!m.stochastic && state.scol !== 'sigma', scol: m.stochastic ? state.scol : null,
+    entry: !m.stochastic || state.scol === 'sigma' ? 'main' : state.scol === 'decay' ? 'main_smd' : 'main_sm',
     auto: !opts.size && !res, counts: [cnt(ix), cnt(iy), cnt(iz)],
   };
 }
@@ -305,7 +307,7 @@ function marchInfo(job) {
   const m = job.march;
   const cap = Number.isFinite(m.hmax) ? `, h ≤ ${fmt(m.hmax)}${Number.isFinite(m.wband) ? ` for ω < ${fmt(m.wband)}` : ' on the whole line'}` : '';
   const g = is3D(job) ? `${job.nx}×${job.ny}×${job.nz}` : `${job.nx}×${job.ny}`;
-  return `${g}${job.auto ? ' (auto)' : ''} · ${job.info}, ω_max = ${fmt(m.wmax)}, tol = ${fmt(m.tol)}${cap}${job.branch0 ? ', branch point at 0' : ''} · ${job.stoch ? 'second moment (2-pass march)' : job.exact ? 'exact roots' : 'fast (first-order σ)'}`;
+  return `${g}${job.auto ? ' (auto)' : ''} · ${job.info}, ω_max = ${fmt(m.wmax)}, tol = ${fmt(m.tol)}${cap}${job.branch0 ? ', branch point at 0' : ''} · ${job.scol === 'decay' ? 'second-moment decay rate (bisection on shifted lines)' : job.stoch ? 'second moment (2-pass march)' : job.exact ? 'exact roots' : 'fast (first-order σ)'}${job.scol === 'sigma' ? ' · first moment only (noise ignored)' : ''}`;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -348,7 +350,7 @@ function sizeFor(N, d3, aspect) {
 
 async function autoSize(job) {
   const d3 = is3D(job);
-  const key = `${job.code}|${job.exact}|${job.branch0}|${d3}`;
+  const key = `${job.code}|${job.exact}|${job.branch0}|${d3}|${job.entry}`;
   const skey = `${job.key}|${job.xl}|${job.yl}|${job.zl}|${job.counts.join()}`;
   if (auto.key !== key) {
     const p = await probe(job);
@@ -951,6 +953,11 @@ function bindChartControls() {
     request();
   });
   $('mode').value = state.exact ? 'exact' : 'fast';
+  $('scol').value = state.scol;
+  $('scol').addEventListener('change', () => {
+    state.scol = $('scol').value;
+    request();
+  });
   $('mode').addEventListener('change', () => {
     state.exact = $('mode').value === 'exact';
     if (!state.exact) countOnce('exact-off');
@@ -992,9 +999,11 @@ function displayFactor(nx) {
 }
 
 function viewOpts(nx) {
-  const st = !!(lastJob && lastJob.stoch);
+  const st = lastJob && lastJob.stoch ? (lastJob.scol === 'decay' ? 2 : 1) : 0;
   const vr = cur().vrange || [-6, 0];
-  return { f: displayFactor(nx), boundary: state.boundary, flags: state.flags, smin: cur().smin, zcap: ZCAP, ds: shownDs, stoch: st, vlo: vr[0], vhi: vr[1] };
+  // decay rate λ_MS (≈ 2σ without multiplicative noise): coloured over [2 σ floor, 0]
+  const smin = st === 2 ? 2 * cur().smin : cur().smin;
+  return { f: displayFactor(nx), boundary: state.boundary, flags: state.flags, smin, zcap: ZCAP, ds: shownDs, stoch: st, vlo: vr[0], vhi: vr[1] };
 }
 
 // stochastic mode: colour range of log10 Var = the 2 % / 98 % quantiles of the mean-square stable
@@ -1009,11 +1018,19 @@ function updateVRange(slot, rb) {
   let lo = v[Math.floor(0.02 * (v.length - 1))], hi = v[Math.ceil(0.98 * (v.length - 1))];
   if (!(hi > lo + 1e-3)) { lo -= 0.5; hi += 0.5; }
   slot.vrange = [lo, hi];
-  $('vrangeLab').textContent = `10^${lo.toFixed(2)} … 10^${hi.toFixed(2)}`;
+  if ($('vrangeLab')) $('vrangeLab').textContent = `10^${lo.toFixed(2)} … 10^${hi.toFixed(2)}`;
 }
-function showLegend(stoch) {
-  $('legendDet').hidden = stoch;
-  $('legendSto').hidden = !stoch;
+function showLegend(job) {
+  const st = !!job.stoch;
+  $('legendDet').hidden = st;
+  $('legendSto').hidden = !st;
+  $('scolRow').hidden = !job.smodel;
+  if (st) {
+    $('legSto1').innerHTML = job.scol === 'decay'
+      ? `mean-square stable: decay rate λ_MS of E[x²] (E[x²] − its limit ∝ e^{λ_MS t}), ${fmt(2 * cur().smin)} … 0`
+      : 'mean-square stable: log₁₀ Var, <span id="vrangeLab">auto</span>';
+    if (job.scol !== 'decay' && cur().vrange) $('vrangeLab').textContent = `10^${cur().vrange[0].toFixed(2)} … 10^${cur().vrange[1].toFixed(2)}`;
+  }
 }
 
 let ctx = null;
@@ -1062,8 +1079,7 @@ async function pump() {
         continue;
       }
       slot.jobWarns = job.warns;
-      showLegend(job.stoch);
-      if (job.stoch && slot.vrange) $('vrangeLab').textContent = `10^${slot.vrange[0].toFixed(2)} … 10^${slot.vrange[1].toFixed(2)}`;
+      showLegend(job);
       $('orderInfo').textContent = job.info;
       $('wgslOut').textContent = job.code.trim();
       try {
@@ -1162,7 +1178,7 @@ async function renderProgressive(job, slot) {
     levels++;
     shownDs = s;
     lastJob = job;
-    if (job.stoch && first && !slot.vrange) updateVRange(slot, await engine.readback());
+    if (job.stoch && job.scol === 'var' && first && !slot.vrange) updateVRange(slot, await engine.readback());
     engine.draw(ctx, viewOpts(job.nx));
     updatePreview();
     drawAxes();
@@ -1184,7 +1200,7 @@ async function renderProgressive(job, slot) {
   if (done) {
     const rb = await engine.readback();
     last = { ...rb, xr: job.xr, yr: job.yr, xl: job.xl, yl: job.yl };
-    if (job.stoch) { updateVRange(slot, rb); engine.draw(ctx, viewOpts(job.nx)); drawAxes(); }
+    if (job.stoch && job.scol === 'var') { updateVRange(slot, rb); engine.draw(ctx, viewOpts(job.nx)); drawAxes(); }
     showStats(last);
   }
 }
@@ -1227,7 +1243,7 @@ async function renderOnce(job, slot) {
   $('marchInfo').textContent = marchInfo(job);
   const rb = await engine.readback();
   last = { ...rb, xr: job.xr, yr: job.yr, xl: job.xl, yl: job.yl };
-  if (job.stoch) updateVRange(slot, rb);
+  if (job.stoch && job.scol === 'var') updateVRange(slot, rb);
   if (d3) {
     countOnce('3d-view');
     countOnce('3d-view/' + job.key);
@@ -1254,7 +1270,7 @@ function showStats(L) {
   const n = L.nx * L.ny;
   let ev = 0, st = 0, fl = 0;
   for (let i = 0; i < n; i++) {
-    ev += 1 + (lastJob && lastJob.stoch ? L.steps[i] & 0x1ffff : L.steps[i]);
+    ev += 1 + (lastJob && lastJob.stoch && lastJob.scol === 'var' ? L.steps[i] & 0x1ffff : L.steps[i]);
     if (countOf(L, i) === 0) st++;
     if (L.flags[i] & 15) fl++;
   }
@@ -1591,9 +1607,11 @@ function hover(p) {
   const Z = countOf(last, i);
   if (lastJob && lastJob.stoch) {
     const fg = last.flags[i];
-    const ev = last.steps[i] & 0x1ffff;
+    const dec = lastJob.scol === 'decay';
+    const ev = dec ? last.steps[i] : last.steps[i] & 0x1ffff;
     let t;
     if (Z !== 0) t = Z < 0 ? 'march failed' : `first moment unstable (Z = ${Z})`;
+    else if (dec && (fg & 256)) t = (fg & 16384) ? `λ_MS < ${fmt(last.s[i])} (below the colour floor)` : `λ_MS ≈ ${fmt(last.s[i])} (decay rate of E[x²]; mean-square stable)`;
     else if (fg & 4096) t = `Var(${cur().model?.stochastic?.output ?? 'x'}) = ${fmt(Math.pow(10, last.s[i]))} · r₀ = ${fmt((last.steps[i] >>> 17) / 32767)} (mean-square stable)`;
     else if (fg & 2048) t = `mean-square UNSTABLE: r₀ = ${fmt(last.s[i])} ≥ 1 (first moment stable, Z = 0)`;
     else t = 'Z = 0, second-moment march failed';
@@ -1809,6 +1827,11 @@ const STO_REF = [
   { key: 'spd', p: { P: 0.5, D: 0.4, τ: 0.5, ζ: 0.05, σₘ: 0.6, σₐ: 0.1 }, Var: 0.026798, r0: 0.3352, src: 'Julia SDDE (MC 0.02656)' },
   { key: 'spd', p: { P: 0.8, D: 0.5, τ: 0.6, ζ: 0.05, σₘ: 0.9, σₐ: 0.1 }, Var: NaN, r0: 96.6515, src: 'Julia SDDE (MS unstable; MC diverges)' },
 ];
+// decay rate λ_MS: Julia ms_exponent / ms_exponent_sdde (bisection on shifted lines)
+const STO_DECAY = [
+  { key: 'sturning', p: { Ω: 0.6, K: 0.2, σ: 0.7, ζ: 0.1 }, lam: -0.00604 },
+  { key: 'spd', p: { P: 0.5, D: 0.4, τ: 0.5, ζ: 0.05, σₘ: 0.6, σₐ: 0.1 }, lam: -0.13731 },
+];
 async function runStoValidation() {
   const rep = $('report');
   rep.innerHTML = '<div class="panel"><h2>Stochastic mode against the Julia references</h2><div id="vstat">computing ...</div></div>';
@@ -1834,6 +1857,23 @@ async function runStoValidation() {
       rows.push({ c, rtol: rtol || '2e-3', Z: countOf(rb, 0), Var, r0, eV, eR, ev });
     }
   }
+  const drows = [];
+  const keepCol = state.scol;
+  state.scol = 'decay';
+  for (const c of STO_DECAY) {
+    const slot = getSlot(c.key);
+    const keep = JSON.parse(JSON.stringify(slot.params));
+    for (const [n, v] of Object.entries(c.p)) slot.params[n].value = v;
+    const job = makeJob(slot, { size: { nx: 1, ny: 1, nz: 1 } });
+    job.xr = [c.p[job.xl], c.p[job.xl]];
+    job.yr = [c.p[job.yl], c.p[job.yl]];
+    await engine.compute(job);
+    const rb = await engine.readback();
+    slot.params = keep;
+    drows.push({ key: c.key, p: c.p, lam: rb.s[0], ref: c.lam, d: Math.abs(rb.s[0] - c.lam), flags: rb.flags[0], ev: rb.steps[0] });
+  }
+  state.scol = keepCol;
+  window.__stoDecay = drows;
   const fmtE = (e) => (Number.isFinite(e) ? e.toExponential(1) : String(e));
   let html = '<table class="vt"><tr><th>example</th><th>point</th><th>rtol_I</th><th>Z</th><th>Var GPU</th><th>Var ref</th><th>rel. err</th>' +
     '<th>r₀ GPU</th><th>r₀ ref</th><th>rel. err</th><th>evals</th><th>reference</th></tr>';
@@ -1842,6 +1882,8 @@ async function runStoValidation() {
       `<td>${Number.isFinite(r.Var) ? r.Var.toPrecision(6) : 'MS-unstable'}</td><td>${Number.isFinite(r.c.Var) ? r.c.Var : 'MS-unstable'}</td><td>${fmtE(r.eV)}</td>` +
       `<td>${r.r0.toPrecision(6)}</td><td>${r.c.r0}</td><td>${fmtE(r.eR)}</td><td>${r.ev}</td><td>${r.c.src}</td></tr>`;
   }
+  html += '</table><h3>Decay rate λ_MS (colour mode "second-moment decay rate")</h3><table class="vt"><tr><th>example</th><th>point</th><th>λ_MS GPU</th><th>Julia</th><th>|Δ|</th><th>evals</th></tr>';
+  for (const r of drows) html += `<tr><td>${r.key}</td><td>${Object.entries(r.p).map(([k, v]) => `${k}=${+v.toPrecision(5)}`).join(' ')}</td><td>${r.lam.toPrecision(5)}</td><td>${r.ref}</td><td>${r.d.toExponential(1)}</td><td>${r.ev}</td></tr>`;
   html += '</table>';
   $('vstat').innerHTML = html;
   window.__stoValidation = rows.map((r) => ({ key: r.c.key, p: r.c.p, rtol: r.rtol, Z: r.Z, Var: r.Var, r0: r.r0, eV: r.eV, eR: r.eR, ev: r.ev }));

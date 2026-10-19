@@ -9,8 +9,7 @@
 //   pass 1: the deterministic march (phase test only) -> the count Z (first-moment stability) and,
 //           on the same nodes, coarse integrals I_Y, I_G;
 //   pass 2 (only if Z == 0): the same march with a second acceptance test, the plain-trapezoid
-//           error h²/12 |f'_a - f'_b| relative to the coarse integral (tolerance P.qtrust, which the
-//           stochastic march uses as rtol_I: it tracks no |D| minima).
+//           error h²/12 |f'_a - f'_b| relative to the coarse integral (tolerance P.rtolI).
 // The integrals use the Hermite-corrected trapezoid rule (f' from the dual numbers) and a power-law
 // tail beyond ω_max:
 //   r0 = (1/2π)∫ Σ_k |G_k|² dω   (mean-square stable iff Z == 0 and r0 < 1)
@@ -124,8 +123,7 @@ fn sm_err(acc: f32, fa: vec2<f32>, fb: vec2<f32>, h: f32, sc: f32) -> f32 {
 }
 
 // one march; rtol = BIG: the deterministic nodes (phase test only)
-fn sm_pass(p: vec2<f32>, rtol: f32, sy: f32, sg: f32) -> SMPass {
-    let sig = P.sigma;
+fn sm_pass(p: vec2<f32>, sig: f32, rtol: f32, sy: f32, sg: f32) -> SMPass {
     var out: SMPass;
     out.flags = 0u;
     var w = P.w0;
@@ -222,7 +220,7 @@ fn sm_pass(p: vec2<f32>, rtol: f32, sy: f32, sg: f32) -> SMPass {
 
 fn march_sm(p: vec2<f32>) -> Res {
     var res: Res;
-    let a = sm_pass(p, BIG, 0.0, 0.0);
+    let a = sm_pass(p, P.sigma, BIG, 0.0, 0.0);
     var f = a.flags;
     var steps = a.steps;
     res.s = 0.0;
@@ -238,7 +236,7 @@ fn march_sm(p: vec2<f32>) -> Res {
     if (abs(zr - Z) > 0.25) { f = f | 4u; }
     if (Z < 0.0) { f = f | 8u; }
     if (Z == 0.0) {
-        let b = sm_pass(p, P.qtrust, a.iy, a.ig);
+        let b = sm_pass(p, P.sigma, P.rtolI, a.iy, a.ig);
         steps = steps + b.steps;
         let st = smstatic(p);
         if ((b.status == 1u) && (st.y > 0.0)) {
@@ -263,6 +261,90 @@ fn march_sm(p: vec2<f32>) -> Res {
     res.steps = steps;
     res.flags = f;
     return res;
+}
+
+// r(σ) on the line Re s = σ/2 (two passes); -1 if the line is not right of every root (Z > 0) or failed
+fn sm_r(p: vec2<f32>, sig: f32) -> vec2<f32> {
+    let a = sm_pass(p, 0.5 * sig, BIG, 0.0, 0.0);
+    if (a.status != 1u) { return vec2<f32>(-1.0, f32(a.steps)); }
+    if (round(P.npow / 2.0 - a.phi / PI) != 0.0) { return vec2<f32>(-1.0, f32(a.steps)); }
+    let b = sm_pass(p, 0.5 * sig, P.rtolI, a.iy, a.ig);
+    if (b.status != 1u) { return vec2<f32>(-1.0, f32(a.steps + b.steps)); }
+    return vec2<f32>(b.ig, f32(a.steps + b.steps));
+}
+
+// Decay-rate colouring: the mean-square Lyapunov exponent λ_MS = max(2 max Re λ_det, λ*), r(λ*) = 1,
+// by bisection on the monotone predicate "Z(σ/2) == 0 and r(σ) < 1" (notes, Sec. 8.4) over
+// [2 sfloor, 0] (12 halvings: resolution |sfloor|/2048; below the floor: s = 2 sfloor, flag 16384).
+// Z > 0: as the variance mode (red); Z = 0, r0 >= 1: mean-square unstable (orange, s = r0).
+// Result: s = λ_MS with flags 256 (σ valid) as the deterministic σ colouring.
+fn march_smd(p: vec2<f32>) -> Res {
+    var res: Res;
+    let a = sm_pass(p, 0.0, BIG, 0.0, 0.0);
+    var f = a.flags;
+    var steps = a.steps;
+    res.s = 0.0;
+    if (a.status != 1u) {
+        res.z = 0.0;
+        res.steps = steps;
+        res.flags = f | 1u | 128u;
+        return res;
+    }
+    let zr = P.npow / 2.0 - a.phi / PI;
+    res.z = zr;
+    let Z = round(zr);
+    if (abs(zr - Z) > 0.25) { f = f | 4u; }
+    if (Z < 0.0) { f = f | 8u; }
+    if (Z == 0.0) {
+        let b = sm_pass(p, 0.0, P.rtolI, a.iy, a.ig);
+        steps = steps + b.steps;
+        if (b.status != 1u) {
+            f = f | 8192u;
+        } else if (b.ig >= 1.0) {
+            res.s = b.ig;
+            f = f | 2048u;
+        } else {
+            var hi = 0.0;
+            var lo = 2.0 * P.sfloor;
+            let rl = sm_r(p, lo);
+            steps = steps + u32(rl.y);
+            if ((rl.x >= 0.0) && (rl.x < 1.0)) {
+                hi = lo;
+                f = f | 16384u;
+            } else {
+                for (var it = 0; it < 12; it++) {
+                    let mid = 0.5 * (lo + hi);
+                    let rm = sm_r(p, mid);
+                    steps = steps + u32(rm.y);
+                    if ((rm.x >= 0.0) && (rm.x < 1.0)) { hi = mid; } else { lo = mid; }
+                }
+            }
+            res.s = 0.5 * (lo + hi);
+            if ((f & 16384u) != 0u) { res.s = 2.0 * P.sfloor; }
+            f = f | 256u;
+        }
+    }
+    res.steps = min(steps, 0xffffffffu);
+    res.flags = f;
+    return res;
+}
+
+@compute @workgroup_size(8, 8)
+fn main_smd(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let S = (P.lev & 0xffffu) + 1u;
+    let ix = gid.x * S;
+    let row = (P.row0 + gid.y) * S;
+    if ((ix >= P.nx) || (row >= P.ny) || (gid.y >= P.rows)) { return; }
+    if (((P.lev >> 16u) != 0u) && (ix % (2u * S) == 0u) && (row % (2u * S) == 0u)) { return; }
+    let iz = row / P.nys;
+    let iy = row - iz * P.nys;
+    PZ = P.z0 + f32(iz) * P.dz;
+    K[0] = P.c[0].x; K[1] = P.c[0].y; K[2] = P.c[0].z; K[3] = P.c[0].w;
+    K[4] = P.c[1].x; K[5] = P.c[1].y; K[6] = P.c[1].z; K[7] = P.c[1].w;
+    K[8] = P.c[2].x; K[9] = P.c[2].y; K[10] = P.c[2].z; K[11] = P.c[2].w;
+    K[12] = P.c[3].x; K[13] = P.c[3].y; K[14] = P.c[3].z; K[15] = P.c[3].w;
+    let p = vec2<f32>(P.x0 + f32(ix) * P.dx, P.y0 + f32(iy) * P.dy);
+    R[row * P.nx + ix] = march_smd(p);
 }
 
 @compute @workgroup_size(8, 8)

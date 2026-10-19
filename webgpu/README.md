@@ -147,6 +147,18 @@ kernel, so its rightmost root is real); the stationary variance is
 is stable but the second moment is not, red where the mean is unstable; white: the mean-square
 boundary. The hover line gives Var, r₀ and the evaluations.
 
+**Colour by** (Display panel, shown for state-form models; `&col=var|decay|sigma` in the URL):
+
+* *variance* (default, above);
+* *second-moment decay rate λ_MS*: E[x²] approaches its limit like e^{λ_MS t};
+  λ_MS = max(2 max Re λ_det, λ*), r(λ*) = 1, found per point by bisection on the monotone predicate
+  "Z(σ/2) = 0 and r(σ) < 1" (each step: the count and r on the shifted line Re λ = σ/2) over
+  [2·σ floor, 0], 12 halvings (`main_smd` of smarch.wgsl). About 10× the cost of the variance
+  (PD: 408 evaluations per point, 0.87 s per 525 × 295 chart on the UHD 630). Checked against Julia:
+  turning −0.006030 (Julia −0.00604), PD −0.13740 (−0.13731);
+* *first moment: σ of the rightmost root*: the deterministic page's march (exact or fast mode) on
+  D = det M(λ) of the state form; the noise is ignored.
+
 **Checks.** `node webgpu/validate/sde_check.mjs`: D(λ) of the state form vs the closed form
 (≤ 2e-15), mean and Γ, and the same transfer functions integrated in Float64 vs Julia (6 digits).
 `index.html?validate=sto`: 9 points (turning: 4 generic and 3 approaching the lobe at Ω = 0.6 up to
