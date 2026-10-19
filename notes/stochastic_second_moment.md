@@ -367,13 +367,29 @@ In 2-pass mode they concentrate at the resonance $\omega\approx1$.
 * GSTM (K=0.2, Ω=0.6): $\lambda_{\text{MS}}=-0.00604$ at σ = 0.7 (MS stable, slow) and $+0.00687$ at σ = 1.5 (MS unstable).
   QuadGK confirms $r(\lambda_{\text{MS}})=1.0000$ in both cases.
 
+### 10.1 Peak subtraction and band cap (tested, `second_moment_cost.jl`)
+
+Pass 1 also tracks the 4 deepest $|D|$ minima, as `_unwrap_march` does. They are polished by Newton to roots $\lambda_r$. Pass 2 subtracts the pole pairs
+$|{\rm res}_r|^2\big(|\mathrm i\omega-\lambda_r|^{-2}+|\mathrm i\omega-\bar\lambda_r|^{-2}\big)$, ${\rm res}_r=n(\lambda_r)/D_\lambda(\lambda_r)$, and adds their
+integral over $[\omega_0,\omega_{\max}]$ back in closed form (arctan). This is exact algebra for any $\lambda_r$. The band cap is $h\le\Omega/4=\pi/(2\tau)$ for $\omega<5$.
+Six points were tested, three of them approaching the lobe at Ω = 0.6 ($K_c=0.224735$; $K=0.9K_c,\ 0.99K_c,\ 0.999K_c$).
+
+| Scheme | rtol_I | time vs deterministic, median (max) | max rel. error Var | max rel. error $r_0$ |
+|---|---|---|---|---|
+| 1-pass | 10⁻³ / 10⁻⁴ | 5.8× (6.1×) / 10.8× (11.9×) | 1.9·10⁻⁴ / 1.7·10⁻⁵ | 1.1·10⁻³ / 9.8·10⁻⁵ |
+| **2-pass** | 10⁻³ / 10⁻⁴ | **3.1× (3.4×)** / **4.3× (5.1×)** | 4.3·10⁻⁴ / 1.2·10⁻⁴ | 1.0·10⁻³ / 4.6·10⁻⁴ |
+| 2-pass + poles | 10⁻³ / 10⁻⁴ | 4.6× (7.5×) / 5.5× (9.5×) | 1.5·10⁻⁴ / 5.0·10⁻⁵ | 1.4·10⁻³ / 3.1·10⁻⁴ |
+| 2-pass + poles + cap | 10⁻³ / 10⁻⁴ | 5.9× (8.6×) / 6.6× (9.8×) | 6.4·10⁻⁵ / 6.6·10⁻⁵ | 8.1·10⁻⁴ / 2.0·10⁻⁴ |
+
+**Result: peak subtraction does not pay off here.** The node count drops by at most ~30 %, and only right at the boundary
+($0.999K_c$: 248 → 180 at 10⁻⁴). Elsewhere it stays the same. The phase march already has to resolve every near-axis root to *count* it,
+so the resonance peaks were never where the extra nodes went. The extra nodes are spread over the smooth parts of the line,
+where the phase test allows long steps but the magnitude integral does not. The pole loop also makes each evaluation slower in this
+prototype (a `Tuple` of runtime length, type-unstable). The band cap buys accuracy in $r_0$ at some points for 20–30 % more nodes.
+**Default: plain 2-pass** (`subtract = false`; the option stays).
+
 **Open points / next steps**
-* The error estimate is the plain-trapezoid error, but the Hermite rule is used, so the estimate is conservative.
-  The 2-pass $r_0$ error still reaches ~10× `rtol_I`. The modulation factor $|e^{-\mathrm i\omega\tau}-1|^2$ oscillates with period $\Omega$
-  and gets few samples where the phase march takes long steps. Possible fixes: cap $h\le\pi/(2\tau)$ in a band (the existing `hmax`/`ωband` advice), or a
-  per-length error budget.
-* **Peak subtraction** should reduce pass 2 substantially. The march already tracks the deepest $|D|$ minima with Newton root estimates
-  $\lambda_r$. Subtract each $|{\rm res}|^2/|{\rm i}\omega-\lambda_r|^2$ (integral $\pi|{\rm res}|^2/|\operatorname{Re}\lambda_r|$, analytic) so that only a smooth
-  remainder is integrated. This matters most near the stability boundary, where the stochastic-resonance peaks are sharp.
 * Port to the GPU kernel: per lane the extra state is 2 accumulators and the tolerance test; MDBM on $\log r_0=0$ for the MS boundary.
 * Independent check of the DDE case against SSD (dissertation Fig. 4.2, σ = 1).
+* The error estimate is the plain-trapezoid error, but the Hermite rule is used, so it is conservative in places and
+  optimistic in others (the 2-pass $r_0$ error reaches ~5× `rtol_I`). A per-length error budget is untested.
