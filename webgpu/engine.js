@@ -4,7 +4,7 @@
 // the colouring render pass (display.wgsl).
 
 const RES_BYTES = 16;            // struct Res { z: f32, s: f32, steps: u32, flags: u32 }
-const PARAM_BYTES = 160;         // struct Params of march.wgsl
+const PARAM_BYTES = 176;         // struct Params of march.wgsl
 const MAX_CONSTS = 16;           // K[0..15]
 const MAX_PIPELINES = 40;        // compiled pipelines kept (oldest dropped)
 const VIEW_BYTES = 64;           // struct View of display.wgsl
@@ -104,8 +104,8 @@ export class Engine {
    * A compile error throws an Error with .wgslErrors = [{ line, col, message }] (line numbers
    * within charD) and .charD = the source.
    */
-  async pipeline(charD, exact = false, branch0 = false, stoch = false) {
-    const key = (exact ? 'X' : '-') + (branch0 ? 'B' : '-') + (stoch ? 'S' : '-') + charD;
+  async pipeline(charD, exact = false, branch0 = false, stoch = false, entryPoint = 'main') {
+    const key = (exact ? 'X' : '-') + (branch0 ? 'B' : '-') + (stoch ? 'S' : '-') + entryPoint + '|' + charD;
     if (this.pipelines.has(key)) {
       const e = this.pipelines.get(key);
       this.pipelines.delete(key);             // most recently used last
@@ -144,7 +144,7 @@ export class Engine {
     }
     let p;
     try {
-      p = await this.device.createComputePipelineAsync({ layout: 'auto', compute: { module, entryPoint: stoch ? 'main_sm' : 'main' }, label: stoch ? 'march:stochastic' : 'march' });
+      p = await this.device.createComputePipelineAsync({ layout: 'auto', compute: { module, entryPoint }, label: 'march:' + entryPoint });
     } finally {
       const ve = await this.device.popErrorScope();
       if (ve) { const err = new Error('WebGPU pipeline error: ' + ve.message); err.charD = charD; throw err; }
@@ -190,11 +190,13 @@ export class Engine {
     const zr = job.zr || [0, 0];
     f[36] = zr[0]; f[37] = nz > 1 ? (zr[1] - zr[0]) / (nz - 1) : 0;
     u[38] = ny; u[39] = lev;
+    f[40] = m.rtolI ?? 2e-3; f[41] = m.sfloor ?? -0.4;
     this.device.queue.writeBuffer(this.paramBuf, 0, b);
   }
 
   /**
-   * Compute one chart.  job = { code (WGSL fn charD), branch0, exact, c (K[0..15]), npow, nx, ny,
+   * Compute one chart.  job = { code (WGSL fn charD), branch0, exact, smodel (state form: smarch.wgsl
+   * is spliced in), entry ('main' | 'main_sm' variance | 'main_smd' decay rate), c (K[0..15]), npow, nx, ny,
    * xr, yr (the axis parameters p.x, p.y), nz, zr (3D: the third axis PZ; the grid is stored
    * as nx x (ny nz) rows), march (MARCH_DEFAULTS overrides) }
    * opts = { targetMs, onBand(rowlo, frac), isCancelled(), deadlineMs, stride, skip }
@@ -211,7 +213,7 @@ export class Engine {
     const S = opts.stride || 1, prog = !!opts.stride;
     const nxs = Math.ceil(nx / S), nys = Math.ceil(ny / S);       // lattice of this level
     const lev = (S - 1) | (opts.skip ? 1 << 16 : 0);
-    const { pipeline, bgCache } = await this.pipeline(job.code, !!job.exact && !job.stoch, !!job.branch0, !!job.stoch);   // (first: a failed compile keeps the chart)
+    const { pipeline, bgCache } = await this.pipeline(job.code, !!job.exact && !job.stoch, !!job.branch0, !!job.smodel, job.entry || 'main');   // (first: a failed compile keeps the chart)
     const fresh = this.ensureBuffers(nx, ny);
     this.grid3d = (job.nz || 1) > 1;           // a 3D grid is not drawn by the 2D colouring pass
     let bg = bgCache.get(this.resBuf);
@@ -317,7 +319,7 @@ export class Engine {
     u[0] = this.nx; u[1] = this.ny; u[2] = f; u[3] = dw;
     u[4] = dh; u[5] = view.boundary ? 1 : 0; u[6] = view.flags ? 1 : 0; u[7] = this.rowlo;
     fl[8] = view.smin; fl[9] = view.zcap; u[10] = view.ds || 1;
-    u[12] = view.stoch ? 1 : 0; fl[13] = view.vlo ?? -6; fl[14] = view.vhi ?? 0;
+    u[12] = view.stoch || 0; fl[13] = view.vlo ?? -6; fl[14] = view.vhi ?? 0;
     this.device.queue.writeBuffer(this.viewBuf, 0, b);
     const enc = this.device.createCommandEncoder();
     const pass = enc.beginRenderPass({

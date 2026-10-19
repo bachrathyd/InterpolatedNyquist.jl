@@ -16,7 +16,7 @@ struct View {
     nx: u32, ny: u32, f: u32, dw: u32,
     dh: u32, bnd: u32, showflags: u32, rowlo: u32,   // rows iy < rowlo: not computed yet
     smin: f32, zcap: f32, ds: u32, pad2: f32,       // ds: stride of the computed lattice (progressive)
-    stoch: u32, vlo: f32, vhi: f32, pad3: f32,      // stochastic mode (smarch.wgsl): log10 Var colour range
+    stoch: u32, vlo: f32, vhi: f32, pad3: f32,      // stochastic: 1 variance (log10 Var in [vlo, vhi]), 2 decay rate
 }
 
 @group(0) @binding(0) var<uniform> V: View;
@@ -72,7 +72,8 @@ fn colour_sm(r: Res) -> vec3<f32> {
 fn colour(r: Res, Z: i32) -> vec3<f32> {
     if (Z == -2) { return vec3<f32>(28.0, 30.0, 36.0); }
     if (Z < 0) { return vec3<f32>(128.0, 128.0, 128.0); }
-    if ((Z == 0) && (V.stoch != 0u)) { return colour_sm(r); }
+    if ((Z == 0) && (V.stoch == 1u)) { return colour_sm(r); }
+    if ((Z == 0) && (V.stoch == 2u) && ((r.flags & 2048u) != 0u)) { return colour_sm(r); }
     if (Z == 0) {
         var t = 0.0;
         if ((r.flags & 256u) != 0u) { t = r.s / V.smin * -1.0 + 1.0; }
