@@ -22,7 +22,9 @@ function ssd_problem(P, D, τ, ζ, σm, σa)
     cVec = Additive(2)
     α1 = stCoeffMX(1, ProportionalMX(@SMatrix [0.0 0.0; 0.0 0.0]))
     β1 = stCoeffMX(1, DelayMX(τ, @SMatrix [0.0 0.0; -σm*P -σm*D]))
-    σ2 = stAdditive(2, Additive(@SVector [0.0, σa]))
+    # one noise ID for both terms: equivalent here (the mean is 0, so E[(γ + βx_τ)²] = γ² + E[(βx_τ)²]);
+    # with the additive term on noise ID 2 the package returns 4× the variance (notes/ssd_noise_diag.jl)
+    σ2 = stAdditive(1, Additive(@SVector [0.0, σa]))
     return LDDEProblem(AMx, [BMx], [α1], [β1], cVec, [σ2])
 end
 function ssd(p; r = 20, order = 1)
@@ -78,8 +80,10 @@ for p in points
     r, λf = freq[p]
     @printf("P=%.1f D=%.1f τ=%.1f σm=%.1f   [freq: Var %s, λ_MS %.5f]\n", p[1], p[2], p[3], p[5],
             r.r0 < 1 ? @sprintf("%.6f", r.P[1, 1]) : "MS-unstable", λf)
-    for rr in (10, 20, 40, 80, 160)
-        t = @elapsed s = ssd(p; r = rr)
+    for rr in (10, 20, 40, 80)
+        s = nothing
+        t = @elapsed (s = try ssd(p; r = rr) catch e; nothing end)
+        s === nothing && (println("   r=$rr: SSD failed (Arpack: spectral radius did not converge)"); continue)
         if rr == 10
             t = med(() -> ssd(p; r = rr); n = 3)
         end

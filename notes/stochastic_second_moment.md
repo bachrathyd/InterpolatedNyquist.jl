@@ -457,3 +457,78 @@ Validation (`?validate=sto`, Float32, 9 points vs the Julia references):
 
 Speed (Intel UHD 630): stochastic turning at 525×295 takes 280 ms (≈195 evaluations per point), and the PD example takes 80 ms.
 A 1080p-class GPU should be roughly an order of magnitude faster.
+
+Colour modes of the stochastic page (`&col=var|decay|sigma`):
+* **Variance** (default).
+* **Second-moment decay rate λ_MS**: bisection on "Z(σ/2) = 0 and r(σ) < 1" over $[2\sigma_{floor},0]$, 12 halvings.
+  It matches Julia (−0.006030 vs −0.00604; −0.13740 vs −0.13731) and costs about 10× the variance mode
+  (PD: 408 evaluations per point, 0.87 s per chart).
+* **First-moment σ**: the deterministic exact-root march on $\det\mathbf M(\lambda)$, ignoring the noise.
+
+---
+
+# Part IV — Comparison with stochastic semi-discretization, and the literature
+
+## 13. PD example vs SSD (`notes/ssd_pd_compare.jl`, `notes/ssd_noise_diag.jl`)
+
+Model: $x''+2\zeta x'+x=-(Px_\tau+Dx'_\tau)(1+\sigma_m\xi_1)+\sigma_a\xi_2$. SSD is `StochasticSemiDiscretizationMethod.jl` v0.3.5
+(Sykora, Bachrathy & Stépán 2019), first order, $\Delta t=\tau/r$. It gives $\lambda=\log\rho/\Delta t$ from the second-moment mapping and Var from its fixed point.
+Frequency side: `stochastic_moments` / `ms_exponent_sdde` (CPU Julia prototype, `rtol_I`=10⁻⁴, not optimised).
+
+| P, D, τ, σₘ (ζ, σₐ) | frequency: Var / λ_MS | SSD r = 10 | SSD r = 20 | SSD r = 40 |
+|---|---|---|---|---|
+| 0.5, 0.4, 0.5, 0.6 (0.05, 0.1) | 0.026798 / −0.13731 | 0.026772 / −0.13735 | 0.026787 / −0.13733 | 0.026793 / −0.13732 |
+| 0.8, 0.5, 0.6, 0.9 | MS unstable (r₀ = 96.7) / +0.25329 | ρ > 1 / 0.25240 | 0.25297 | 0.25316 |
+| 1.2, 0.2, 0.5, 0.3 | mean unstable (Z = 2) / +0.31068 | 0.31045 | 0.31062 | Arpack failed |
+| 0.2, 0.8, 1.0, 0.4 | MS unstable (r₀ = 1.92) / +0.03262 | 0.03141 | 0.03229 | 0.03252 |
+| 1.5, 0.9, 0.3, 0.2 (0.1, 0.2) | 0.015463 / −0.63435 | 0.015462 / −0.63415 | 0.015462 / −0.63430 | 0.015462 / −0.63434 |
+
+* **Agreement.** The SSD values converge toward the frequency-domain ones, with first order in Δt for the variance (9.6·10⁻⁴ → 4.2·10⁻⁴ → 1.9·10⁻⁴).
+  The classification agrees at every point: MS stable / MS unstable with a stable mean / mean unstable.
+* **CPU time per point** (12-thread laptop CPU, single thread):
+
+  | Method | Variance and stability | Exponent λ_MS |
+  |---|---|---|
+  | SSD | r = 10: 5 ms; r = 20: 19 ms; r = 40: 85–93 ms (the cost grows like $r^{2..3}$) | from the same run |
+  | Frequency, Var + r₀ | 0.8–1.6 ms (rtol 10⁻³…10⁻⁴), at the accuracy of SSD r ≥ 40 | — |
+  | Frequency, λ_MS | — | 42–54 ms (30 bisection steps, each a 2-pass march; not optimised) |
+
+  For the variance and the MS boundary the frequency method is ≈ 20–100× faster than SSD at equal accuracy.
+  For the exponent, SSD at r = 20 (19 ms) is cheaper than the current bisection. A secant/Illinois iteration on $\log r(\sigma)$
+  (≈ 6 steps instead of 30) would cut this to ≈ 10 ms. On the GPU a full λ_MS chart is 5.6 µs per point; the variance chart is 0.5 µs per point.
+* **Robustness.** SSD's Arpack eigen-solver did not converge at r = 80 for all points, and at r = 40 for one point.
+* **Package issue (SSD).** With the additive term on its own noise ID (`stAdditive(2, …)` next to `stCoeffMX(1, …)`),
+  the SSD variance is **exactly 4×** the correct value. This happens even for σₘ = 0, where the exact value is
+  $\sigma_a^2\frac1{2\pi}\int|1/D|^2$ = 0.017816 and SSD gives 0.071266. With all terms on one noise ID it agrees to 1.000; the Hayes README example is also correct (0.125056 vs 1/8).
+  This looks like a bug in the handling of multiple noise sources and should be reported to the package.
+  The comparison above uses one noise ID, which is equivalent here because the mean is zero.
+
+## 14. What is known, what is new (literature check, 2026-10-19)
+
+The search was done by a research agent. Items marked † were confirmed only bibliographically, not read.
+
+| Claim | Status | Closest prior work |
+|---|---|---|
+| (a) First moment = deterministic DDE; stability by argument-principle count | classical | Stépán 1989; D-subdivision; QPmR |
+| Variance by $\int H S H^*d\omega$, additive white noise | classical (random vibration) | Crandall & Mark; Lin & Cai; for turning: Fodor & Bachrathy, IJAMT 133 (2024) |
+| (b) Itô closure $Q=\Gamma+\mathcal L(Q)$, Var = ext/(1 − loop gain) | classical for ODE oscillators† (Ariaratnam, Kozin, Lin & Cai); general LTI loops: Bamieh & Filo, IEEE TAC 65 (2020); scalar delay: Appleby, Mao & Riedle, PAMS 137 (2009) | not found in the explicit MIMO SDDE form (additive + present + delayed multiplicative noise) |
+| (c) MS stable ⇔ $\rho(\mathcal L)<1$ | known: Willems & Blankenship 1971†, Hinrichsen & Pritchard (stability radius)†, Bamieh & Filo 2020 (mentions delays, no delay example) | — |
+| (c) Renewal equation; MS exponent = root of (Laplace kernel) = 1 | known in the **scalar** delay case: Appleby–Mao–Riedle 2009 | real-root crossing also stated by Iklodi & Dankowicz, arXiv 2607.01374 (2026) |
+| (c) Matrix case: completely positive kernel ⇒ rightmost root real; $\lambda^*$ from $r(\sigma)=1$ on shifted lines | **apparently new** | — |
+| (d) Integrals along the deterministic frequency march (2 passes, 3–5× deterministic cost), SDDE f/g input via ForwardDiff and mock history, GPU charts of variance / MS boundary / MS exponent | **apparently new** | SSD (Sykora et al. 2019), collocation (Fodor et al. 2023), spectral (Torkamani et al. 2014) are discretisations |
+
+**Suggested publication split.**
+1. **Method paper** (IJNME, Probabilistic Engineering Mechanics, or J. Sound Vib.): the MIMO SDDE frequency-domain formulation (b)–(c), with the
+   real-root/exponent theorem in the matrix case, the march-based algorithm and the SSD benchmark of Sec. 13.
+   It must be positioned explicitly against Appleby–Mao–Riedle, Bamieh–Filo and Iklodi–Dankowicz, and present (b)/(c) as their unification for SDDEs, not as new criteria.
+2. **Application paper** (IJAMT / IJMTM): stochastic turning (GSTM), with charts of variance and MS boundary from measured FRFs
+   (the frequency method uses measured $H(\omega)$ directly), building on Fodor & Bachrathy 2024.
+3. **Short software/GPU note** (SoftwareX or a conference: IFAC TDS): the WebGPU page and the per-pixel two-pass march.
+
+References (DOIs where verified): Appleby, Mao, Riedle, PAMS 137 (2009) 339, arXiv:math/0703837; Bamieh, Filo, IEEE TAC 65(12)
+(2020), 10.1109/TAC.2020.2970393; Filo, Bamieh, arXiv:1806.09091; Iklodi, Dankowicz, arXiv:2607.01374 (2026); Willems,
+Blankenship, IEEE TAC 16(4) (1971) 292†; Hinrichsen, Pritchard, SICON 34(6) (1996) 1972†; Korenevskii, Math. Notes 70(2) (2001)
+192†; Sykora, Bachrathy, Stépán, IJNME 119 (2019) 879, 10.1002/nme.6076; Fodor, Sykora, Bachrathy, IJAMT 111 (2020) 213,
+10.1007/s00170-020-05877-8; Fodor, Sykora, Bachrathy, PEM 74 (2023) 103515; Fodor, Bachrathy, IJAMT 133 (2024) 5673,
+10.1007/s00170-024-14059-9; Torkamani et al., IJDC 2 (2014) 210; Küchler, Mensch, Stoch. Stoch. Rep. 40 (1992) 23; Stépán,
+*Retarded Dynamical Systems* (1989); Lin, Cai, *Probabilistic Structural Dynamics* (1995).
